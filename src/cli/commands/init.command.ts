@@ -8,7 +8,6 @@ import {
   VALID_PROJECT_MODES,
   MODE_DEFINITIONS,
 } from "../../config/project-modes.js";
-import { promptProviderSetup, ensureEnvInGitignore } from "../../setup/provider-setup.js";
 
 export async function initCommand(options: {
   name?: string;
@@ -86,11 +85,6 @@ export async function initCommand(options: {
   console.log(picocolors.dim(`  Project ID: ${project.projectId}`));
   console.log(picocolors.dim(`  Location: ${project.rootPath}`));
   console.log(picocolors.dim(`  Created: ${new Date(project.createdAt).toLocaleString()}`));
-  console.log("");
-
-  await ensureEnvInGitignore(rootPath);
-  await promptProviderSetup(rootPath);
-
   console.log("");
   console.log(picocolors.cyan("Next steps:"));
   console.log(picocolors.cyan('  flowtask run "<your prompt>"'));

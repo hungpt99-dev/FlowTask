@@ -2,6 +2,7 @@ import { type FlowTaskConfig, FlowTaskConfigSchema } from "../schemas/config.sch
 import { fileExists, readJsonFile } from "../utils/fs.js";
 import { configJsonPath } from "../utils/paths.js";
 import { generateDefaultConfig } from "./default-config.js";
+import { loadEnvFile } from "../utils/env-loader.js";
 
 function migrateConfig(raw: Record<string, unknown>): Record<string, unknown> {
   const executors = raw.executors as Record<string, Record<string, unknown>> | undefined;
@@ -36,6 +37,8 @@ function migrateConfig(raw: Record<string, unknown>): Record<string, unknown> {
 
 export class ConfigLoader {
   async load(rootPath: string): Promise<FlowTaskConfig> {
+    await loadEnvFile(rootPath);
+
     const configPath = configJsonPath(rootPath);
     const exists = await fileExists(configPath);
     if (!exists) {

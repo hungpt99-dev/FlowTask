@@ -1,6 +1,7 @@
 import type { FlowTaskConfig } from "../../schemas/config.schema.js";
 import { PlannerRegistry } from "../../planner/planner-registry.js";
 import type { PlannerMode } from "../../planner/planner-registry.js";
+import { ApiKeyValidator } from "../../ai/api-key-validator.js";
 import picocolors from "picocolors";
 
 export interface PlannerSelection {
@@ -39,6 +40,19 @@ export function selectPlanner(config: FlowTaskConfig, requested?: string): Plann
       );
     }
   } else {
+    const isAuto = plannerMode === "auto";
+    if (isAuto && plannerType === "internal-ai") {
+      const validator = new ApiKeyValidator(config);
+      const defaultResult = validator.validateDefaultProvider();
+      if (!defaultResult.valid) {
+        console.log(
+          picocolors.yellow(
+            `API key missing for "${defaultResult.provider}" — falling back to simple planner.`,
+          ),
+        );
+        console.log(picocolors.dim(`  ${defaultResult.suggestion}`));
+      }
+    }
     console.log(picocolors.dim("Using simple planner"));
   }
 

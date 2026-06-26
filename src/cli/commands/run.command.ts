@@ -1,6 +1,7 @@
 import { RunLifecycle } from "../../core/run-lifecycle.js";
 import { ProjectManager } from "../../core/project-manager.js";
 import { EventStore } from "../../core/event-store.js";
+import { ApiKeyValidator } from "../../ai/api-key-validator.js";
 import picocolors from "picocolors";
 import type { Run } from "../../schemas/run.schema.js";
 import { selectPlanner } from "./run-planner.js";
@@ -90,6 +91,19 @@ export async function runCommand(
 
   const { plannerMode, plannerRegistry, plannerType } = selectPlanner(config, options.planner);
   const { planner } = plannerRegistry.getPlanner(plannerMode);
+
+  if (plannerType === "internal-ai" && plannerMode === "ai") {
+    const validator = new ApiKeyValidator(config);
+    const keyResult = validator.validateDefaultProvider();
+    if (!keyResult.valid) {
+      console.log(picocolors.red(`\n  ✗ ${keyResult.message}`));
+      if (keyResult.suggestion) {
+        console.log(picocolors.yellow(`  ${keyResult.suggestion}`));
+      }
+      console.log(picocolors.dim(`  Or run with --planner simple to skip AI planning.\n`));
+      process.exit(1);
+    }
+  }
 
   if (out.mode !== "json") {
     printRunHeader(prompt, options.executor, plannerMode, plannerType, config, out);
