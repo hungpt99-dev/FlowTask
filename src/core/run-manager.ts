@@ -36,11 +36,12 @@ export class RunManager {
 
   async createRun(projectId: string, title: string, mode: Run["mode"] = "auto"): Promise<Run> {
     const timestamp = now();
-    const runId = generateRunId(title);
+    const truncatedTitle = title.slice(0, 200);
+    const runId = generateRunId(truncatedTitle);
     const run: Run = {
       runId,
       projectId,
-      title,
+      title: truncatedTitle,
       status: "created",
       mode,
       taskCount: 0,
