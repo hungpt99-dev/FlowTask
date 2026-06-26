@@ -7,6 +7,8 @@ import {
 } from "../ai-provider.js";
 import { AiProviderError, redactErrorMessage } from "../ai-provider-error.js";
 import { generateWithResponseFormatFallback } from "../response-format-fallback.js";
+import { parseSseStream } from "../../utils/stream-parser.js";
+import { extractGeminiDelta, extractGeminiUsage } from "../../utils/provider-stream.js";
 
 interface GeminiPart {
   text?: string;
@@ -281,56 +283,29 @@ export class GeminiProvider implements AiProvider {
     reader: ReadableStreamDefaultReader<Uint8Array>,
     onChunk: (chunk: AiProviderStreamChunk) => void | Promise<void>,
   ): Promise<AiProviderResponse> {
-    const decoder = new TextDecoder();
-    const fullTextParts: string[] = [];
-    let buffer = "";
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed || !trimmed.startsWith("data: ")) continue;
-
-          const data = trimmed.slice(6);
-
-          try {
-            const chunk = JSON.parse(data) as GeminiResponse;
-            const text =
-              chunk.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
-
-            if (text) {
-              fullTextParts.push(text);
-              await onChunk({
-                provider: this.name,
-                model: this.model,
-                textDelta: text,
-                raw: chunk,
-              });
-            }
-          } catch {
-            // skip malformed lines
-          }
+    const { text, usage } = await parseSseStream(
+      reader,
+      async (data, emit) => {
+        const delta = extractGeminiDelta(data);
+        if (delta) {
+          await onChunk({
+            provider: this.name,
+            model: this.model,
+            textDelta: delta,
+            raw: data,
+          });
+          emit({ textDelta: delta });
         }
-      }
-    } finally {
-      reader.releaseLock();
-    }
+        const streamUsage = extractGeminiUsage(data);
+        if (streamUsage) {
+          return { done: true, usage: streamUsage };
+        }
+      },
+      this.name,
+      this.model,
+    );
 
-    const fullText = fullTextParts.join("");
-    await onChunk({
-      provider: this.name,
-      model: this.model,
-      textDelta: "",
-      done: true,
-    });
-    return { text: fullText, model: this.model, provider: this.name };
+    return { text, model: this.model, provider: this.name, usage };
   }
 
   private normalizeFetchError(err: unknown, timeoutMs?: number): AiProviderError {

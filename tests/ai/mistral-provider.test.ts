@@ -81,4 +81,88 @@ describe("MistralProvider", () => {
 
     expect(result.text).toBe("fallback response");
   });
+
+  it("parses SSE stream with finish_reason and usage", async () => {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(
+            'data: {"choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}\n',
+          ),
+        );
+        controller.enqueue(
+          encoder.encode(
+            'data: {"choices":[{"delta":{"content":" world"},"finish_reason":null}]}\n',
+          ),
+        );
+        controller.enqueue(
+          encoder.encode(
+            'data: {"choices":[{"delta":{"content":""},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}\n',
+          ),
+        );
+        controller.enqueue(encoder.encode("data: [DONE]\n"));
+        controller.close();
+      },
+    });
+
+    const sseResponse = new Response(stream, {
+      headers: { "content-type": "text/event-stream" },
+    });
+    Object.defineProperty(sseResponse, "json", {
+      value: async () => ({}),
+    });
+    mockFetch.mockResolvedValueOnce(sseResponse);
+
+    const chunks: string[] = [];
+    const result = await provider.stream(
+      {
+        systemPrompt: "",
+        userPrompt: "test",
+        stream: true,
+      },
+      (chunk) => {
+        if (chunk.textDelta) chunks.push(chunk.textDelta);
+      },
+    );
+
+    expect(chunks).toEqual(["Hello", " world"]);
+    expect(result.text).toBe("Hello world");
+    expect(result.usage?.totalTokens).toBe(7);
+  });
+
+  it("handles streaming via generate with stream flag", async () => {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode('data: {"choices":[{"delta":{"content":"test"},"finish_reason":null}]}\n'),
+        );
+        controller.enqueue(
+          encoder.encode(
+            'data: {"choices":[{"delta":{"content":""},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}\n',
+          ),
+        );
+        controller.enqueue(encoder.encode("data: [DONE]\n"));
+        controller.close();
+      },
+    });
+
+    const sseResponse = new Response(stream, {
+      headers: { "content-type": "text/event-stream" },
+    });
+    Object.defineProperty(sseResponse, "json", {
+      value: async () => ({}),
+    });
+    mockFetch.mockResolvedValueOnce(sseResponse);
+
+    const result = await provider.generate({
+      systemPrompt: "",
+      userPrompt: "test",
+      stream: true,
+    });
+
+    expect(result.text).toBe("test");
+    expect(result.usage?.totalTokens).toBe(2);
+  });
 });

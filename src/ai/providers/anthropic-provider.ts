@@ -6,6 +6,8 @@ import {
   type AiProviderHealthResult,
 } from "../ai-provider.js";
 import { AiProviderError, redactErrorMessage } from "../ai-provider-error.js";
+import { parseSseStream } from "../../utils/stream-parser.js";
+import { extractAnthropicDelta, extractAnthropicDone } from "../../utils/provider-stream.js";
 
 interface AnthropicContentBlock {
   type: string;
@@ -22,16 +24,6 @@ interface AnthropicResponse {
     input_tokens?: number;
     output_tokens?: number;
   };
-}
-
-interface AnthropicStreamEvent {
-  type: string;
-  delta?: {
-    type?: string;
-    text?: string;
-  };
-  content_block?: AnthropicContentBlock;
-  message?: AnthropicResponse;
 }
 
 export class AnthropicProvider implements AiProvider {
@@ -267,69 +259,34 @@ export class AnthropicProvider implements AiProvider {
     reader: ReadableStreamDefaultReader<Uint8Array>,
     onChunk: (chunk: AiProviderStreamChunk) => void | Promise<void>,
   ): Promise<AiProviderResponse> {
-    const decoder = new TextDecoder();
-    const fullTextParts: string[] = [];
-    let buffer = "";
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed || !trimmed.startsWith("data: ")) continue;
-
-          const data = trimmed.slice(6);
-
-          try {
-            const event = JSON.parse(data) as AnthropicStreamEvent;
-
-            if (
-              event.type === "content_block_delta" &&
-              event.delta?.type === "text_delta" &&
-              event.delta.text
-            ) {
-              fullTextParts.push(event.delta.text);
-              await onChunk({
-                provider: this.name,
-                model: this.model,
-                textDelta: event.delta.text,
-                raw: event,
-              });
-            }
-
-            if (event.type === "message_stop" || event.type === "message_delta") {
-              const fullText = fullTextParts.join("");
-              await onChunk({
-                provider: this.name,
-                model: this.model,
-                textDelta: "",
-                done: true,
-              });
-              return { text: fullText, model: this.model, provider: this.name };
-            }
-          } catch {
-            // skip malformed SSE data
-          }
+    const { text } = await parseSseStream(
+      reader,
+      async (data, emit) => {
+        const delta = extractAnthropicDelta(data);
+        if (delta) {
+          await onChunk({
+            provider: this.name,
+            model: this.model,
+            textDelta: delta,
+            raw: data,
+          });
+          emit({ textDelta: delta });
         }
-      }
-    } finally {
-      reader.releaseLock();
-    }
+        if (extractAnthropicDone(data)) {
+          await onChunk({
+            provider: this.name,
+            model: this.model,
+            textDelta: "",
+            done: true,
+          });
+          return { done: true };
+        }
+      },
+      this.name,
+      this.model,
+    );
 
-    const fullText = fullTextParts.join("");
-    await onChunk({
-      provider: this.name,
-      model: this.model,
-      textDelta: "",
-      done: true,
-    });
-    return { text: fullText, model: this.model, provider: this.name };
+    return { text, model: this.model, provider: this.name };
   }
 
   private normalizeFetchError(err: unknown, timeoutMs?: number): AiProviderError {

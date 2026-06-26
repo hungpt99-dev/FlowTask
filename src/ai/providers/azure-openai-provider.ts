@@ -7,6 +7,12 @@ import {
 } from "../ai-provider.js";
 import { AiProviderError, redactErrorMessage } from "../ai-provider-error.js";
 import { generateWithResponseFormatFallback } from "../response-format-fallback.js";
+import { parseSseStream } from "../../utils/stream-parser.js";
+import {
+  extractOpenAiDelta,
+  extractOpenAiFinishReason,
+  extractOpenAiUsage,
+} from "../../utils/provider-stream.js";
 
 export class AzureOpenAiProvider implements AiProvider {
   name = "azure-openai";
@@ -275,62 +281,37 @@ export class AzureOpenAiProvider implements AiProvider {
     reader: ReadableStreamDefaultReader<Uint8Array>,
     onChunk: (chunk: AiProviderStreamChunk) => void | Promise<void>,
   ): Promise<AiProviderResponse> {
-    const decoder = new TextDecoder();
-    const fullTextParts: string[] = [];
-    let buffer = "";
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed || trimmed.startsWith(":")) continue;
-          if (!trimmed.startsWith("data: ")) continue;
-
-          const data = trimmed.slice(6);
-          if (data === "[DONE]") continue;
-
-          try {
-            const parsed = JSON.parse(data) as {
-              choices?: Array<{
-                delta?: { content?: string };
-                finish_reason?: string | null;
-              }>;
-            };
-
-            const delta = parsed.choices?.[0]?.delta?.content ?? "";
-            if (delta) {
-              fullTextParts.push(delta);
-              await onChunk({
-                provider: this.name,
-                model: this.deployment,
-                textDelta: delta,
-                raw: parsed,
-              });
-            }
-          } catch {
-            // skip malformed lines
-          }
+    const { text, usage } = await parseSseStream(
+      reader,
+      async (data, emit) => {
+        const delta = extractOpenAiDelta(data);
+        if (delta) {
+          await onChunk({
+            provider: this.name,
+            model: this.deployment,
+            textDelta: delta,
+            raw: data,
+          });
+          emit({ textDelta: delta });
         }
-      }
-    } finally {
-      reader.releaseLock();
-    }
+        const finishReason = extractOpenAiFinishReason(data);
+        if (finishReason) {
+          const streamUsage = extractOpenAiUsage(data);
+          await onChunk({
+            provider: this.name,
+            model: this.deployment,
+            textDelta: "",
+            done: true,
+            usage: streamUsage,
+          });
+          return { done: true, usage: streamUsage };
+        }
+      },
+      this.name,
+      this.deployment,
+    );
 
-    const fullText = fullTextParts.join("");
-    await onChunk({
-      provider: this.name,
-      model: this.deployment,
-      textDelta: "",
-      done: true,
-    });
-    return { text: fullText, model: this.deployment, provider: this.name };
+    return { text, model: this.deployment, provider: this.name, usage };
   }
 
   private normalizeFetchError(err: unknown, timeoutMs?: number): AiProviderError {

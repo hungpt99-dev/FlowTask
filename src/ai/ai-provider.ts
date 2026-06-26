@@ -67,3 +67,54 @@ export interface AiProvider {
 
   healthCheck?(options?: { model?: string; timeoutMs?: number }): Promise<AiProviderHealthResult>;
 }
+
+export interface StreamToEventBusOptions {
+  runId?: string;
+  taskId?: string;
+}
+
+interface StreamEvent {
+  type: string;
+  provider?: string;
+  model?: string;
+  textDelta?: string;
+  usage?: AiProviderUsage;
+  runId?: string;
+  taskId?: string;
+  reason?: string;
+  timestamp: string;
+}
+
+export function streamToEventBus(
+  provider: AiProvider,
+  request: AiProviderRequest,
+  eventBus: { emit: (event: StreamEvent) => void },
+  options?: StreamToEventBusOptions,
+): Promise<AiProviderResponse> {
+  if (!provider.stream) {
+    return provider.generate(request);
+  }
+
+  eventBus.emit({
+    type: "ai_provider_stream_started",
+    provider: provider.name,
+    model: request.model ?? "unknown",
+    runId: options?.runId,
+    taskId: options?.taskId,
+    timestamp: new Date().toISOString(),
+  });
+
+  return provider.stream(request, (chunk) => {
+    if (!chunk.done) {
+      eventBus.emit({
+        type: "ai_provider_stream_delta",
+        provider: chunk.provider,
+        model: chunk.model,
+        textDelta: chunk.textDelta,
+        runId: options?.runId,
+        taskId: options?.taskId,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  });
+}

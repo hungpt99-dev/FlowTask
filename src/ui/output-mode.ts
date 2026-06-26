@@ -5,6 +5,8 @@ export interface OutputOptions {
   verbose: boolean;
   quiet: boolean;
   debug: boolean;
+  showTimestamp?: boolean;
+  maxLineLength?: number;
 }
 
 export function detectOutputMode(

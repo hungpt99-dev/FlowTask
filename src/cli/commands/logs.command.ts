@@ -113,6 +113,13 @@ export async function logsCommand(options: {
   console.log("");
 }
 
+function formatOutputLine(taskId: string, stream: "stdout" | "stderr", text: string): string {
+  const symbol = stream === "stderr" ? picocolors.yellow("\u2717") : picocolors.dim("\u203A");
+  const label = stream === "stderr" ? picocolors.yellow("stderr") : picocolors.dim("stdout");
+  const shortId = taskId.length > 8 ? taskId.slice(0, 8) : taskId;
+  return `  ${picocolors.cyan(shortId)} ${symbol} ${label} ${text}`;
+}
+
 async function followEventsJsonl(
   rootPath: string,
   runId: string,
@@ -125,17 +132,21 @@ async function followEventsJsonl(
   const unsubscribe = eventBus.subscribe((event: UiEvent) => {
     if ("runId" in event && event.runId !== runId) return;
     if (event.type === "executor_output") {
-      process.stdout.write(
-        `  [${event.taskId}][${event.executor}][${event.stream}] ${event.text}\n`,
-      );
+      process.stdout.write(`${formatOutputLine(event.taskId, event.stream, event.text)}\n`);
     } else if (event.type === "executor_started") {
-      process.stdout.write(`  [${event.taskId}][${event.executor}] started\n`);
-    } else if (event.type === "executor_exited") {
       process.stdout.write(
-        `  [${event.taskId}][${event.executor}] exited (code ${event.exitCode})\n`,
+        `  ${picocolors.cyan(event.taskId)} ${picocolors.dim("\u2192")} started\n`,
       );
+    } else if (event.type === "executor_exited") {
+      const codeLabel =
+        event.exitCode === 0
+          ? picocolors.green("\u2713")
+          : picocolors.red(`\u2717 code ${event.exitCode}`);
+      process.stdout.write(`  ${picocolors.cyan(event.taskId)} ${codeLabel}\n`);
     } else if (event.type === "executor_failed") {
-      process.stdout.write(`  [${event.taskId}][${event.executor}] failed: ${event.reason}\n`);
+      process.stdout.write(
+        `  ${picocolors.cyan(event.taskId)} ${picocolors.red("\u2717")} ${event.reason}\n`,
+      );
     }
   });
 
@@ -148,9 +159,7 @@ async function followEventsJsonl(
       try {
         const event = JSON.parse(line) as UiEvent;
         if (event.type === "executor_output") {
-          process.stdout.write(
-            `  [${event.taskId!}][${event.executor!}][${event.stream!}] ${event.text}\n`,
-          );
+          process.stdout.write(`${formatOutputLine(event.taskId!, event.stream!, event.text!)}\n`);
         }
       } catch {
         process.stdout.write(`  ${line}\n`);
@@ -185,7 +194,7 @@ async function followEventsJsonl(
             const event = JSON.parse(line) as UiEvent;
             if (event.type === "executor_output") {
               process.stdout.write(
-                `  [${event.taskId!}][${event.executor!}][${event.stream!}] ${event.text}\n`,
+                `${formatOutputLine(event.taskId!, event.stream!, event.text!)}\n`,
               );
             }
           } catch {

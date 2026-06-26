@@ -7,6 +7,8 @@ import {
 } from "../ai-provider.js";
 import { AiProviderError, redactErrorMessage } from "../ai-provider-error.js";
 import { generateWithResponseFormatFallback } from "../response-format-fallback.js";
+import { parseNdjsonStream } from "../../utils/stream-parser.js";
+import { extractOllamaDelta, extractOllamaDone } from "../../utils/provider-stream.js";
 
 interface OllamaMessage {
   role: string;
@@ -245,67 +247,35 @@ export class OllamaProvider implements AiProvider {
     reader: ReadableStreamDefaultReader<Uint8Array>,
     onChunk: (chunk: AiProviderStreamChunk) => void | Promise<void>,
   ): Promise<AiProviderResponse> {
-    const decoder = new TextDecoder();
-    const fullTextParts: string[] = [];
-    let buffer = "";
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed) continue;
-
-          try {
-            const chunk = JSON.parse(trimmed) as OllamaResponse;
-
-            if (chunk.message?.content) {
-              fullTextParts.push(chunk.message.content);
-              await onChunk({
-                provider: this.name,
-                model: chunk.model ?? this.model,
-                textDelta: chunk.message.content,
-                raw: chunk,
-              });
-            }
-
-            if (chunk.done) {
-              const fullText = fullTextParts.join("");
-              await onChunk({
-                provider: this.name,
-                model: chunk.model ?? this.model,
-                textDelta: "",
-                done: true,
-              });
-              return {
-                text: fullText,
-                model: chunk.model ?? this.model,
-                provider: this.name,
-              };
-            }
-          } catch {
-            // skip malformed NDJSON lines
-          }
+    const { text, model: resultModel } = await parseNdjsonStream(
+      reader,
+      async (data, emit) => {
+        const delta = extractOllamaDelta(data);
+        const chunkModel = (data.model as string) ?? undefined;
+        if (delta) {
+          await onChunk({
+            provider: this.name,
+            model: chunkModel ?? this.model,
+            textDelta: delta,
+            raw: data,
+          });
+          emit({ textDelta: delta });
         }
-      }
-    } finally {
-      reader.releaseLock();
-    }
+        if (extractOllamaDone(data)) {
+          await onChunk({
+            provider: this.name,
+            model: chunkModel ?? this.model,
+            textDelta: "",
+            done: true,
+          });
+          return { done: true, model: chunkModel };
+        }
+      },
+      this.name,
+      this.model,
+    );
 
-    const fullText = fullTextParts.join("");
-    await onChunk({
-      provider: this.name,
-      model: this.model,
-      textDelta: "",
-      done: true,
-    });
-    return { text: fullText, model: this.model, provider: this.name };
+    return { text, model: resultModel ?? this.model, provider: this.name };
   }
 
   private normalizeFetchError(err: unknown, timeoutMs?: number): AiProviderError {
