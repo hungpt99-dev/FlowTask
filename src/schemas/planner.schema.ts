@@ -39,6 +39,11 @@ export const PlannerConfigSchema = z.object({
   executor: z.string().default("opencode"),
   provider: z.string().default("openai"),
   model: z.string().default("gpt-4.1-mini"),
+  baseUrl: z.string().optional(),
+  stream: z.boolean().optional(),
+  timeoutMs: z.number().int().positive().optional(),
+  temperature: z.number().optional(),
+  maxTokens: z.number().int().positive().optional(),
   maxRetries: z.number().int().min(0).default(1),
   fallbackToSimple: z.boolean().default(true),
 });
