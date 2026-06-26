@@ -4,13 +4,36 @@ import {
   type AiProviderResponse,
   type AiProviderStreamChunk,
   type AiProviderHealthResult,
-} from "./ai-provider.js";
-import { AiProviderError, redactErrorMessage } from "./ai-provider-error.js";
-import { generateWithResponseFormatFallback } from "./response-format-fallback.js";
+} from "../ai-provider.js";
+import { AiProviderError, redactErrorMessage } from "../ai-provider-error.js";
+import { generateWithResponseFormatFallback } from "../response-format-fallback.js";
 
-export class OpenAiProvider implements AiProvider {
-  name = "openai";
-  type = "openai";
+interface GeminiPart {
+  text?: string;
+}
+
+interface GeminiContent {
+  role?: string;
+  parts?: GeminiPart[];
+}
+
+interface GeminiCandidate {
+  content?: GeminiContent;
+  finishReason?: string;
+}
+
+interface GeminiResponse {
+  candidates?: GeminiCandidate[];
+  usageMetadata?: {
+    promptTokenCount?: number;
+    candidatesTokenCount?: number;
+    totalTokenCount?: number;
+  };
+}
+
+export class GeminiProvider implements AiProvider {
+  name = "gemini";
+  type = "gemini";
   supportsJsonObject = true;
   supportsStreaming = true;
   private apiKey?: string;
@@ -19,15 +42,17 @@ export class OpenAiProvider implements AiProvider {
 
   constructor(config: { apiKey?: string; baseUrl?: string; model?: string }) {
     this.apiKey = config.apiKey;
-    this.baseUrl = (config.baseUrl ?? "https://api.openai.com/v1").replace(/\/+$/, "");
-    this.model = config.model ?? "gpt-4.1-mini";
+    this.baseUrl = (config.baseUrl ?? "https://generativelanguage.googleapis.com").replace(
+      /\/+$/,
+      "",
+    );
+    this.model = config.model ?? "gemini-1.5-pro";
   }
 
   async generate(request: AiProviderRequest): Promise<AiProviderResponse> {
     if (request.stream) {
       return this.streamInternal(request, async () => {});
     }
-
     const { response } = await generateWithResponseFormatFallback(this.name, request, (req) =>
       this.generateOnce(req),
     );
@@ -50,23 +75,21 @@ export class OpenAiProvider implements AiProvider {
         provider: this.name,
         ok: false,
         kind: "missing_api_key",
-        message: "OPENAI_API_KEY environment variable not set",
-        suggestion: "Set OPENAI_API_KEY=your-api-key",
+        message: "GEMINI_API_KEY environment variable not set",
+        suggestion: "Set GEMINI_API_KEY=your-api-key",
       };
     }
 
     const start = Date.now();
     try {
-      const response = await fetch(`${this.baseUrl}/chat/completions`, {
+      const model = options?.model ?? this.model;
+      const url = `${this.baseUrl}/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
+      const response = await fetch(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${this.apiKey}`,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: options?.model ?? this.model,
-          messages: [{ role: "user", content: "test" }],
-          max_tokens: 1,
+          contents: [{ parts: [{ text: "test" }] }],
+          generationConfig: { maxOutputTokens: 1 },
         }),
         signal: AbortSignal.timeout(options?.timeoutMs ?? 5000),
       });
@@ -88,9 +111,8 @@ export class OpenAiProvider implements AiProvider {
           provider: this.name,
           ok: false,
           kind: "model_not_found",
-          message: `Model ${options?.model ?? this.model} not found`,
+          message: `Model ${model} not found`,
           latencyMs,
-          suggestion: "Check planner.model in .flowtask/config.json",
         };
       }
 
@@ -100,7 +122,6 @@ export class OpenAiProvider implements AiProvider {
         kind: "unauthorized",
         message: `HTTP ${response.status}`,
         latencyMs,
-        suggestion: "Check your API key and permissions",
       };
     } catch (err) {
       const latencyMs = Date.now() - start;
@@ -127,17 +148,14 @@ export class OpenAiProvider implements AiProvider {
     request: AiProviderRequest,
     onChunk: (chunk: AiProviderStreamChunk) => void | Promise<void>,
   ): Promise<AiProviderResponse> {
-    const body = this.buildRequestBody(request, true);
+    const { url, body } = this.buildRequestBody(request, true);
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     };
-    if (this.apiKey) {
-      headers.Authorization = `Bearer ${this.apiKey}`;
-    }
 
     let response: Response;
     try {
-      response = await fetch(`${this.baseUrl}/chat/completions`, {
+      response = await fetch(url, {
         method: "POST",
         headers,
         body: JSON.stringify(body),
@@ -161,21 +179,18 @@ export class OpenAiProvider implements AiProvider {
       });
     }
 
-    return this.parseSseStream(reader, onChunk, response.headers.get("content-type") ?? "");
+    return this.parseSseStream(reader, onChunk);
   }
 
   private async generateOnce(request: AiProviderRequest): Promise<AiProviderResponse> {
-    const body = this.buildRequestBody(request, false);
+    const { url, body } = this.buildRequestBody(request, false);
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     };
-    if (this.apiKey) {
-      headers.Authorization = `Bearer ${this.apiKey}`;
-    }
 
     let response: Response;
     try {
-      response = await fetch(`${this.baseUrl}/chat/completions`, {
+      response = await fetch(url, {
         method: "POST",
         headers,
         body: JSON.stringify(body),
@@ -193,43 +208,48 @@ export class OpenAiProvider implements AiProvider {
     return this.parseResponse(response);
   }
 
-  private buildRequestBody(request: AiProviderRequest, stream: boolean): Record<string, unknown> {
-    const messages: Array<{ role: string; content: string }> = [
-      { role: "system", content: request.systemPrompt },
-      { role: "user", content: request.userPrompt },
+  private buildRequestBody(
+    request: AiProviderRequest,
+    stream: boolean,
+  ): { url: string; body: Record<string, unknown> } {
+    const model = request.model ?? this.model;
+    const useStream = stream ? "streamGenerateContent" : "generateContent";
+    const url = `${this.baseUrl}/v1beta/models/${model}:${useStream}?key=${this.apiKey}`;
+
+    const contents: GeminiContent[] = [
+      {
+        role: "user",
+        parts: [{ text: request.userPrompt }],
+      },
     ];
 
-    const body: Record<string, unknown> = {
-      model: request.model ?? this.model,
-      messages,
+    const generationConfig: Record<string, unknown> = {
       temperature: request.temperature ?? 0.1,
-      max_tokens: request.maxTokens ?? 4096,
+      maxOutputTokens: request.maxTokens ?? 4096,
     };
 
     if (request.responseFormat === "json_object" && !stream) {
-      body.response_format = { type: "json_object" };
+      generationConfig.responseMimeType = "application/json";
     }
 
-    if (stream) {
-      body.stream = true;
+    const body: Record<string, unknown> = {
+      contents,
+      generationConfig,
+    };
+
+    if (request.systemPrompt) {
+      body.systemInstruction = {
+        parts: [{ text: request.systemPrompt }],
+      };
     }
 
-    return body;
+    return { url, body };
   }
 
   private async parseResponse(response: Response): Promise<AiProviderResponse> {
-    const data = (await response.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
-      model?: string;
-      usage?: {
-        prompt_tokens?: number;
-        completion_tokens?: number;
-        total_tokens?: number;
-      };
-    };
+    const data = (await response.json()) as GeminiResponse;
 
-    const choice = data.choices?.[0];
-    const text = choice?.message?.content ?? "";
+    const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
 
     if (!text) {
       throw new AiProviderError({
@@ -242,15 +262,15 @@ export class OpenAiProvider implements AiProvider {
     const result: AiProviderResponse = {
       text,
       raw: data,
-      model: data.model ?? this.model,
+      model: this.model,
       provider: this.name,
     };
 
-    if (data.usage) {
+    if (data.usageMetadata) {
       result.usage = {
-        inputTokens: data.usage.prompt_tokens,
-        outputTokens: data.usage.completion_tokens,
-        totalTokens: data.usage.total_tokens,
+        inputTokens: data.usageMetadata.promptTokenCount,
+        outputTokens: data.usageMetadata.candidatesTokenCount,
+        totalTokens: data.usageMetadata.totalTokenCount,
       };
     }
 
@@ -260,7 +280,6 @@ export class OpenAiProvider implements AiProvider {
   private async parseSseStream(
     reader: ReadableStreamDefaultReader<Uint8Array>,
     onChunk: (chunk: AiProviderStreamChunk) => void | Promise<void>,
-    _contentType: string,
   ): Promise<AiProviderResponse> {
     const decoder = new TextDecoder();
     const fullTextParts: string[] = [];
@@ -277,62 +296,26 @@ export class OpenAiProvider implements AiProvider {
 
         for (const line of lines) {
           const trimmed = line.trim();
-          if (!trimmed || trimmed.startsWith(":")) continue;
-          if (!trimmed.startsWith("data: ")) continue;
+          if (!trimmed || !trimmed.startsWith("data: ")) continue;
 
           const data = trimmed.slice(6);
-          if (data === "[DONE]") continue;
 
           try {
-            const parsed = JSON.parse(data) as {
-              choices?: Array<{
-                delta?: { content?: string };
-                finish_reason?: string | null;
-              }>;
-              usage?: {
-                prompt_tokens?: number;
-                completion_tokens?: number;
-                total_tokens?: number;
-              };
-            };
+            const chunk = JSON.parse(data) as GeminiResponse;
+            const text =
+              chunk.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
 
-            const delta = parsed.choices?.[0]?.delta?.content ?? "";
-            if (delta) {
-              fullTextParts.push(delta);
+            if (text) {
+              fullTextParts.push(text);
               await onChunk({
                 provider: this.name,
                 model: this.model,
-                textDelta: delta,
-                raw: parsed,
+                textDelta: text,
+                raw: chunk,
               });
-            }
-
-            const finishReason = parsed.choices?.[0]?.finish_reason;
-            if (finishReason) {
-              const fullText = fullTextParts.join("");
-              const result: AiProviderResponse = {
-                text: fullText,
-                model: this.model,
-                provider: this.name,
-              };
-              if (parsed.usage) {
-                result.usage = {
-                  inputTokens: parsed.usage.prompt_tokens,
-                  outputTokens: parsed.usage.completion_tokens,
-                  totalTokens: parsed.usage.total_tokens,
-                };
-              }
-              await onChunk({
-                provider: this.name,
-                model: this.model,
-                textDelta: "",
-                done: true,
-                usage: result.usage,
-              });
-              return result;
             }
           } catch {
-            // skip malformed SSE data lines
+            // skip malformed lines
           }
         }
       }
@@ -372,9 +355,14 @@ export class OpenAiProvider implements AiProvider {
     const secrets = new Set<string>();
     if (this.apiKey) secrets.add(this.apiKey);
     const redacted = redactErrorMessage(errorText, secrets);
-    const message = `OpenAI API error (${status}): ${redacted.slice(0, 500)}`;
+    const message = `Gemini API error (${status}): ${redacted.slice(0, 500)}`;
 
-    if (status === 400 && errorText.includes("response_format")) {
+    if (
+      status === 400 &&
+      (errorText.includes("responseMimeType") ||
+        errorText.includes("response_mime_type") ||
+        errorText.includes("UNSUPPORTED"))
+    ) {
       return new AiProviderError({
         provider: this.name,
         kind: "unsupported_response_format",
@@ -386,6 +374,7 @@ export class OpenAiProvider implements AiProvider {
 
     switch (status) {
       case 401:
+      case 403:
         return new AiProviderError({
           provider: this.name,
           kind: "unauthorized",
@@ -399,13 +388,6 @@ export class OpenAiProvider implements AiProvider {
           statusCode: status,
           message,
           retryable: true,
-        });
-      case 402:
-        return new AiProviderError({
-          provider: this.name,
-          kind: "quota_exceeded",
-          statusCode: status,
-          message,
         });
       case 404:
         return new AiProviderError({

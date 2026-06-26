@@ -4,30 +4,47 @@ import {
   type AiProviderResponse,
   type AiProviderStreamChunk,
   type AiProviderHealthResult,
-} from "./ai-provider.js";
-import { AiProviderError, redactErrorMessage } from "./ai-provider-error.js";
-import { generateWithResponseFormatFallback } from "./response-format-fallback.js";
+} from "../ai-provider.js";
+import { AiProviderError, redactErrorMessage } from "../ai-provider-error.js";
+import { generateWithResponseFormatFallback } from "../response-format-fallback.js";
 
-export class OpenAiProvider implements AiProvider {
-  name = "openai";
-  type = "openai";
+interface OllamaMessage {
+  role: string;
+  content: string;
+}
+
+interface OllamaResponse {
+  model?: string;
+  message?: OllamaMessage;
+  created_at?: string;
+  done?: boolean;
+}
+
+interface OllamaModel {
+  name: string;
+}
+
+interface OllamaTagsResponse {
+  models?: OllamaModel[];
+}
+
+export class OllamaProvider implements AiProvider {
+  name = "ollama";
+  type = "ollama";
   supportsJsonObject = true;
   supportsStreaming = true;
-  private apiKey?: string;
   private baseUrl: string;
   private model: string;
 
   constructor(config: { apiKey?: string; baseUrl?: string; model?: string }) {
-    this.apiKey = config.apiKey;
-    this.baseUrl = (config.baseUrl ?? "https://api.openai.com/v1").replace(/\/+$/, "");
-    this.model = config.model ?? "gpt-4.1-mini";
+    this.baseUrl = (config.baseUrl ?? "http://localhost:11434").replace(/\/+$/, "");
+    this.model = config.model ?? "llama3.1";
   }
 
   async generate(request: AiProviderRequest): Promise<AiProviderResponse> {
     if (request.stream) {
       return this.streamInternal(request, async () => {});
     }
-
     const { response } = await generateWithResponseFormatFallback(this.name, request, (req) =>
       this.generateOnce(req),
     );
@@ -45,65 +62,57 @@ export class OpenAiProvider implements AiProvider {
     model?: string;
     timeoutMs?: number;
   }): Promise<AiProviderHealthResult> {
-    if (!this.apiKey) {
-      return {
-        provider: this.name,
-        ok: false,
-        kind: "missing_api_key",
-        message: "OPENAI_API_KEY environment variable not set",
-        suggestion: "Set OPENAI_API_KEY=your-api-key",
-      };
-    }
-
     const start = Date.now();
+
     try {
-      const response = await fetch(`${this.baseUrl}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${this.apiKey}`,
-        },
-        body: JSON.stringify({
-          model: options?.model ?? this.model,
-          messages: [{ role: "user", content: "test" }],
-          max_tokens: 1,
-        }),
+      const tagsResponse = await fetch(`${this.baseUrl}/api/tags`, {
         signal: AbortSignal.timeout(options?.timeoutMs ?? 5000),
       });
 
       const latencyMs = Date.now() - start;
 
-      if (response.ok) {
+      if (!tagsResponse.ok) {
+        return {
+          provider: this.name,
+          ok: false,
+          kind: "not_reachable",
+          message: `Ollama returned HTTP ${tagsResponse.status}`,
+          latencyMs,
+          suggestion: "Ensure Ollama is running on the configured baseUrl",
+        };
+      }
+
+      const model = options?.model ?? this.model;
+      const tags = (await tagsResponse.json()) as OllamaTagsResponse;
+      const availableModels = tags.models?.map((m) => m.name) ?? [];
+
+      const modelFound = availableModels.some((m) => m === model || m.startsWith(`${model}:`));
+
+      if (modelFound) {
         return {
           provider: this.name,
           ok: true,
           kind: "ok",
-          message: "endpoint reachable, model ok",
+          message: `${this.baseUrl} reachable, model ${model} found`,
           latencyMs,
         };
       }
 
-      if (response.status === 404) {
-        return {
-          provider: this.name,
-          ok: false,
-          kind: "model_not_found",
-          message: `Model ${options?.model ?? this.model} not found`,
-          latencyMs,
-          suggestion: "Check planner.model in .flowtask/config.json",
-        };
-      }
-
+      const suggestion =
+        availableModels.length > 0
+          ? `Available models: ${availableModels.slice(0, 5).join(", ")}${availableModels.length > 5 ? "..." : ""}`
+          : "Pull the model with: ollama pull " + model;
       return {
         provider: this.name,
-        ok: false,
-        kind: "unauthorized",
-        message: `HTTP ${response.status}`,
+        ok: true,
+        kind: "model_not_found",
+        message: `${this.baseUrl} reachable, model ${model} not found`,
         latencyMs,
-        suggestion: "Check your API key and permissions",
+        suggestion,
       };
     } catch (err) {
       const latencyMs = Date.now() - start;
+      if (err instanceof AiProviderError) throw err;
       if (err instanceof Error && err.name === "TimeoutError") {
         return {
           provider: this.name,
@@ -119,6 +128,7 @@ export class OpenAiProvider implements AiProvider {
         kind: "not_reachable",
         message: `Cannot reach ${this.baseUrl}: ${err instanceof Error ? err.message : String(err)}`,
         latencyMs,
+        suggestion: "Ensure Ollama is running (ollama serve) and the baseUrl is correct",
       };
     }
   }
@@ -131,13 +141,10 @@ export class OpenAiProvider implements AiProvider {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     };
-    if (this.apiKey) {
-      headers.Authorization = `Bearer ${this.apiKey}`;
-    }
 
     let response: Response;
     try {
-      response = await fetch(`${this.baseUrl}/chat/completions`, {
+      response = await fetch(`${this.baseUrl}/api/chat`, {
         method: "POST",
         headers,
         body: JSON.stringify(body),
@@ -161,7 +168,7 @@ export class OpenAiProvider implements AiProvider {
       });
     }
 
-    return this.parseSseStream(reader, onChunk, response.headers.get("content-type") ?? "");
+    return this.parseNdjsonStream(reader, onChunk);
   }
 
   private async generateOnce(request: AiProviderRequest): Promise<AiProviderResponse> {
@@ -169,13 +176,10 @@ export class OpenAiProvider implements AiProvider {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     };
-    if (this.apiKey) {
-      headers.Authorization = `Bearer ${this.apiKey}`;
-    }
 
     let response: Response;
     try {
-      response = await fetch(`${this.baseUrl}/chat/completions`, {
+      response = await fetch(`${this.baseUrl}/api/chat`, {
         method: "POST",
         headers,
         body: JSON.stringify(body),
@@ -194,7 +198,7 @@ export class OpenAiProvider implements AiProvider {
   }
 
   private buildRequestBody(request: AiProviderRequest, stream: boolean): Record<string, unknown> {
-    const messages: Array<{ role: string; content: string }> = [
+    const messages: OllamaMessage[] = [
       { role: "system", content: request.systemPrompt },
       { role: "user", content: request.userPrompt },
     ];
@@ -202,34 +206,22 @@ export class OpenAiProvider implements AiProvider {
     const body: Record<string, unknown> = {
       model: request.model ?? this.model,
       messages,
-      temperature: request.temperature ?? 0.1,
-      max_tokens: request.maxTokens ?? 4096,
+      stream,
+      options: {
+        temperature: request.temperature ?? 0.1,
+      },
     };
 
     if (request.responseFormat === "json_object" && !stream) {
-      body.response_format = { type: "json_object" };
-    }
-
-    if (stream) {
-      body.stream = true;
+      body.format = "json";
     }
 
     return body;
   }
 
   private async parseResponse(response: Response): Promise<AiProviderResponse> {
-    const data = (await response.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
-      model?: string;
-      usage?: {
-        prompt_tokens?: number;
-        completion_tokens?: number;
-        total_tokens?: number;
-      };
-    };
-
-    const choice = data.choices?.[0];
-    const text = choice?.message?.content ?? "";
+    const data = (await response.json()) as OllamaResponse;
+    const text = data.message?.content ?? "";
 
     if (!text) {
       throw new AiProviderError({
@@ -246,21 +238,12 @@ export class OpenAiProvider implements AiProvider {
       provider: this.name,
     };
 
-    if (data.usage) {
-      result.usage = {
-        inputTokens: data.usage.prompt_tokens,
-        outputTokens: data.usage.completion_tokens,
-        totalTokens: data.usage.total_tokens,
-      };
-    }
-
     return result;
   }
 
-  private async parseSseStream(
+  private async parseNdjsonStream(
     reader: ReadableStreamDefaultReader<Uint8Array>,
     onChunk: (chunk: AiProviderStreamChunk) => void | Promise<void>,
-    _contentType: string,
   ): Promise<AiProviderResponse> {
     const decoder = new TextDecoder();
     const fullTextParts: string[] = [];
@@ -277,62 +260,37 @@ export class OpenAiProvider implements AiProvider {
 
         for (const line of lines) {
           const trimmed = line.trim();
-          if (!trimmed || trimmed.startsWith(":")) continue;
-          if (!trimmed.startsWith("data: ")) continue;
-
-          const data = trimmed.slice(6);
-          if (data === "[DONE]") continue;
+          if (!trimmed) continue;
 
           try {
-            const parsed = JSON.parse(data) as {
-              choices?: Array<{
-                delta?: { content?: string };
-                finish_reason?: string | null;
-              }>;
-              usage?: {
-                prompt_tokens?: number;
-                completion_tokens?: number;
-                total_tokens?: number;
-              };
-            };
+            const chunk = JSON.parse(trimmed) as OllamaResponse;
 
-            const delta = parsed.choices?.[0]?.delta?.content ?? "";
-            if (delta) {
-              fullTextParts.push(delta);
+            if (chunk.message?.content) {
+              fullTextParts.push(chunk.message.content);
               await onChunk({
                 provider: this.name,
-                model: this.model,
-                textDelta: delta,
-                raw: parsed,
+                model: chunk.model ?? this.model,
+                textDelta: chunk.message.content,
+                raw: chunk,
               });
             }
 
-            const finishReason = parsed.choices?.[0]?.finish_reason;
-            if (finishReason) {
+            if (chunk.done) {
               const fullText = fullTextParts.join("");
-              const result: AiProviderResponse = {
-                text: fullText,
-                model: this.model,
-                provider: this.name,
-              };
-              if (parsed.usage) {
-                result.usage = {
-                  inputTokens: parsed.usage.prompt_tokens,
-                  outputTokens: parsed.usage.completion_tokens,
-                  totalTokens: parsed.usage.total_tokens,
-                };
-              }
               await onChunk({
                 provider: this.name,
-                model: this.model,
+                model: chunk.model ?? this.model,
                 textDelta: "",
                 done: true,
-                usage: result.usage,
               });
-              return result;
+              return {
+                text: fullText,
+                model: chunk.model ?? this.model,
+                provider: this.name,
+              };
             }
           } catch {
-            // skip malformed SSE data lines
+            // skip malformed NDJSON lines
           }
         }
       }
@@ -370,11 +328,10 @@ export class OpenAiProvider implements AiProvider {
 
   private normalizeHttpError(status: number, errorText: string): AiProviderError {
     const secrets = new Set<string>();
-    if (this.apiKey) secrets.add(this.apiKey);
     const redacted = redactErrorMessage(errorText, secrets);
-    const message = `OpenAI API error (${status}): ${redacted.slice(0, 500)}`;
+    const message = `Ollama API error (${status}): ${redacted.slice(0, 500)}`;
 
-    if (status === 400 && errorText.includes("response_format")) {
+    if (status === 400 && errorText.includes("format")) {
       return new AiProviderError({
         provider: this.name,
         kind: "unsupported_response_format",
@@ -384,29 +341,17 @@ export class OpenAiProvider implements AiProvider {
       });
     }
 
+    if (status === 400) {
+      return new AiProviderError({
+        provider: this.name,
+        kind: "invalid_request",
+        statusCode: status,
+        message,
+        retryable: true,
+      });
+    }
+
     switch (status) {
-      case 401:
-        return new AiProviderError({
-          provider: this.name,
-          kind: "unauthorized",
-          statusCode: status,
-          message,
-        });
-      case 429:
-        return new AiProviderError({
-          provider: this.name,
-          kind: "rate_limited",
-          statusCode: status,
-          message,
-          retryable: true,
-        });
-      case 402:
-        return new AiProviderError({
-          provider: this.name,
-          kind: "quota_exceeded",
-          statusCode: status,
-          message,
-        });
       case 404:
         return new AiProviderError({
           provider: this.name,

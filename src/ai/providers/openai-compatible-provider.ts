@@ -4,30 +4,41 @@ import {
   type AiProviderResponse,
   type AiProviderStreamChunk,
   type AiProviderHealthResult,
-} from "./ai-provider.js";
-import { AiProviderError, redactErrorMessage } from "./ai-provider-error.js";
-import { generateWithResponseFormatFallback } from "./response-format-fallback.js";
+} from "../ai-provider.js";
+import { AiProviderError, redactErrorMessage } from "../ai-provider-error.js";
+import { generateWithResponseFormatFallback } from "../response-format-fallback.js";
 
-export class OpenAiProvider implements AiProvider {
-  name = "openai";
-  type = "openai";
+export class OpenAiCompatibleProvider implements AiProvider {
+  name: string;
+  type = "openai-compatible";
   supportsJsonObject = true;
   supportsStreaming = true;
   private apiKey?: string;
   private baseUrl: string;
   private model: string;
+  private customHeaders?: Record<string, string>;
+  private allowNoApiKey: boolean;
 
-  constructor(config: { apiKey?: string; baseUrl?: string; model?: string }) {
+  constructor(config: {
+    name: string;
+    apiKey?: string;
+    baseUrl?: string;
+    model?: string;
+    customHeaders?: Record<string, string>;
+    allowNoApiKey?: boolean;
+  }) {
+    this.name = config.name;
     this.apiKey = config.apiKey;
     this.baseUrl = (config.baseUrl ?? "https://api.openai.com/v1").replace(/\/+$/, "");
     this.model = config.model ?? "gpt-4.1-mini";
+    this.customHeaders = config.customHeaders;
+    this.allowNoApiKey = config.allowNoApiKey ?? false;
   }
 
   async generate(request: AiProviderRequest): Promise<AiProviderResponse> {
     if (request.stream) {
       return this.streamInternal(request, async () => {});
     }
-
     const { response } = await generateWithResponseFormatFallback(this.name, request, (req) =>
       this.generateOnce(req),
     );
@@ -45,24 +56,28 @@ export class OpenAiProvider implements AiProvider {
     model?: string;
     timeoutMs?: number;
   }): Promise<AiProviderHealthResult> {
-    if (!this.apiKey) {
+    if (!this.apiKey && !this.allowNoApiKey) {
       return {
         provider: this.name,
         ok: false,
         kind: "missing_api_key",
-        message: "OPENAI_API_KEY environment variable not set",
-        suggestion: "Set OPENAI_API_KEY=your-api-key",
+        message: `${this.name.toUpperCase()}_API_KEY environment variable not set`,
+        suggestion: `Set ${this.name.toUpperCase()}_API_KEY=your-api-key`,
       };
     }
 
     const start = Date.now();
     try {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (this.apiKey) {
+        headers.Authorization = `Bearer ${this.apiKey}`;
+      }
+
       const response = await fetch(`${this.baseUrl}/chat/completions`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${this.apiKey}`,
-        },
+        headers,
         body: JSON.stringify({
           model: options?.model ?? this.model,
           messages: [{ role: "user", content: "test" }],
@@ -90,7 +105,6 @@ export class OpenAiProvider implements AiProvider {
           kind: "model_not_found",
           message: `Model ${options?.model ?? this.model} not found`,
           latencyMs,
-          suggestion: "Check planner.model in .flowtask/config.json",
         };
       }
 
@@ -100,7 +114,6 @@ export class OpenAiProvider implements AiProvider {
         kind: "unauthorized",
         message: `HTTP ${response.status}`,
         latencyMs,
-        suggestion: "Check your API key and permissions",
       };
     } catch (err) {
       const latencyMs = Date.now() - start;
@@ -128,12 +141,7 @@ export class OpenAiProvider implements AiProvider {
     onChunk: (chunk: AiProviderStreamChunk) => void | Promise<void>,
   ): Promise<AiProviderResponse> {
     const body = this.buildRequestBody(request, true);
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (this.apiKey) {
-      headers.Authorization = `Bearer ${this.apiKey}`;
-    }
+    const headers = this.buildHeaders();
 
     let response: Response;
     try {
@@ -161,17 +169,12 @@ export class OpenAiProvider implements AiProvider {
       });
     }
 
-    return this.parseSseStream(reader, onChunk, response.headers.get("content-type") ?? "");
+    return this.parseSseStream(reader, onChunk);
   }
 
   private async generateOnce(request: AiProviderRequest): Promise<AiProviderResponse> {
     const body = this.buildRequestBody(request, false);
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (this.apiKey) {
-      headers.Authorization = `Bearer ${this.apiKey}`;
-    }
+    const headers = this.buildHeaders();
 
     let response: Response;
     try {
@@ -191,6 +194,24 @@ export class OpenAiProvider implements AiProvider {
     }
 
     return this.parseResponse(response);
+  }
+
+  private buildHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (this.apiKey) {
+      headers.Authorization = `Bearer ${this.apiKey}`;
+    }
+    if (this.customHeaders) {
+      for (const [key, value] of Object.entries(this.customHeaders)) {
+        const lower = key.toLowerCase();
+        if (lower !== "authorization" && lower !== "content-type") {
+          headers[key] = value;
+        }
+      }
+    }
+    return headers;
   }
 
   private buildRequestBody(request: AiProviderRequest, stream: boolean): Record<string, unknown> {
@@ -235,13 +256,14 @@ export class OpenAiProvider implements AiProvider {
       throw new AiProviderError({
         provider: this.name,
         kind: "invalid_response",
-        message: "Provider returned empty response",
+        message: `Provider "${this.name}" returned empty response. Check your model and API key.`,
+        suggestion: `Verify the model "${this.model}" is accessible with your API key.`,
       });
     }
 
     const result: AiProviderResponse = {
       text,
-      raw: data,
+      raw: { model: data.model, usage: data.usage },
       model: data.model ?? this.model,
       provider: this.name,
     };
@@ -260,7 +282,6 @@ export class OpenAiProvider implements AiProvider {
   private async parseSseStream(
     reader: ReadableStreamDefaultReader<Uint8Array>,
     onChunk: (chunk: AiProviderStreamChunk) => void | Promise<void>,
-    _contentType: string,
   ): Promise<AiProviderResponse> {
     const decoder = new TextDecoder();
     const fullTextParts: string[] = [];
@@ -332,7 +353,7 @@ export class OpenAiProvider implements AiProvider {
               return result;
             }
           } catch {
-            // skip malformed SSE data lines
+            // skip malformed lines
           }
         }
       }
@@ -358,13 +379,15 @@ export class OpenAiProvider implements AiProvider {
         kind: "timeout",
         message: `Provider "${this.name}" timed out after ${timeoutMs}ms`,
         retryable: true,
+        suggestion: "Increase planner.timeoutMs in .flowtask/config.json or retry.",
       });
     }
     return new AiProviderError({
       provider: this.name,
       kind: "network_error",
-      message: `Network error: ${err instanceof Error ? err.message : String(err)}`,
+      message: `Network error connecting to ${this.baseUrl}: ${err instanceof Error ? err.message : String(err)}`,
       retryable: true,
+      suggestion: "Check your network connection and provider endpoint.",
     });
   }
 
@@ -372,7 +395,7 @@ export class OpenAiProvider implements AiProvider {
     const secrets = new Set<string>();
     if (this.apiKey) secrets.add(this.apiKey);
     const redacted = redactErrorMessage(errorText, secrets);
-    const message = `OpenAI API error (${status}): ${redacted.slice(0, 500)}`;
+    const message = `${this.name} API error (${status}): ${redacted.slice(0, 500)}`;
 
     if (status === 400 && errorText.includes("response_format")) {
       return new AiProviderError({
@@ -391,6 +414,7 @@ export class OpenAiProvider implements AiProvider {
           kind: "unauthorized",
           statusCode: status,
           message,
+          suggestion: `Check that your API key is valid and has access to the selected model.`,
         });
       case 429:
         return new AiProviderError({
@@ -399,6 +423,7 @@ export class OpenAiProvider implements AiProvider {
           statusCode: status,
           message,
           retryable: true,
+          suggestion: "Reduce request frequency or upgrade your API tier.",
         });
       case 402:
         return new AiProviderError({
@@ -406,6 +431,7 @@ export class OpenAiProvider implements AiProvider {
           kind: "quota_exceeded",
           statusCode: status,
           message,
+          suggestion: "Your API quota has been exceeded. Check your billing.",
         });
       case 404:
         return new AiProviderError({
@@ -413,6 +439,7 @@ export class OpenAiProvider implements AiProvider {
           kind: "model_not_found",
           statusCode: status,
           message,
+          suggestion: `Check planner.model in config. Model may not exist or may not be accessible.`,
         });
       case 500:
       case 502:
@@ -423,6 +450,7 @@ export class OpenAiProvider implements AiProvider {
           statusCode: status,
           message,
           retryable: true,
+          suggestion: "The provider returned a server error. Retry later.",
         });
       default:
         return new AiProviderError({

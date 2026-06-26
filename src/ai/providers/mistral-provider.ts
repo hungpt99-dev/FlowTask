@@ -4,13 +4,13 @@ import {
   type AiProviderResponse,
   type AiProviderStreamChunk,
   type AiProviderHealthResult,
-} from "./ai-provider.js";
-import { AiProviderError, redactErrorMessage } from "./ai-provider-error.js";
-import { generateWithResponseFormatFallback } from "./response-format-fallback.js";
+} from "../ai-provider.js";
+import { AiProviderError, redactErrorMessage } from "../ai-provider-error.js";
+import { generateWithResponseFormatFallback } from "../response-format-fallback.js";
 
-export class OpenAiProvider implements AiProvider {
-  name = "openai";
-  type = "openai";
+export class MistralProvider implements AiProvider {
+  name = "mistral";
+  type = "mistral";
   supportsJsonObject = true;
   supportsStreaming = true;
   private apiKey?: string;
@@ -19,15 +19,14 @@ export class OpenAiProvider implements AiProvider {
 
   constructor(config: { apiKey?: string; baseUrl?: string; model?: string }) {
     this.apiKey = config.apiKey;
-    this.baseUrl = (config.baseUrl ?? "https://api.openai.com/v1").replace(/\/+$/, "");
-    this.model = config.model ?? "gpt-4.1-mini";
+    this.baseUrl = (config.baseUrl ?? "https://api.mistral.ai/v1").replace(/\/+$/, "");
+    this.model = config.model ?? "mistral-large-latest";
   }
 
   async generate(request: AiProviderRequest): Promise<AiProviderResponse> {
     if (request.stream) {
       return this.streamInternal(request, async () => {});
     }
-
     const { response } = await generateWithResponseFormatFallback(this.name, request, (req) =>
       this.generateOnce(req),
     );
@@ -50,8 +49,8 @@ export class OpenAiProvider implements AiProvider {
         provider: this.name,
         ok: false,
         kind: "missing_api_key",
-        message: "OPENAI_API_KEY environment variable not set",
-        suggestion: "Set OPENAI_API_KEY=your-api-key",
+        message: "MISTRAL_API_KEY environment variable not set",
+        suggestion: "Set MISTRAL_API_KEY=your-api-key",
       };
     }
 
@@ -90,7 +89,6 @@ export class OpenAiProvider implements AiProvider {
           kind: "model_not_found",
           message: `Model ${options?.model ?? this.model} not found`,
           latencyMs,
-          suggestion: "Check planner.model in .flowtask/config.json",
         };
       }
 
@@ -100,7 +98,6 @@ export class OpenAiProvider implements AiProvider {
         kind: "unauthorized",
         message: `HTTP ${response.status}`,
         latencyMs,
-        suggestion: "Check your API key and permissions",
       };
     } catch (err) {
       const latencyMs = Date.now() - start;
@@ -161,7 +158,7 @@ export class OpenAiProvider implements AiProvider {
       });
     }
 
-    return this.parseSseStream(reader, onChunk, response.headers.get("content-type") ?? "");
+    return this.parseSseStream(reader, onChunk);
   }
 
   private async generateOnce(request: AiProviderRequest): Promise<AiProviderResponse> {
@@ -195,7 +192,6 @@ export class OpenAiProvider implements AiProvider {
 
   private buildRequestBody(request: AiProviderRequest, stream: boolean): Record<string, unknown> {
     const messages: Array<{ role: string; content: string }> = [
-      { role: "system", content: request.systemPrompt },
       { role: "user", content: request.userPrompt },
     ];
 
@@ -208,6 +204,10 @@ export class OpenAiProvider implements AiProvider {
 
     if (request.responseFormat === "json_object" && !stream) {
       body.response_format = { type: "json_object" };
+    }
+
+    if (request.systemPrompt) {
+      body.messages = [{ role: "system", content: request.systemPrompt }, ...messages];
     }
 
     if (stream) {
@@ -260,7 +260,6 @@ export class OpenAiProvider implements AiProvider {
   private async parseSseStream(
     reader: ReadableStreamDefaultReader<Uint8Array>,
     onChunk: (chunk: AiProviderStreamChunk) => void | Promise<void>,
-    _contentType: string,
   ): Promise<AiProviderResponse> {
     const decoder = new TextDecoder();
     const fullTextParts: string[] = [];
@@ -277,8 +276,7 @@ export class OpenAiProvider implements AiProvider {
 
         for (const line of lines) {
           const trimmed = line.trim();
-          if (!trimmed || trimmed.startsWith(":")) continue;
-          if (!trimmed.startsWith("data: ")) continue;
+          if (!trimmed || !trimmed.startsWith("data: ")) continue;
 
           const data = trimmed.slice(6);
           if (data === "[DONE]") continue;
@@ -289,11 +287,6 @@ export class OpenAiProvider implements AiProvider {
                 delta?: { content?: string };
                 finish_reason?: string | null;
               }>;
-              usage?: {
-                prompt_tokens?: number;
-                completion_tokens?: number;
-                total_tokens?: number;
-              };
             };
 
             const delta = parsed.choices?.[0]?.delta?.content ?? "";
@@ -306,33 +299,8 @@ export class OpenAiProvider implements AiProvider {
                 raw: parsed,
               });
             }
-
-            const finishReason = parsed.choices?.[0]?.finish_reason;
-            if (finishReason) {
-              const fullText = fullTextParts.join("");
-              const result: AiProviderResponse = {
-                text: fullText,
-                model: this.model,
-                provider: this.name,
-              };
-              if (parsed.usage) {
-                result.usage = {
-                  inputTokens: parsed.usage.prompt_tokens,
-                  outputTokens: parsed.usage.completion_tokens,
-                  totalTokens: parsed.usage.total_tokens,
-                };
-              }
-              await onChunk({
-                provider: this.name,
-                model: this.model,
-                textDelta: "",
-                done: true,
-                usage: result.usage,
-              });
-              return result;
-            }
           } catch {
-            // skip malformed SSE data lines
+            // skip malformed lines
           }
         }
       }
@@ -372,7 +340,7 @@ export class OpenAiProvider implements AiProvider {
     const secrets = new Set<string>();
     if (this.apiKey) secrets.add(this.apiKey);
     const redacted = redactErrorMessage(errorText, secrets);
-    const message = `OpenAI API error (${status}): ${redacted.slice(0, 500)}`;
+    const message = `Mistral API error (${status}): ${redacted.slice(0, 500)}`;
 
     if (status === 400 && errorText.includes("response_format")) {
       return new AiProviderError({
@@ -386,6 +354,7 @@ export class OpenAiProvider implements AiProvider {
 
     switch (status) {
       case 401:
+      case 403:
         return new AiProviderError({
           provider: this.name,
           kind: "unauthorized",
@@ -399,13 +368,6 @@ export class OpenAiProvider implements AiProvider {
           statusCode: status,
           message,
           retryable: true,
-        });
-      case 402:
-        return new AiProviderError({
-          provider: this.name,
-          kind: "quota_exceeded",
-          statusCode: status,
-          message,
         });
       case 404:
         return new AiProviderError({

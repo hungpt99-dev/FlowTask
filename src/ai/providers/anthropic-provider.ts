@@ -4,14 +4,40 @@ import {
   type AiProviderResponse,
   type AiProviderStreamChunk,
   type AiProviderHealthResult,
-} from "./ai-provider.js";
-import { AiProviderError, redactErrorMessage } from "./ai-provider-error.js";
-import { generateWithResponseFormatFallback } from "./response-format-fallback.js";
+} from "../ai-provider.js";
+import { AiProviderError, redactErrorMessage } from "../ai-provider-error.js";
 
-export class OpenAiProvider implements AiProvider {
-  name = "openai";
-  type = "openai";
-  supportsJsonObject = true;
+interface AnthropicContentBlock {
+  type: string;
+  text?: string;
+}
+
+interface AnthropicResponse {
+  id?: string;
+  type?: string;
+  role?: string;
+  content?: AnthropicContentBlock[];
+  model?: string;
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+  };
+}
+
+interface AnthropicStreamEvent {
+  type: string;
+  delta?: {
+    type?: string;
+    text?: string;
+  };
+  content_block?: AnthropicContentBlock;
+  message?: AnthropicResponse;
+}
+
+export class AnthropicProvider implements AiProvider {
+  name = "anthropic";
+  type = "anthropic";
+  supportsJsonObject = false;
   supportsStreaming = true;
   private apiKey?: string;
   private baseUrl: string;
@@ -19,19 +45,15 @@ export class OpenAiProvider implements AiProvider {
 
   constructor(config: { apiKey?: string; baseUrl?: string; model?: string }) {
     this.apiKey = config.apiKey;
-    this.baseUrl = (config.baseUrl ?? "https://api.openai.com/v1").replace(/\/+$/, "");
-    this.model = config.model ?? "gpt-4.1-mini";
+    this.baseUrl = (config.baseUrl ?? "https://api.anthropic.com").replace(/\/+$/, "");
+    this.model = config.model ?? "claude-3-5-sonnet-latest";
   }
 
   async generate(request: AiProviderRequest): Promise<AiProviderResponse> {
     if (request.stream) {
       return this.streamInternal(request, async () => {});
     }
-
-    const { response } = await generateWithResponseFormatFallback(this.name, request, (req) =>
-      this.generateOnce(req),
-    );
-    return response;
+    return this.generateOnce(request);
   }
 
   async stream(
@@ -50,23 +72,24 @@ export class OpenAiProvider implements AiProvider {
         provider: this.name,
         ok: false,
         kind: "missing_api_key",
-        message: "OPENAI_API_KEY environment variable not set",
-        suggestion: "Set OPENAI_API_KEY=your-api-key",
+        message: "ANTHROPIC_API_KEY environment variable not set",
+        suggestion: "Set ANTHROPIC_API_KEY=your-api-key",
       };
     }
 
     const start = Date.now();
     try {
-      const response = await fetch(`${this.baseUrl}/chat/completions`, {
+      const response = await fetch(`${this.baseUrl}/v1/messages`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${this.apiKey}`,
+          "x-api-key": this.apiKey,
+          "anthropic-version": "2023-06-01",
         },
         body: JSON.stringify({
           model: options?.model ?? this.model,
-          messages: [{ role: "user", content: "test" }],
           max_tokens: 1,
+          messages: [{ role: "user", content: "test" }],
         }),
         signal: AbortSignal.timeout(options?.timeoutMs ?? 5000),
       });
@@ -90,7 +113,6 @@ export class OpenAiProvider implements AiProvider {
           kind: "model_not_found",
           message: `Model ${options?.model ?? this.model} not found`,
           latencyMs,
-          suggestion: "Check planner.model in .flowtask/config.json",
         };
       }
 
@@ -100,7 +122,6 @@ export class OpenAiProvider implements AiProvider {
         kind: "unauthorized",
         message: `HTTP ${response.status}`,
         latencyMs,
-        suggestion: "Check your API key and permissions",
       };
     } catch (err) {
       const latencyMs = Date.now() - start;
@@ -130,14 +151,13 @@ export class OpenAiProvider implements AiProvider {
     const body = this.buildRequestBody(request, true);
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
+      "x-api-key": this.apiKey ?? "",
+      "anthropic-version": "2023-06-01",
     };
-    if (this.apiKey) {
-      headers.Authorization = `Bearer ${this.apiKey}`;
-    }
 
     let response: Response;
     try {
-      response = await fetch(`${this.baseUrl}/chat/completions`, {
+      response = await fetch(`${this.baseUrl}/v1/messages`, {
         method: "POST",
         headers,
         body: JSON.stringify(body),
@@ -161,21 +181,20 @@ export class OpenAiProvider implements AiProvider {
       });
     }
 
-    return this.parseSseStream(reader, onChunk, response.headers.get("content-type") ?? "");
+    return this.parseSseStream(reader, onChunk);
   }
 
   private async generateOnce(request: AiProviderRequest): Promise<AiProviderResponse> {
     const body = this.buildRequestBody(request, false);
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
+      "x-api-key": this.apiKey ?? "",
+      "anthropic-version": "2023-06-01",
     };
-    if (this.apiKey) {
-      headers.Authorization = `Bearer ${this.apiKey}`;
-    }
 
     let response: Response;
     try {
-      response = await fetch(`${this.baseUrl}/chat/completions`, {
+      response = await fetch(`${this.baseUrl}/v1/messages`, {
         method: "POST",
         headers,
         body: JSON.stringify(body),
@@ -194,21 +213,13 @@ export class OpenAiProvider implements AiProvider {
   }
 
   private buildRequestBody(request: AiProviderRequest, stream: boolean): Record<string, unknown> {
-    const messages: Array<{ role: string; content: string }> = [
-      { role: "system", content: request.systemPrompt },
-      { role: "user", content: request.userPrompt },
-    ];
-
     const body: Record<string, unknown> = {
       model: request.model ?? this.model,
-      messages,
+      system: request.systemPrompt,
+      messages: [{ role: "user", content: request.userPrompt }],
       temperature: request.temperature ?? 0.1,
       max_tokens: request.maxTokens ?? 4096,
     };
-
-    if (request.responseFormat === "json_object" && !stream) {
-      body.response_format = { type: "json_object" };
-    }
 
     if (stream) {
       body.stream = true;
@@ -218,20 +229,15 @@ export class OpenAiProvider implements AiProvider {
   }
 
   private async parseResponse(response: Response): Promise<AiProviderResponse> {
-    const data = (await response.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
-      model?: string;
-      usage?: {
-        prompt_tokens?: number;
-        completion_tokens?: number;
-        total_tokens?: number;
-      };
-    };
+    const data = (await response.json()) as AnthropicResponse;
 
-    const choice = data.choices?.[0];
-    const text = choice?.message?.content ?? "";
+    const textBlocks =
+      data.content
+        ?.filter((b) => b.type === "text")
+        .map((b) => b.text ?? "")
+        .join("") ?? "";
 
-    if (!text) {
+    if (!textBlocks) {
       throw new AiProviderError({
         provider: this.name,
         kind: "invalid_response",
@@ -240,7 +246,7 @@ export class OpenAiProvider implements AiProvider {
     }
 
     const result: AiProviderResponse = {
-      text,
+      text: textBlocks,
       raw: data,
       model: data.model ?? this.model,
       provider: this.name,
@@ -248,9 +254,9 @@ export class OpenAiProvider implements AiProvider {
 
     if (data.usage) {
       result.usage = {
-        inputTokens: data.usage.prompt_tokens,
-        outputTokens: data.usage.completion_tokens,
-        totalTokens: data.usage.total_tokens,
+        inputTokens: data.usage.input_tokens,
+        outputTokens: data.usage.output_tokens,
+        totalTokens: (data.usage.input_tokens ?? 0) + (data.usage.output_tokens ?? 0),
       };
     }
 
@@ -260,7 +266,6 @@ export class OpenAiProvider implements AiProvider {
   private async parseSseStream(
     reader: ReadableStreamDefaultReader<Uint8Array>,
     onChunk: (chunk: AiProviderStreamChunk) => void | Promise<void>,
-    _contentType: string,
   ): Promise<AiProviderResponse> {
     const decoder = new TextDecoder();
     const fullTextParts: string[] = [];
@@ -277,62 +282,39 @@ export class OpenAiProvider implements AiProvider {
 
         for (const line of lines) {
           const trimmed = line.trim();
-          if (!trimmed || trimmed.startsWith(":")) continue;
-          if (!trimmed.startsWith("data: ")) continue;
+          if (!trimmed || !trimmed.startsWith("data: ")) continue;
 
           const data = trimmed.slice(6);
-          if (data === "[DONE]") continue;
 
           try {
-            const parsed = JSON.parse(data) as {
-              choices?: Array<{
-                delta?: { content?: string };
-                finish_reason?: string | null;
-              }>;
-              usage?: {
-                prompt_tokens?: number;
-                completion_tokens?: number;
-                total_tokens?: number;
-              };
-            };
+            const event = JSON.parse(data) as AnthropicStreamEvent;
 
-            const delta = parsed.choices?.[0]?.delta?.content ?? "";
-            if (delta) {
-              fullTextParts.push(delta);
+            if (
+              event.type === "content_block_delta" &&
+              event.delta?.type === "text_delta" &&
+              event.delta.text
+            ) {
+              fullTextParts.push(event.delta.text);
               await onChunk({
                 provider: this.name,
                 model: this.model,
-                textDelta: delta,
-                raw: parsed,
+                textDelta: event.delta.text,
+                raw: event,
               });
             }
 
-            const finishReason = parsed.choices?.[0]?.finish_reason;
-            if (finishReason) {
+            if (event.type === "message_stop" || event.type === "message_delta") {
               const fullText = fullTextParts.join("");
-              const result: AiProviderResponse = {
-                text: fullText,
-                model: this.model,
-                provider: this.name,
-              };
-              if (parsed.usage) {
-                result.usage = {
-                  inputTokens: parsed.usage.prompt_tokens,
-                  outputTokens: parsed.usage.completion_tokens,
-                  totalTokens: parsed.usage.total_tokens,
-                };
-              }
               await onChunk({
                 provider: this.name,
                 model: this.model,
                 textDelta: "",
                 done: true,
-                usage: result.usage,
               });
-              return result;
+              return { text: fullText, model: this.model, provider: this.name };
             }
           } catch {
-            // skip malformed SSE data lines
+            // skip malformed SSE data
           }
         }
       }
@@ -372,20 +354,11 @@ export class OpenAiProvider implements AiProvider {
     const secrets = new Set<string>();
     if (this.apiKey) secrets.add(this.apiKey);
     const redacted = redactErrorMessage(errorText, secrets);
-    const message = `OpenAI API error (${status}): ${redacted.slice(0, 500)}`;
-
-    if (status === 400 && errorText.includes("response_format")) {
-      return new AiProviderError({
-        provider: this.name,
-        kind: "unsupported_response_format",
-        statusCode: status,
-        message,
-        retryable: true,
-      });
-    }
+    const message = `Anthropic API error (${status}): ${redacted.slice(0, 500)}`;
 
     switch (status) {
       case 401:
+      case 403:
         return new AiProviderError({
           provider: this.name,
           kind: "unauthorized",
@@ -400,10 +373,10 @@ export class OpenAiProvider implements AiProvider {
           message,
           retryable: true,
         });
-      case 402:
+      case 400:
         return new AiProviderError({
           provider: this.name,
-          kind: "quota_exceeded",
+          kind: "invalid_request",
           statusCode: status,
           message,
         });
