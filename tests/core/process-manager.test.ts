@@ -8,22 +8,41 @@ describe("ProcessManager", () => {
     expect(pm).toBeInstanceOf(ProcessManager);
   });
 
-  it("should register and clear process metadata", async () => {
+  it("should save and read process metadata", async () => {
     const pm = new ProcessManager();
-    pm.register(testDir, "run_001", "task_001", 12345, "shell");
+    const runId = "run_test_001";
 
-    expect(pm.hasActiveProcess("run_001")).toBe(true);
-    const meta = pm.getProcess("run_001");
-    expect(meta).toBeDefined();
-    expect(meta!.pid).toBe(12345);
-    expect(meta!.taskId).toBe("task_001");
+    await pm.save(testDir, {
+      runId,
+      taskId: "task_001",
+      pid: 12345,
+      executor: "shell",
+      command: "node",
+      args: ["script.js"],
+      startedAt: new Date().toISOString(),
+      status: "running",
+    });
 
-    await pm.clear(testDir, "run_001");
-    expect(pm.hasActiveProcess("run_001")).toBe(false);
+    const read = await pm.read(testDir, runId);
+    expect(read).not.toBeNull();
+    expect(read!.pid).toBe(12345);
+    expect(read!.status).toBe("running");
+
+    await pm.clear(testDir, runId);
+    const after = await pm.read(testDir, runId);
+    expect(after).toBeNull();
   });
 
-  it("should report no active process when not registered", () => {
+  it("should report process not running when not saved", async () => {
     const pm = new ProcessManager();
-    expect(pm.hasActiveProcess("non-existent")).toBe(false);
+    const running = await pm.isRunning(testDir, "non-existent");
+    expect(running).toBe(false);
+  });
+
+  it("should return not_found when stopping non-existent process", async () => {
+    const pm = new ProcessManager();
+    const result = await pm.stop(testDir, "non-existent");
+    expect(result.success).toBe(false);
+    expect(result.finalStatus).toBe("not_found");
   });
 });

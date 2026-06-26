@@ -34,6 +34,7 @@ export function generateDefaultConfig(): FlowTaskConfig {
       ],
     },
     quality: {
+      enabledByDefault: false,
       commands: ["pnpm lint", "pnpm typecheck", "pnpm test"],
     },
     limits: {
@@ -74,6 +75,13 @@ export function generateDefaultConfig(): FlowTaskConfig {
         args: [],
         inputMode: "argument",
         timeoutMs: 1800000,
+      },
+      "mock-ai": {
+        type: "command",
+        command: "node",
+        args: ["tests/fixtures/mock-ai-executor.mjs"],
+        inputMode: "stdin",
+        timeoutMs: 30000,
       },
     },
   };

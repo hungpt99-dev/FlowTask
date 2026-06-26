@@ -3,7 +3,6 @@ import { ProjectManager } from "../../core/project-manager.js";
 import { RunManager } from "../../core/run-manager.js";
 import { ProcessManager } from "../../core/process-manager.js";
 import { EventStore } from "../../core/event-store.js";
-import { ConfigLoader } from "../../config/config-loader.js";
 
 export async function cancelCommand(runId: string): Promise<void> {
   const rootPath = process.cwd();
@@ -29,17 +28,27 @@ export async function cancelCommand(runId: string): Promise<void> {
   }
 
   const eventStore = new EventStore(rootPath);
-  const configLoader = new ConfigLoader();
-  const config = await configLoader.load(rootPath);
-  const gracefulTimeout = config.process?.gracefulStopTimeoutMs ?? 5000;
-
   const processManager = new ProcessManager();
-  const hasProcess = processManager.hasActiveProcess(runId);
 
-  if (hasProcess) {
-    console.log(picocolors.yellow(`\nStopping executor process for run: ${run.title}...`));
-    await processManager.stopProcess(rootPath, runId, gracefulTimeout);
-    console.log(picocolors.green("  Executor process stopped."));
+  const processMeta = await processManager.read(rootPath, runId);
+
+  if (processMeta && processManager.isAlive(processMeta.pid)) {
+    console.log(
+      picocolors.yellow(
+        `\nStopping executor process (PID ${processMeta.pid}) for run: ${run.title}...`,
+      ),
+    );
+    const result = await processManager.stop(rootPath, runId);
+    if (result.success) {
+      console.log(picocolors.green(`  Process ${result.finalStatus}.`));
+    } else {
+      console.log(picocolors.yellow(`  Process status: ${result.finalStatus}`));
+    }
+  } else if (processMeta) {
+    console.log(picocolors.dim("  Process is stale (no longer running)."));
+    await processManager.clear(rootPath, runId);
+  } else {
+    console.log(picocolors.dim("  No active executor process found."));
   }
 
   await runManager.updateRunStatus(runId, "cancelled");

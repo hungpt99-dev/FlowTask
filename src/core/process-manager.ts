@@ -1,93 +1,148 @@
 import fs from "node:fs/promises";
+import path from "node:path";
 import { ensureDir } from "../utils/fs.js";
 import { getRunDir } from "../utils/paths.js";
-import path from "node:path";
-import { now } from "../utils/time.js";
+import { EventStore } from "./event-store.js";
 
-export interface ProcessMeta {
+export interface ProcessMetadata {
   runId: string;
-  taskId: string;
+  taskId: string | undefined;
   pid: number;
-  startedAt: string;
   executor: string;
+  command: string;
+  args: string[];
+  startedAt: string;
+  status: "running" | "exited" | "stopped" | "killed" | "stale";
+}
+
+export interface StopOptions {
+  gracefulTimeoutMs?: number;
+  forceKillTimeoutMs?: number;
+}
+
+export interface StopResult {
+  success: boolean;
+  finalStatus: "stopped" | "killed" | "not_found" | "stale";
 }
 
 export class ProcessManager {
-  private processes: Map<string, ProcessMeta> = new Map();
   private abortControllers: Map<string, AbortController> = new Map();
 
-  async register(
-    rootPath: string,
-    runId: string,
-    taskId: string,
-    pid: number,
-    executor: string,
-  ): Promise<void> {
-    const meta: ProcessMeta = { runId, taskId, pid, startedAt: now(), executor };
-    this.processes.set(runId, meta);
-    this.processes.set(taskId, meta);
-
-    const stateDir = path.join(getRunDir(rootPath, runId), "state");
-    await ensureDir(stateDir);
-    await fs.writeFile(path.join(stateDir, "process.json"), JSON.stringify(meta, null, 2), "utf-8");
+  getProcessPath(rootPath: string, runId: string): string {
+    return path.join(getRunDir(rootPath, runId), "process.json");
   }
 
   registerController(runId: string, controller: AbortController): void {
     this.abortControllers.set(runId, controller);
   }
 
-  getProcess(runId: string): ProcessMeta | undefined {
-    return this.processes.get(runId);
+  getController(runId: string): AbortController | undefined {
+    return this.abortControllers.get(runId);
   }
 
-  getProcessByTaskId(taskId: string): ProcessMeta | undefined {
-    return this.processes.get(taskId);
+  async save(rootPath: string, metadata: ProcessMetadata): Promise<void> {
+    const processPath = this.getProcessPath(rootPath, metadata.runId);
+    await ensureDir(path.dirname(processPath));
+    await fs.writeFile(processPath, JSON.stringify(metadata, null, 2), "utf-8");
   }
 
-  async clear(rootPath: string, runId: string): Promise<void> {
-    this.processes.delete(runId);
-    this.abortControllers.delete(runId);
-
-    const stateDir = path.join(getRunDir(rootPath, runId), "state");
+  async read(rootPath: string, runId: string): Promise<ProcessMetadata | null> {
     try {
-      await fs.unlink(path.join(stateDir, "process.json"));
+      const content = await fs.readFile(this.getProcessPath(rootPath, runId), "utf-8");
+      return JSON.parse(content) as ProcessMetadata;
     } catch {
-      // ignore if file does not exist
+      return null;
     }
   }
 
-  async stopProcess(rootPath: string, runId: string, gracefulTimeoutMs = 5000): Promise<boolean> {
+  async clear(rootPath: string, runId: string): Promise<void> {
+    this.abortControllers.delete(runId);
+    try {
+      await fs.unlink(this.getProcessPath(rootPath, runId));
+    } catch {
+      // ignore
+    }
+  }
+
+  isAlive(pid: number): boolean {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async stop(rootPath: string, runId: string, options?: StopOptions): Promise<StopResult> {
+    const meta = await this.read(rootPath, runId);
+    if (!meta) {
+      return { success: false, finalStatus: "not_found" };
+    }
+
     const controller = this.abortControllers.get(runId);
     if (controller) {
       controller.abort();
     }
 
-    const meta = this.processes.get(runId);
-    if (!meta) return false;
+    const gracefulMs = options?.gracefulTimeoutMs ?? 5000;
+
+    if (!this.isAlive(meta.pid)) {
+      await this.updateStatus(rootPath, runId, "stale");
+      await this.clear(rootPath, runId);
+      return { success: false, finalStatus: "stale" };
+    }
 
     try {
       process.kill(meta.pid, "SIGTERM");
-      await this.waitForExit(meta.pid, gracefulTimeoutMs);
+      await this.updateStatus(rootPath, runId, "stopped");
+      await this.waitForExit(meta.pid, gracefulMs);
       await this.clear(rootPath, runId);
-      return true;
+      return { success: true, finalStatus: "stopped" };
     } catch {
       try {
         process.kill(meta.pid, "SIGKILL");
+        await this.updateStatus(rootPath, runId, "killed");
         await this.clear(rootPath, runId);
-        return true;
+        return { success: true, finalStatus: "killed" };
       } catch {
+        await this.updateStatus(rootPath, runId, "stale");
         await this.clear(rootPath, runId);
-        return false;
+        return { success: false, finalStatus: "stale" };
       }
     }
   }
 
-  async forceKill(pid: number): Promise<boolean> {
-    try {
-      process.kill(pid, "SIGKILL");
-      return true;
-    } catch {
-      return false;
+  async isRunning(rootPath: string, runId: string): Promise<boolean> {
+    const meta = await this.read(rootPath, runId);
+    if (!meta) return false;
+    return this.isAlive(meta.pid);
+  }
+
+  async writeEvent(
+    rootPath: string,
+    runId: string,
+    type: string,
+    taskId?: string,
+    message?: string,
+  ): Promise<void> {
+    const store = new EventStore(rootPath);
+    await store.appendToRun(runId, {
+      type: type as never,
+      runId,
+      taskId,
+      message,
+    });
+  }
+
+  private async updateStatus(
+    rootPath: string,
+    runId: string,
+    status: ProcessMetadata["status"],
+  ): Promise<void> {
+    const meta = await this.read(rootPath, runId);
+    if (meta) {
+      meta.status = status;
+      await this.save(rootPath, meta);
     }
   }
 
@@ -101,9 +156,5 @@ export class ProcessManager {
         return;
       }
     }
-  }
-
-  hasActiveProcess(runId: string): boolean {
-    return this.processes.has(runId);
   }
 }

@@ -2,6 +2,7 @@ import type { Executor, ExecutorInput, ExecutorResult } from "./executor.js";
 import { CommandExecutor } from "./command-executor.js";
 import { ManualExecutor } from "./manual-executor.js";
 import type { ExecutorEntry } from "../schemas/config.schema.js";
+import type { ProcessManager } from "../core/process-manager.js";
 
 export class ExecutorRegistry {
   private executors: Map<string, Executor> = new Map();
@@ -18,12 +19,22 @@ export class ExecutorRegistry {
     this.register("manual", new ManualExecutor());
   }
 
+  setProcessManager(_pm: ProcessManager): void {
+    for (const [name] of this.executorConfigs) {
+      const executor = this.executors.get(name);
+      if (executor instanceof CommandExecutor) {
+        executor.setProcessManager(_pm);
+      }
+    }
+  }
+
   register(name: string, executor: Executor): void {
     this.executors.set(name, executor);
   }
 
   registerCommandExecutor(name: string, config: ExecutorEntry): void {
-    this.executors.set(name, new CommandExecutor(config));
+    const executor = new CommandExecutor(config);
+    this.executors.set(name, executor);
     this.executorConfigs.set(name, config);
   }
 

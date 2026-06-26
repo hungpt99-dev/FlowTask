@@ -2,15 +2,16 @@ import picocolors from "picocolors";
 import ora from "ora";
 import { ProjectManager } from "../../core/project-manager.js";
 import { ConfigLoader } from "../../config/config-loader.js";
+import { spawnWithPromise } from "../../utils/process.js";
 import path from "node:path";
 
 export async function doctorCommand(): Promise<void> {
   const rootPath = process.cwd();
   console.log(picocolors.cyan("\nFlowTask Doctor"));
-  console.log(picocolors.dim("─".repeat(50)));
+  console.log(picocolors.dim("─".repeat(60)));
   console.log("");
 
-  const checks: Array<{
+  const systemChecks: Array<{
     name: string;
     run: () => Promise<{ ok: boolean; message: string }>;
   }> = [
@@ -34,39 +35,11 @@ export async function doctorCommand(): Promise<void> {
     {
       name: "Git available",
       run: async () => {
-        const { spawnWithPromise } = await import("../../utils/process.js");
         try {
           const result = await spawnWithPromise("git", ["--version"]);
           return { ok: true, message: result.stdout.trim() };
         } catch {
           return { ok: false, message: "not found" };
-        }
-      },
-    },
-    {
-      name: "Config valid",
-      run: async () => {
-        const manager = new ProjectManager();
-        try {
-          const config = await manager.loadConfig(rootPath);
-          return { ok: true, message: `v${config.version}, executor: ${config.defaultExecutor}` };
-        } catch {
-          return { ok: false, message: "invalid config" };
-        }
-      },
-    },
-    {
-      name: "Rule paths accessible",
-      run: async () => {
-        const manager = new ProjectManager();
-        try {
-          const config = await manager.loadConfig(rootPath);
-          const { RuleSourceResolver } = await import("../../rules/rule-source-resolver.js");
-          const resolver = new RuleSourceResolver();
-          const files = await resolver.resolvePaths(config.rules.paths, rootPath);
-          return { ok: true, message: `${files.length} rule files found` };
-        } catch {
-          return { ok: false, message: "rule paths not accessible" };
         }
       },
     },
@@ -90,45 +63,60 @@ export async function doctorCommand(): Promise<void> {
           : { ok: false, message: `missing: ${missing.join(", ")}` };
       },
     },
-    {
-      name: "Configured executors",
-      run: async () => {
-        const loader = new ConfigLoader();
-        try {
-          const config = await loader.load(rootPath);
-          const executorNames = Object.keys(config.executors ?? {});
-          const results: string[] = [];
-          for (const name of executorNames) {
-            const entry = config.executors[name]!;
-            if (entry.type === "shell") {
-              results.push(`${name}: available (built-in)`);
-            } else if (entry.command) {
-              const { spawnWithPromise } = await import("../../utils/process.js");
-              try {
-                const cmd = entry.command.split(/\s+/)[0]!;
-                await spawnWithPromise("which", [cmd], { timeout: 3000 });
-                results.push(`${name}: available (${entry.command})`);
-              } catch {
-                results.push(`${name}: ${picocolors.yellow("not found")} (${entry.command})`);
-              }
-            }
-          }
-          return { ok: true, message: results.join("\n            ") };
-        } catch {
-          return { ok: false, message: "could not check executors" };
-        }
-      },
-    },
   ];
 
   let allOk = true;
-  for (const check of checks) {
+  for (const check of systemChecks) {
     const spinner = ora({ text: check.name, color: "blue" }).start();
     const result = await check.run();
     if (result.ok) {
       spinner.succeed(`${check.name}: ${picocolors.dim(result.message)}`);
     } else {
       spinner.fail(`${check.name}: ${picocolors.red(result.message)}`);
+      allOk = false;
+    }
+  }
+
+  const loader = new ConfigLoader();
+  const config = await loader.load(rootPath);
+  const executorNames = Object.keys(config.executors ?? {});
+
+  console.log(picocolors.cyan("\nConfigured Executors"));
+  console.log(picocolors.dim("─".repeat(60)));
+
+  const header = `${"Name".padEnd(14)}${"Type".padEnd(10)}${"Available".padEnd(12)}${"Input Mode".padEnd(14)}${"Timeout"}`;
+  console.log(`  ${picocolors.bold(header)}`);
+  console.log(picocolors.dim(`  ${"─".repeat(60)}`));
+
+  for (const name of executorNames) {
+    const entry = config.executors[name]!;
+    const inputMode = entry.inputMode ?? "argument";
+    const timeout = entry.timeoutMs ? `${entry.timeoutMs}ms` : "-";
+
+    if (entry.type === "shell") {
+      const avail = picocolors.green("yes");
+      console.log(
+        `  ${name.padEnd(14)}${"shell".padEnd(10)}${avail.padEnd(12)}${"-".padEnd(14)}${timeout}`,
+      );
+      continue;
+    }
+
+    const cmdName = entry.command?.split(/\s+/)[0] ?? "?";
+    try {
+      await spawnWithPromise("which", [cmdName], { timeout: 3000 });
+      const avail = picocolors.green("yes");
+      console.log(
+        `  ${name.padEnd(14)}${"command".padEnd(10)}${avail.padEnd(12)}${inputMode.padEnd(14)}${timeout}`,
+      );
+    } catch {
+      const avail = picocolors.red("no");
+      console.log(
+        `  ${name.padEnd(14)}${"command".padEnd(10)}${avail.padEnd(12)}${inputMode.padEnd(14)}${timeout}`,
+      );
+      const cmdDisplay = entry.command ?? "?";
+      console.log(
+        `  ${"".padEnd(14)}${picocolors.dim(`Command: ${cmdDisplay} — not found. Install or update config.`)}`,
+      );
       allOk = false;
     }
   }

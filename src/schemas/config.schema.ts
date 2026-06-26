@@ -34,6 +34,7 @@ export const ApprovalConfigSchema = z.object({
 });
 
 export const QualityConfigSchema = z.object({
+  enabledByDefault: z.boolean().default(false),
   commands: z.array(z.string()).default(["pnpm lint", "pnpm typecheck", "pnpm test"]),
 });
 

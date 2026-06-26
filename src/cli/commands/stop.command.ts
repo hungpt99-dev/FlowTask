@@ -36,25 +36,50 @@ export async function stopCommand(): Promise<void> {
   const eventStore = new EventStore(rootPath);
   const processManager = new ProcessManager();
 
-  const hasProcess = processManager.hasActiveProcess(state.activeRunId);
+  const processMeta = await processManager.read(rootPath, state.activeRunId);
 
-  if (hasProcess) {
-    console.log(picocolors.yellow(`\nStopping executor process for run: ${run.title}...`));
-    const stopped = await processManager.stopProcess(rootPath, state.activeRunId, gracefulTimeout);
-
-    await eventStore.appendToRun(state.activeRunId, {
-      type: stopped ? "process_stopped" : "process_stop_failed",
-      runId: state.activeRunId,
-      message: stopped ? "Process stopped" : "Failed to stop process",
+  if (processMeta && processManager.isAlive(processMeta.pid)) {
+    console.log(
+      picocolors.yellow(
+        `\nStopping executor process (PID ${processMeta.pid}) for run: ${run.title}...`,
+      ),
+    );
+    const result = await processManager.stop(rootPath, state.activeRunId, {
+      gracefulTimeoutMs: gracefulTimeout,
     });
 
-    if (stopped) {
-      console.log(picocolors.green("  Executor process stopped."));
+    let eventType: string;
+    if (result.success) {
+      eventType = result.finalStatus === "killed" ? "process_force_killed" : "process_stopped";
     } else {
-      console.log(picocolors.red("  Could not stop executor process."));
+      eventType = result.finalStatus === "stale" ? "process_stale" : "process_stale";
     }
+    await eventStore.appendToRun(state.activeRunId, {
+      type: eventType as never,
+      runId: state.activeRunId,
+      message: result.success
+        ? `Process ${result.finalStatus}`
+        : `Failed to stop process (${result.finalStatus})`,
+    });
+
+    if (result.success) {
+      console.log(picocolors.green(`  Process ${result.finalStatus}.`));
+    } else if (result.finalStatus === "stale") {
+      console.log(
+        picocolors.yellow(`  Process PID ${processMeta.pid} is stale (no longer running).`),
+      );
+    } else {
+      console.log(picocolors.red(`  Could not stop process (${result.finalStatus}).`));
+    }
+  } else if (processMeta) {
+    console.log(
+      picocolors.yellow(
+        `  Process PID ${processMeta.pid} is stale (no longer running). Cleaning up.`,
+      ),
+    );
+    await processManager.clear(rootPath, state.activeRunId);
   } else {
-    console.log(picocolors.dim("  No active executor process found."));
+    console.log(picocolors.dim("  No active executor process found on disk."));
   }
 
   await runManager.updateRunStatus(state.activeRunId, "interrupted");

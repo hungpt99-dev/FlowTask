@@ -18,6 +18,8 @@ import { ExecutorRegistry } from "../executor/executor-registry.js";
 import { GitService } from "../git/git-service.js";
 import { SafetyChecker } from "../safety/safety-checker.js";
 import { ProcessManager } from "./process-manager.js";
+import { QualityGate } from "../quality/quality-gate.js";
+import type { QualityGateResult } from "../schemas/quality.schema.js";
 import { writeTextFile, ensureDir } from "../utils/fs.js";
 import { getContextDir } from "../utils/paths.js";
 import { now } from "../utils/time.js";
@@ -66,6 +68,7 @@ export class RunLifecycle {
       template?: string;
       debug?: boolean;
       plannerMode?: PlannerMode;
+      quality?: boolean;
     },
   ): Promise<{ run: Run; success: boolean }> {
     const mode = options?.mode ?? "auto";
@@ -204,7 +207,17 @@ export class RunLifecycle {
 
     await this.gitService.takeAfterSnapshot(this.rootPath, run.runId);
 
-    const finalRun = runSuccess
+    const shouldRunQuality = options?.quality ?? this.config.quality.enabledByDefault ?? false;
+    let qualityPassed = true;
+    if (runSuccess && shouldRunQuality) {
+      const qResult = await this.runQualityGate(run.runId, true, this.config.quality.commands);
+      if (qResult && qResult.status !== "passed") {
+        qualityPassed = false;
+      }
+    }
+
+    const finalSuccess = runSuccess && qualityPassed;
+    const finalRun = finalSuccess
       ? await this.runManager.updateRunStatus(run.runId, "completed")
       : await this.runManager.updateRunStatus(run.runId, "failed");
 
@@ -239,7 +252,7 @@ export class RunLifecycle {
     return { run: finalRun, success: runSuccess };
   }
 
-  async continueRun(runId: string): Promise<{ success: boolean }> {
+  async continueRun(runId: string, _quality?: boolean): Promise<{ success: boolean }> {
     const tasks = await this.runManager.loadTasks(runId);
     const pending = tasks.filter((t) => t.status === "pending" || t.status === "interrupted");
 
@@ -502,5 +515,52 @@ export class RunLifecycle {
     console.log(picocolors.yellow(`  - flowtask inspect ${run.runId}`));
 
     return false;
+  }
+
+  async runQualityGate(
+    runId: string,
+    qualityEnabled: boolean,
+    commands: string[],
+  ): Promise<QualityGateResult | null> {
+    if (!qualityEnabled || commands.length === 0) {
+      const now_ts = now();
+      const result: QualityGateResult = {
+        status: "skipped",
+        commands: [],
+        startedAt: now_ts,
+        finishedAt: now_ts,
+      };
+      const { atomicWriteJsonFile: atomicWrite } = await import("../utils/fs.js");
+      const { getOutputsDir } = await import("../utils/paths.js");
+      const p = await import("node:path");
+      await atomicWrite(
+        p.join(getOutputsDir(this.rootPath, runId), "quality-results.json"),
+        result,
+      );
+      return result;
+    }
+
+    console.log(picocolors.cyan("\n  Running quality gate..."));
+    const gate = new QualityGate();
+    const result = await gate.run(this.rootPath, runId, commands);
+
+    await this.eventStore.appendToRun(runId, {
+      type: result.status === "passed" ? "quality_completed" : "quality_failed",
+      runId,
+      details: { commandCount: commands.length, allPassed: result.status === "passed" },
+    });
+
+    if (result.status === "passed") {
+      console.log(picocolors.green("  Quality gate: passed"));
+    } else {
+      console.log(picocolors.red("  Quality gate: failed"));
+      for (const cmd of result.commands) {
+        if (cmd.status !== "passed") {
+          console.log(picocolors.red(`    ✗ ${cmd.command}`));
+        }
+      }
+    }
+
+    return result;
   }
 }

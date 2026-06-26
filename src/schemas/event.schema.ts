@@ -31,6 +31,9 @@ export const EventTypeSchema = z.enum([
   "approval_approved",
   "approval_rejected",
   "quality_started",
+  "quality_command_started",
+  "quality_command_completed",
+  "quality_command_failed",
   "quality_completed",
   "quality_failed",
   "resume_started",
@@ -47,10 +50,11 @@ export const EventTypeSchema = z.enum([
   "retry_failed",
   "retry_limit_reached",
   "process_started",
+  "process_exited",
   "process_signal_sent",
   "process_stopped",
   "process_force_killed",
-  "process_stop_failed",
+  "process_stale",
   "planner_fallback",
 ]);
 
