@@ -496,7 +496,7 @@ export class InternalAiPlanner implements Planner {
     this.validateArtifacts(data);
     this.validateExecutors(data);
 
-    const runIdFinal = generateRunId(input.prompt);
+    const runIdFinal = runId ?? generateRunId(input.prompt);
     const timestamp = now();
 
     const title = data.title || input.prompt.slice(0, 80).trim();

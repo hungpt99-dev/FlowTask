@@ -159,6 +159,7 @@ export class RunLifecycle {
           rulesContext,
           template: options?.template,
           availableExecutors,
+          runId: run.runId,
         });
         await this.eventStore.appendToRun(run.runId, {
           type: passedEvent as never,
