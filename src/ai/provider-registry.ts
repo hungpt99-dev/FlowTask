@@ -10,6 +10,7 @@ import type { FlowTaskConfig } from "../schemas/config.schema.js";
 import type { AiProviderConfig } from "./ai.schema.js";
 import { DEFAULT_PROVIDER_MODELS, mergeProviderConfigs } from "./provider-presets.js";
 import { AiProviderError } from "./ai-provider-error.js";
+import { resolveCredentialSync } from "../config/credential-resolver.js";
 
 export type AiProviderFactory = (config: ResolvedAiProviderConfig) => AiProvider;
 
@@ -31,6 +32,7 @@ export interface ProviderSummary {
   configured: boolean;
   apiKeyAvailable: boolean;
   apiKeyEnv?: string;
+  needsApiKey: boolean;
 }
 
 export class ProviderRegistry {
@@ -99,24 +101,30 @@ export class ProviderRegistry {
   }
 
   isApiKeyAvailable(providerName?: string): boolean {
-    const envVar = this.getApiKeyEnv(providerName);
-    if (!envVar) return true;
-    return !!process.env[envVar];
+    const name = providerName ?? this.config.planner?.provider ?? "openai";
+    const providerConfig = this.mergedProviders[name];
+    if (!providerConfig) return false;
+    const credential = resolveCredentialSync(name, providerConfig);
+    return credential.apiKey !== undefined || providerConfig.allowNoApiKey === true;
   }
 
   listProviders(): ProviderSummary[] {
     return Object.entries(this.mergedProviders).map(([name, config]) => {
       const providerConfig = config;
-      const apiKeyEnv = providerConfig.apiKeyEnv;
-      const hasKey = apiKeyEnv ? !!process.env[apiKeyEnv] : true;
+      const credential = resolveCredentialSync(name, providerConfig);
       return {
         name,
         type: providerConfig.type ?? "unknown",
         configured: true,
-        apiKeyAvailable: hasKey,
-        apiKeyEnv,
+        apiKeyAvailable: credential.apiKey !== undefined || providerConfig.allowNoApiKey === true,
+        apiKeyEnv: providerConfig.apiKeyEnv,
+        needsApiKey: !providerConfig.allowNoApiKey,
       };
     });
+  }
+
+  getProviderConfig(name: string): AiProviderConfig | undefined {
+    return this.mergedProviders[name];
   }
 
   private registerBuiltInFactories(): void {
@@ -233,8 +241,7 @@ export class ProviderRegistry {
     providerConfig: AiProviderConfig,
     model: string,
   ): ResolvedAiProviderConfig {
-    const apiKeyEnv = providerConfig.apiKeyEnv;
-    const apiKey = apiKeyEnv ? process.env[apiKeyEnv] : undefined;
+    const credential = resolveCredentialSync(name, providerConfig);
 
     let baseUrl = providerConfig.baseUrl;
     if (providerConfig.endpointEnv && !baseUrl) {
@@ -244,7 +251,7 @@ export class ProviderRegistry {
     return {
       name,
       type: providerConfig.type ?? "openai-compatible",
-      apiKey,
+      apiKey: credential.apiKey,
       baseUrl,
       model,
       endpointEnv: providerConfig.endpointEnv,

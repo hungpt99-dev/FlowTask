@@ -22,7 +22,10 @@ FlowTask core runtime is implemented and operational.
 - Git snapshot support (before/after run snapshots)
 - Init-time project mode selection (development, writing, research, general)
 - Mode-specific rules, steps, validation, and safety defaults
-- 227+ tests across 37 test files cover all modules
+- AI provider setup with guided interactive flow
+- Secure credential storage (no API keys in config files)
+- Provider management commands (list, test, configure, remove)
+- 269+ tests across 41 test files cover all modules
 - All quality gates pass
 
 ## Requirements
@@ -36,7 +39,7 @@ FlowTask core runtime is implemented and operational.
 # Install
 pnpm install
 
-# Initialize a project (interactive — choose mode)
+# Full setup (project + AI provider + rules)
 pnpm dev init
 
 # Initialize with a specific mode
@@ -46,6 +49,20 @@ pnpm dev init --name "Research Project" --mode research
 
 # Show available init modes
 pnpm dev init --show-modes
+
+# Configure AI provider (interactive)
+pnpm dev setup
+
+# Configure AI provider (non-interactive)
+pnpm dev setup --provider openai --api-key-env OPENAI_API_KEY
+pnpm dev setup --provider ollama --model llama3.1
+
+# Provider management
+pnpm dev providers list       # List all configured providers
+pnpm dev providers current    # Show current provider
+pnpm dev providers test       # Test provider connection
+pnpm dev providers configure  # Interactive provider configuration
+pnpm dev providers remove     # Remove a provider
 
 # List configured rules
 pnpm dev rules list
@@ -76,12 +93,19 @@ pnpm dev doctor
 ## Commands
 
 ```bash
-flowtask init        # Initialize a FlowTask project (interactive mode selection)
+flowtask init        # Initialize a FlowTask project (interactive mode + AI setup)
 flowtask init --mode development   # Initialize as development project
 flowtask init --mode writing       # Initialize as writing/document project
 flowtask init --mode research      # Initialize as research project
 flowtask init --mode general       # Initialize as general project
 flowtask init --show-modes         # List available project modes
+flowtask setup       # Configure AI provider interactively
+flowtask setup --provider openai --api-key-env OPENAI_API_KEY   # Non-interactive AI setup
+flowtask providers list    # List configured AI providers
+flowtask providers current # Show current AI provider
+flowtask providers test    # Test AI provider connection
+flowtask providers configure  # Configure AI provider interactively
+flowtask providers remove [name]  # Remove an AI provider
 flowtask run         # Start a new run from a prompt
 flowtask status      # Show current project and run status
 flowtask runs        # List all runs in the project
@@ -94,7 +118,8 @@ flowtask stop        # Stop the current running task
 flowtask cancel      # Cancel a run
 flowtask clean       # Clean up old runs
 flowtask doctor      # Check system health and project configuration
-flowtask providers   # Manage AI providers (list, doctor)
+flowtask setup       # Configure AI provider interactively
+flowtask providers   # Manage AI providers (list, test, configure, remove)
 flowtask rules       # Manage FlowTask rule sources
 ```
 
@@ -130,7 +155,7 @@ Each mode generates:
 ### Planner Modes
 
 - `simple` — always use the fixed 7-task template, never calls AI
-- `ai` — use internal AI planner (requires `OPENAI_API_KEY`); fails if invalid
+- `ai` — use internal AI planner (requires an API key for the configured provider); fails if invalid
 - `auto` — try internal AI planner, fall back to simple if invalid or missing API key (default)
 
 ### Providers Command
@@ -140,19 +165,33 @@ flowtask providers list            # List configured AI providers with type and 
 flowtask providers doctor          # Check health of all configured AI providers
 ```
 
-### Planner Provider
+### AI Provider Setup
 
-FlowTask supports dedicated AI provider implementations for planning:
+FlowTask supports guided AI provider setup. Run `flowtask setup` to configure:
 
 ```text
 OpenAI               native OpenAI (gpt-4.1-mini)
-OpenAI-compatible    OpenRouter, DeepSeek, Groq, Together, Fireworks, LM Studio
 Anthropic            native /v1/messages (claude-3-5-sonnet-latest)
 Gemini               native generateContent (gemini-1.5-pro)
-Mistral              native /chat/completions (mistral-large-latest)
-Azure OpenAI         deployment-based provider
-Ollama               native local /api/chat (llama3.1)
+OpenRouter           OpenAI-compatible (openai/gpt-4o-mini)
+DeepSeek             OpenAI-compatible (deepseek-chat)
+Groq                 OpenAI-compatible (llama-3.3-70b-versatile)
+Ollama               local /api/chat (llama3.1) — no API key needed
+LM Studio            local OpenAI-compatible — no API key needed
 ```
+
+Setup stores API keys in `~/.flowtask/secrets.json` — **not** in project config.
+
+Environment variables like `OPENAI_API_KEY` still work for CI/advanced users.
+
+### Planner Provider
+
+Planner provider resolution follows this order:
+
+1. Explicit `apiKeyEnv` from config (env var)
+2. Secret reference (`flowtask:<name>`) from secure store
+3. Default env var for provider type (e.g., `OPENAI_API_KEY`)
+4. Local no-key mode for local providers
 
 ### Custom Provider Registration
 
@@ -172,11 +211,63 @@ registry.registerProvider("my-model", { type: "my-vendor", ...config });
 
 Providers registered via the API are checked during health checks and planning alongside built-in providers.
 
-```bash
-# Set API key
-export OPENAI_API_KEY=sk-your-key
+### API Key Setup
 
-# Use AI planner
+FlowTask offers **two ways** to configure API keys for AI providers:
+
+**1. Interactive setup (recommended) — during `flowtask init`:**
+
+After initializing a project, FlowTask can configure an AI planner provider. API keys are stored in `~/.flowtask/secrets.json` — never in project config files. Run `flowtask setup` later to change or test the provider.
+
+```bash
+flowtask init
+# → "Would you like to configure an AI planner provider now?" [Yes]
+# → Select provider (OpenAI, Anthropic, Gemini, Mistral, OpenRouter, etc.)
+# → Enter your API key (masked input)
+# → Key saved to .env, provider configured in .flowtask/config.json
+```
+
+**2. Manual setup — environment variables (advanced):**
+
+Environment variables are supported but optional. Use them for CI/CD or when you prefer not to use the secure store.
+
+```bash
+export OPENAI_API_KEY=sk-your-key
+```
+
+Or create a `.env` file in your project root:
+
+```bash
+# .env
+OPENAI_API_KEY=sk-your-key
+```
+
+FlowTask automatically loads `.env` from your project root on every command.
+
+**Provider API key environment variables:**
+
+| Provider     | Env Variable           |
+| ------------ | ---------------------- |
+| OpenAI       | `OPENAI_API_KEY`       |
+| Anthropic    | `ANTHROPIC_API_KEY`    |
+| Gemini       | `GEMINI_API_KEY`       |
+| Mistral      | `MISTRAL_API_KEY`      |
+| Azure OpenAI | `AZURE_OPENAI_API_KEY` |
+| OpenRouter   | `OPENROUTER_API_KEY`   |
+| DeepSeek     | `DEEPSEEK_API_KEY`     |
+| Groq         | `GROQ_API_KEY`         |
+| Together AI  | `TOGETHER_API_KEY`     |
+| Fireworks AI | `FIREWORKS_API_KEY`    |
+| Ollama       | _(no key needed)_      |
+| LM Studio    | _(no key needed)_      |
+
+**Using the AI planner:**
+
+```bash
+# Use AI planner (auto mode — tries AI, falls back to simple)
+flowtask run "update readme"
+
+# Force AI planner (fails if API key missing)
 flowtask run "update readme" --planner ai
 
 # Override provider/model
@@ -469,7 +560,7 @@ cat .flowtask/runs/<runId>/outputs/internal-ai-planner-raw-attempt-1.txt
 - **No team features** — Single-user, local-only.
 - **No database** — All state is file-based using JSON and JSONL intentionally.
 - **Windows testing** — Cross-platform utilities (`getShell()`, `path.join`) are in place but Windows has not been tested end-to-end.
-- **AI planner** — The internal AI planner requires an API key for the selected provider and will fall back to the simple planner if unavailable.
+- **AI planner** — The internal AI planner requires an API key for the selected provider and will fall back to the simple planner if unavailable. Keys can be configured via `flowtask setup` (interactive), `flowtask init`, or by setting environment variables.
 - **External AI CLI integration** — AI CLI tools (opencode, claude, codex) are used as task executors, not as the planner. The command executor supports argument, stdin, and file input modes, but end-to-end integration with specific tools may require configuration tuning.
 
 ## License

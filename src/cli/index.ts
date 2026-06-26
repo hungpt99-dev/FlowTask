@@ -13,7 +13,14 @@ import { cancelCommand } from "./commands/cancel.command.js";
 import { cleanCommand } from "./commands/clean.command.js";
 import { doctorCommand, doctorProvidersCommand } from "./commands/doctor.command.js";
 import { rulesCommand } from "./commands/rules.command.js";
-import { listProvidersCommand } from "./commands/providers.command.js";
+import {
+  listProvidersCommand,
+  currentProviderCommand,
+  testProviderCommand,
+  removeProviderCommand,
+  configureProviderCommand,
+} from "./commands/providers.command.js";
+import { setupAiCommand } from "./commands/setup.command.js";
 
 const program = new Command();
 
@@ -34,6 +41,23 @@ program
   .action((opts: { name?: string; mode?: string; force?: boolean; showModes?: boolean }) => {
     initCommand(opts);
   });
+
+program
+  .command("setup")
+  .description("Configure AI provider setup")
+  .argument("[type]", "Setup type: ai", "ai")
+  .option("--provider <name>", "Provider name (openai, anthropic, gemini, etc.)")
+  .option("--model <name>", "Default model for the provider")
+  .option("--base-url <url>", "Provider base URL")
+  .option("--api-key-env <env>", "Environment variable name for API key")
+  .action(
+    (
+      _type: string,
+      opts: { provider?: string; model?: string; baseUrl?: string; apiKeyEnv?: string },
+    ) => {
+      setupAiCommand(opts);
+    },
+  );
 
 program
   .command("run")
@@ -151,6 +175,25 @@ program
   .description("Manage AI providers")
   .addCommand(
     new Command("list").description("List configured AI providers").action(listProvidersCommand),
+  )
+  .addCommand(
+    new Command("current").description("Show current AI provider").action(currentProviderCommand),
+  )
+  .addCommand(
+    new Command("test")
+      .description("Test current AI provider connection")
+      .action(testProviderCommand),
+  )
+  .addCommand(
+    new Command("configure")
+      .description("Configure AI provider interactively")
+      .action(configureProviderCommand),
+  )
+  .addCommand(
+    new Command("remove")
+      .description("Remove an AI provider configuration")
+      .argument("[name]", "Provider name to remove")
+      .action(removeProviderCommand),
   )
   .addCommand(
     new Command("doctor").description("Check AI provider health").action(doctorProvidersCommand),

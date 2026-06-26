@@ -3,6 +3,7 @@ import { z } from "zod";
 export const AiProviderConfigSchema = z.object({
   type: z.string().min(1),
   apiKeyEnv: z.string().optional(),
+  apiKeyRef: z.string().optional(),
   baseUrl: z.string().optional(),
   endpointEnv: z.string().optional(),
   apiVersion: z.string().optional(),
