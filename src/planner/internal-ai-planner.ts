@@ -13,8 +13,24 @@ import type { FlowTaskConfig } from "../schemas/config.schema.js";
 import { writeTextFile, ensureDir } from "../utils/fs.js";
 import { extractJsonObject } from "../utils/json-extractor.js";
 import { ProviderRegistry } from "../ai/provider-registry.js";
+import type { AiProviderStreamChunk } from "../ai/ai-provider.js";
+import { getEventBus } from "../ui/event-bus.js";
 
 const VALID_EXECUTORS = new Set(["shell", "manual"]);
+
+export interface PlannerProviderMetadata {
+  provider: string;
+  model: string;
+  responseFormatRequested: string;
+  responseFormatUsed: string;
+  responseFormatFallback: boolean;
+  streaming: boolean;
+  usage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+  };
+}
 
 export class InternalAiPlanner implements Planner {
   private config: FlowTaskConfig;
@@ -29,6 +45,7 @@ export class InternalAiPlanner implements Planner {
     const plannerConfig = this.config.planner!;
     const provider = this.providerRegistry.getProvider(plannerConfig.provider);
     const runId = input.runId;
+    const enableStream = plannerConfig.stream ?? false;
 
     console.log(
       picocolors.cyan(
@@ -36,14 +53,27 @@ export class InternalAiPlanner implements Planner {
       ),
     );
 
-    const attempt1 = await this.executePlanner(provider.name, input, runId, 1);
+    if (enableStream && provider.supportsStreaming) {
+      console.log(picocolors.dim("    Streaming enabled"));
+    }
+
+    const streamEnabled = enableStream && (provider.supportsStreaming ?? false);
+
+    const attempt1 = await this.executePlanner(provider.name, input, runId, 1, streamEnabled);
 
     try {
-      return await this.processPlannerOutput(attempt1, input, runId);
+      return await this.processPlannerOutput(attempt1.output, input, runId);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
 
-      await this.savePlannerError(input.projectRoot, runId, errorMessage, attempt1, 1);
+      await this.savePlannerError(
+        input.projectRoot,
+        runId,
+        errorMessage,
+        attempt1.output,
+        attempt1.metadata,
+        1,
+      );
 
       console.log(picocolors.yellow("\n  Internal AI planner returned non-JSON output."));
       if (runId) {
@@ -60,7 +90,7 @@ export class InternalAiPlanner implements Planner {
         input,
         runId,
         errorMessage,
-        attempt1,
+        attempt1.output,
       );
 
       try {
@@ -69,7 +99,21 @@ export class InternalAiPlanner implements Planner {
         const repairErrorMessage =
           repairErr instanceof Error ? repairErr.message : String(repairErr);
 
-        await this.savePlannerError(input.projectRoot, runId, repairErrorMessage, repairOutput, 2);
+        await this.savePlannerError(
+          input.projectRoot,
+          runId,
+          repairErrorMessage,
+          repairOutput,
+          {
+            provider: "",
+            model: "",
+            responseFormatRequested: "",
+            responseFormatUsed: "",
+            responseFormatFallback: false,
+            streaming: false,
+          },
+          2,
+        );
 
         throw new Error(
           `Internal AI planner returned invalid JSON after repair. Last error: ${repairErrorMessage}`,
@@ -83,22 +127,94 @@ export class InternalAiPlanner implements Planner {
     input: PlannerInput,
     runId: string | undefined,
     attemptNumber: number,
-  ): Promise<string> {
+    enableStream: boolean = false,
+  ): Promise<{ output: string; metadata: PlannerProviderMetadata }> {
     const systemPrompt = this.buildSystemPrompt();
     const userPrompt = this.buildUserPrompt(input);
-
     const plannerConfig = this.config.planner!;
     const provider = this.providerRegistry.getProvider(plannerConfig.provider);
+    const eventBus = getEventBus();
 
-    const response = await provider.generate({
+    let responseFormatFallback = false;
+    let responseFormatUsed = "json_object";
+
+    const baseRequest = {
       systemPrompt,
       userPrompt,
-      temperature: 0.1,
-      maxTokens: 4096,
-      responseFormat: "json_object",
-    });
+      temperature: plannerConfig.temperature ?? 0.1,
+      maxTokens: plannerConfig.maxTokens ?? 4096,
+      responseFormat: "json_object" as const,
+      timeoutMs: plannerConfig.timeoutMs,
+      stream: enableStream,
+    };
 
-    const output = response.text.trim();
+    let responseText: string;
+    let usage: { inputTokens?: number; outputTokens?: number; totalTokens?: number } | undefined;
+
+    if (enableStream && provider.supportsStreaming && provider.stream) {
+      eventBus.emit({
+        type: "ai_provider_stream_started",
+        provider: provider.name,
+        model: plannerConfig.model ?? "",
+        runId,
+        timestamp: new Date().toISOString(),
+      });
+
+      const streamChunks: string[] = [];
+
+      const result = await provider.stream(baseRequest, async (chunk: AiProviderStreamChunk) => {
+        if (chunk.textDelta) {
+          streamChunks.push(chunk.textDelta);
+          eventBus.emit({
+            type: "ai_provider_stream_delta",
+            provider: provider.name,
+            model: plannerConfig.model ?? "",
+            runId,
+            textDelta: chunk.textDelta,
+            timestamp: new Date().toISOString(),
+          });
+        }
+
+        if (chunk.done) {
+          eventBus.emit({
+            type: "ai_provider_stream_completed",
+            provider: provider.name,
+            model: plannerConfig.model ?? "",
+            runId,
+            usage: chunk.usage,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      });
+
+      responseText = result.text;
+      usage = result.usage;
+    } else {
+      let result;
+      // Try with json_object response format, fall back without it
+      try {
+        result = await provider.generate(baseRequest);
+      } catch {
+        // Check if it's a response_format error
+        const { generateWithResponseFormatFallback } =
+          await import("../ai/response-format-fallback.js");
+        const fallbackResult = await generateWithResponseFormatFallback(
+          providerName,
+          baseRequest,
+          (req) => provider.generate(req),
+        );
+        result = fallbackResult.response;
+        responseFormatFallback = fallbackResult.fallbackOccurred;
+      }
+
+      responseText = result.text;
+      usage = result.usage;
+      if (responseFormatFallback) {
+        responseFormatUsed = "text";
+      }
+    }
+
+    const output = responseText.trim();
 
     await this.saveRawOutput(
       input.projectRoot,
@@ -107,15 +223,34 @@ export class InternalAiPlanner implements Planner {
       `internal-ai-planner-raw-attempt-${attemptNumber}.txt`,
     );
 
-    if (response.usage) {
+    // Save provider metadata
+    const metadata: PlannerProviderMetadata = {
+      provider: providerName,
+      model: plannerConfig.model ?? "",
+      responseFormatRequested: "json_object",
+      responseFormatUsed,
+      responseFormatFallback,
+      streaming: enableStream,
+      usage,
+    };
+
+    await this.saveProviderMetadata(input.projectRoot, runId, metadata);
+
+    if (usage) {
       console.log(
         picocolors.dim(
-          `    Tokens: ${response.usage.inputTokens ?? "?"} in / ${response.usage.outputTokens ?? "?"} out`,
+          `    Tokens: ${usage.inputTokens ?? "?"} in / ${usage.outputTokens ?? "?"} out`,
         ),
       );
     }
 
-    return output;
+    if (responseFormatFallback) {
+      console.log(
+        picocolors.yellow("    Response format json_object not supported, retried without it"),
+      );
+    }
+
+    return { output, metadata };
   }
 
   private async executeRepairPlanner(
@@ -127,7 +262,6 @@ export class InternalAiPlanner implements Planner {
   ): Promise<string> {
     const systemPrompt = this.buildRepairSystemPrompt(errorMessage, previousOutput);
     const userPrompt = this.buildUserPrompt(input);
-
     const plannerConfig = this.config.planner!;
     const provider = this.providerRegistry.getProvider(plannerConfig.provider);
 
@@ -475,11 +609,24 @@ export class InternalAiPlanner implements Planner {
     return filePath;
   }
 
+  private async saveProviderMetadata(
+    projectRoot: string,
+    runId: string | undefined,
+    metadata: PlannerProviderMetadata,
+  ): Promise<void> {
+    if (!runId) return;
+    const outputsDir = path.join(projectRoot, ".flowtask", "runs", runId, "outputs");
+    await ensureDir(outputsDir);
+    const filePath = path.join(outputsDir, "internal-ai-planner-provider.json");
+    await writeTextFile(filePath, JSON.stringify(metadata, null, 2));
+  }
+
   private async savePlannerError(
     projectRoot: string,
     runId: string | undefined,
     errorMessage: string,
     rawOutput: string,
+    _metadata: PlannerProviderMetadata,
     attemptNumber: number,
   ): Promise<string | undefined> {
     if (!runId) return undefined;

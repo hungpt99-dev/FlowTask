@@ -11,8 +11,9 @@ import { inspectCommand } from "./commands/inspect.command.js";
 import { stopCommand } from "./commands/stop.command.js";
 import { cancelCommand } from "./commands/cancel.command.js";
 import { cleanCommand } from "./commands/clean.command.js";
-import { doctorCommand } from "./commands/doctor.command.js";
+import { doctorCommand, doctorProvidersCommand } from "./commands/doctor.command.js";
 import { rulesCommand } from "./commands/rules.command.js";
+import { listProvidersCommand } from "./commands/providers.command.js";
 
 const program = new Command();
 
@@ -37,8 +38,15 @@ program
   .option("--executor <name>", "Executor to use (shell, opencode, claude, codex)", "shell")
   .option("--mode <mode>", "Run mode: auto | manual | plan-only | dry-run | debug", "auto")
   .option("--planner <mode>", "Planner mode: simple | ai | auto", "auto")
-  .option("--planner-provider <name>", "AI planner provider (e.g. openai)")
-  .option("--planner-model <name>", "AI planner model (e.g. gpt-4.1-mini)")
+  .option("--planner-provider <name>", "AI planner provider (e.g. openai, anthropic, gemini)")
+  .option(
+    "--planner-model <name>",
+    "AI planner model (e.g. gpt-4.1-mini, claude-3-5-sonnet-latest)",
+  )
+  .option("--planner-base-url <url>", "AI planner base URL override")
+  .option("--planner-timeout <ms>", "AI planner timeout in milliseconds")
+  .option("--planner-stream", "Enable AI planner streaming")
+  .option("--no-planner-stream", "Disable AI planner streaming")
   .option("--ui", "Force rich terminal UI")
   .option("--no-ui", "Disable rich terminal UI")
   .option("--json", "Output machine-readable JSON events")
@@ -126,7 +134,23 @@ program
 program
   .command("doctor")
   .description("Check system health and project configuration")
-  .action(doctorCommand);
+  .option("--providers", "Only check AI provider status")
+  .action((opts: { providers?: boolean }) => {
+    if (opts.providers) {
+      return doctorProvidersCommand();
+    }
+    return doctorCommand();
+  });
+
+program
+  .command("providers")
+  .description("Manage AI providers")
+  .addCommand(
+    new Command("list").description("List configured AI providers").action(listProvidersCommand),
+  )
+  .addCommand(
+    new Command("doctor").description("Check AI provider health").action(doctorProvidersCommand),
+  );
 
 program
   .command("rules")
@@ -136,4 +160,10 @@ program
   .action(rulesCommand);
 
 const userArgs = process.argv.slice(2).filter((a) => a !== "--");
-program.parse(userArgs, { from: "user" });
+
+if (userArgs.length === 0 && process.stdin.isTTY) {
+  const { startInteractiveMode } = await import("./interactive/repl.js");
+  await startInteractiveMode();
+} else {
+  program.parse(userArgs, { from: "user" });
+}
