@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { EventBus, getEventBus, setEventBus } from "../../src/ui/event-bus.js";
 
+const flushMicrotasks = () => new Promise<void>((resolve) => queueMicrotask(() => resolve()));
+
 describe("EventBus", () => {
-  it("emits and receives events", () => {
+  it("emits and receives events", async () => {
     const bus = new EventBus();
     const received: string[] = [];
 
@@ -11,10 +13,11 @@ describe("EventBus", () => {
     });
 
     bus.emit({ type: "task_started", taskId: "task_001", title: "Test", index: 1, total: 3 });
+    await flushMicrotasks();
     expect(received).toEqual(["task_started"]);
   });
 
-  it("removes listeners with off()", () => {
+  it("removes listeners with off()", async () => {
     const bus = new EventBus();
     let count = 0;
 
@@ -23,10 +26,12 @@ describe("EventBus", () => {
     };
     bus.on("task_completed", handler);
     bus.emit({ type: "task_completed", taskId: "task_001", title: "Test" });
+    await flushMicrotasks();
     expect(count).toBe(1);
 
     bus.off("task_completed", handler);
     bus.emit({ type: "task_completed", taskId: "task_001", title: "Test" });
+    await flushMicrotasks();
     expect(count).toBe(1);
   });
 
@@ -56,7 +61,6 @@ describe("EventBus", () => {
     setEventBus(custom);
     expect(getEventBus()).toBe(custom);
 
-    // Reset
     setEventBus(new EventBus());
   });
 });

@@ -6,6 +6,8 @@ import { SecretRedactor } from "../safety/secret-redactor.js";
 export class LogManager {
   private rootPath: string;
   private redactor: SecretRedactor;
+  private pendingWrites = 0;
+  private resolveQueue: Array<() => void> = [];
 
   constructor(rootPath: string) {
     this.rootPath = rootPath;
@@ -20,24 +22,62 @@ export class LogManager {
     await this.ensureLogDir(runId);
     const timestamp = now();
     const safeMessage = this.redactor.redact(message);
-    await appendToFile(runtimeLogPath(this.rootPath, runId), `[${timestamp}] ${safeMessage}\n`);
+    this.pendingWrites++;
+    try {
+      await appendToFile(runtimeLogPath(this.rootPath, runId), `[${timestamp}] ${safeMessage}\n`);
+    } finally {
+      this.pendingWrites--;
+      this.checkQueue();
+    }
   }
 
   async writeTaskLog(runId: string, taskId: string, message: string): Promise<void> {
     await this.ensureLogDir(runId);
     const timestamp = now();
     const safeMessage = this.redactor.redact(message);
-    await appendToFile(
-      taskLogPath(this.rootPath, runId, taskId),
-      `[${timestamp}] ${safeMessage}\n`,
-    );
+    this.pendingWrites++;
+    try {
+      await appendToFile(
+        taskLogPath(this.rootPath, runId, taskId),
+        `[${timestamp}] ${safeMessage}\n`,
+      );
+    } finally {
+      this.pendingWrites--;
+      this.checkQueue();
+    }
   }
 
   async writeValidation(runId: string, message: string): Promise<void> {
     await this.ensureLogDir(runId);
     const timestamp = now();
     const safeMessage = this.redactor.redact(message);
-    await appendToFile(validationLogPath(this.rootPath, runId), `[${timestamp}] ${safeMessage}\n`);
+    this.pendingWrites++;
+    try {
+      await appendToFile(
+        validationLogPath(this.rootPath, runId),
+        `[${timestamp}] ${safeMessage}\n`,
+      );
+    } finally {
+      this.pendingWrites--;
+      this.checkQueue();
+    }
+  }
+
+  async flush(): Promise<void> {
+    if (this.pendingWrites === 0) return;
+    return new Promise<void>((resolve) => {
+      this.resolveQueue.push(resolve);
+    });
+  }
+
+  private checkQueue(): void {
+    if (this.pendingWrites === 0) {
+      const queue = [...this.resolveQueue];
+      this.resolveQueue = [];
+      for (const resolve of queue) {
+        resolve();
+      }
+    }
   }
 
   async readRuntime(runId: string): Promise<string> {

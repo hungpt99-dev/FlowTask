@@ -1,18 +1,31 @@
 import { type Executor, type ExecutorInput, type ExecutorResult } from "./executor.js";
-import { spawnWithStreaming } from "../utils/process.js";
+import { spawn } from "node:child_process";
 import { now } from "../utils/time.js";
 import { getShell, getShellCommandFlag } from "../utils/shell.js";
+import { getEventBus } from "../ui/event-bus.js";
+import { LineBuffer } from "../utils/stream-lines.js";
+import { SecretRedactor } from "../safety/secret-redactor.js";
+import type { LogManager } from "../core/log-manager.js";
 
 export class ShellExecutor implements Executor {
   name = "shell";
+  private logManager?: LogManager;
+
+  setLogManager(lm: LogManager): void {
+    this.logManager = lm;
+  }
 
   async execute(input: ExecutorInput): Promise<ExecutorResult> {
     const startedAt = now();
+    const eventBus = getEventBus();
+    const redactor = new SecretRedactor();
+    const runId = input.runId;
+    const taskId = input.task.id;
+    const executorName = "shell";
 
     const commands = input.task.validation?.commands;
     if (!commands || commands.length === 0) {
       const msg = `No shell commands defined for task: ${input.task.title}`;
-      console.log(msg);
       return {
         status: "done",
         exitCode: 0,
@@ -22,40 +35,128 @@ export class ShellExecutor implements Executor {
       };
     }
 
+    const writeLog = async (stream: string, text: string): Promise<void> => {
+      if (!this.logManager) return;
+      try {
+        await this.logManager.writeTaskLog(runId, taskId, `[${stream}] ${text}`);
+      } catch {
+        // non-critical
+      }
+    };
+
+    const command = commands.join(" && ");
+
+    eventBus.emit({
+      type: "executor_started",
+      runId,
+      taskId,
+      executor: executorName,
+      command: getShell(),
+      args: [getShellCommandFlag(), command],
+    });
+
     try {
-      const stdoutBuffer: string[] = [];
-      const stderrBuffer: string[] = [];
-
-      const command = commands.join(" && ");
-
-      const result = await spawnWithStreaming(getShell(), [getShellCommandFlag(), command], {
-        cwd: input.projectRoot,
-        env: input.env,
-        signal: input.signal,
-        callbacks: {
-          onStdout: (text) => {
-            process.stdout.write(text);
-            stdoutBuffer.push(text);
+      return await new Promise<ExecutorResult>((resolve) => {
+        const child = spawn(getShell(), [getShellCommandFlag(), command], {
+          cwd: input.projectRoot,
+          env: {
+            ...process.env,
+            ...input.env,
+            FLOWTASK_TASK_ID: taskId,
+            FLOWTASK_RUN_ID: runId,
           },
-          onStderr: (text) => {
-            process.stderr.write(text);
-            stderrBuffer.push(text);
-          },
-        },
+          stdio: ["pipe", "pipe", "pipe"],
+          signal: input.signal,
+          shell: false,
+        });
+
+        child.stdin?.end();
+
+        const stdoutLines: string[] = [];
+        const stderrLines: string[] = [];
+
+        const emitAndLog = (stream: "stdout" | "stderr", text: string): void => {
+          const safe = redactor.redact(text);
+          eventBus.emit({
+            type: "executor_output",
+            runId,
+            taskId,
+            executor: executorName,
+            stream,
+            text: safe,
+          });
+          writeLog(stream, safe);
+        };
+
+        if (child.stdout) {
+          const stdoutBuf = new LineBuffer((line) => {
+            stdoutLines.push(line);
+            emitAndLog("stdout", line);
+          });
+          child.stdout.on("data", (data: Buffer) => stdoutBuf.push(data));
+          child.stdout.on("end", () => stdoutBuf.flush());
+        }
+
+        if (child.stderr) {
+          const stderrBuf = new LineBuffer((line) => {
+            stderrLines.push(line);
+            emitAndLog("stderr", line);
+          });
+          child.stderr.on("data", (data: Buffer) => stderrBuf.push(data));
+          child.stderr.on("end", () => stderrBuf.flush());
+        }
+
+        child.on("close", (exitCode) => {
+          eventBus.emit({
+            type: "executor_exited",
+            runId,
+            taskId,
+            executor: executorName,
+            exitCode,
+          });
+
+          resolve({
+            status: exitCode === 0 ? "done" : "failed",
+            exitCode: exitCode ?? undefined,
+            output: stdoutLines.join("\n"),
+            error: stderrLines.join("\n") || undefined,
+            startedAt,
+            finishedAt: now(),
+          });
+        });
+
+        child.on("error", (err) => {
+          eventBus.emit({
+            type: "executor_failed",
+            runId,
+            taskId,
+            executor: executorName,
+            reason: err.message,
+          });
+
+          resolve({
+            status: "failed",
+            error: err.message,
+            startedAt,
+            finishedAt: now(),
+          });
+        });
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const isTimeout = message.includes("timeout") || message.includes("ETIMEDOUT");
+
+      eventBus.emit({
+        type: "executor_failed",
+        runId,
+        taskId,
+        executor: executorName,
+        reason: message,
       });
 
       return {
-        status: result.exitCode === 0 ? "done" : "failed",
-        exitCode: result.exitCode ?? undefined,
-        output: stdoutBuffer.join(""),
-        error: stderrBuffer.join("") || undefined,
-        startedAt,
-        finishedAt: now(),
-      };
-    } catch (err) {
-      return {
-        status: "failed",
-        error: err instanceof Error ? err.message : String(err),
+        status: isTimeout ? "timeout" : "failed",
+        error: message,
         startedAt,
         finishedAt: now(),
       };

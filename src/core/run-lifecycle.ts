@@ -25,6 +25,8 @@ import { getContextDir } from "../utils/paths.js";
 import { now } from "../utils/time.js";
 import path from "node:path";
 import picocolors from "picocolors";
+import { getEventBus } from "../ui/event-bus.js";
+import type { UiEvent } from "../ui/event-bus.js";
 
 export class RunLifecycle {
   private rootPath: string;
@@ -56,6 +58,7 @@ export class RunLifecycle {
     this.contextPackBuilder = new ContextPackBuilder();
     this.validationEngine = new ValidationEngine();
     this.executorRegistry = new ExecutorRegistry();
+    this.executorRegistry.setLogManager(this.logManager);
     this.gitService = new GitService();
     this.safetyChecker = new SafetyChecker();
     this.processManager = new ProcessManager();
@@ -242,61 +245,88 @@ export class RunLifecycle {
       return { run: { ...updatedRun, status: "planning" }, success: true };
     }
 
-    await this.gitService.takeBeforeSnapshot(this.rootPath, run.runId);
-
-    const runSuccess = await this.executeTasks(
-      run,
-      prompt,
-      rulesContext,
-      updatedRun,
-      tasksWithRunId,
-    );
-
-    await this.gitService.takeAfterSnapshot(this.rootPath, run.runId);
-
-    const shouldRunQuality = options?.quality ?? this.config.quality.enabledByDefault ?? false;
-    let qualityPassed = true;
-    if (runSuccess && shouldRunQuality) {
-      const qResult = await this.runQualityGate(run.runId, true, this.config.quality.commands);
-      if (qResult && qResult.status !== "passed") {
-        qualityPassed = false;
+    const eventBus = getEventBus();
+    const eventBusUnsubscribe = eventBus.subscribe(async (event: UiEvent) => {
+      if ("runId" in event && event.runId !== run.runId) return;
+      if (
+        event.type === "executor_started" ||
+        event.type === "executor_output" ||
+        event.type === "executor_exited" ||
+        event.type === "executor_failed"
+      ) {
+        try {
+          const storeEvent = {
+            type: event.type,
+            runId: event.runId ?? run.runId,
+            taskId: "taskId" in event ? event.taskId : undefined,
+            details: { ...event },
+          } as never;
+          await this.eventStore.appendToRun(run.runId, storeEvent);
+        } catch {
+          // persistence is non-critical
+        }
       }
-    }
-
-    const finalSuccess = runSuccess && qualityPassed;
-    const finalRun = finalSuccess
-      ? await this.runManager.updateRunStatus(run.runId, "completed")
-      : await this.runManager.updateRunStatus(run.runId, "failed");
-
-    const finalTasks = await this.runManager.loadTasks(run.runId);
-    const report = new ReportGenerator().generate(finalRun, finalTasks);
-    const reportMarkdown = new ReportGenerator().generateMarkdown(report);
-    await this.runManager.saveFinalReport(run.runId, reportMarkdown);
-
-    await this.eventStore.appendToRun(run.runId, {
-      type: runSuccess ? "run_completed" : "run_failed",
-      runId: run.runId,
-      message: `Run ${runSuccess ? "completed" : "failed"}`,
     });
 
-    if (runSuccess) {
-      console.log(picocolors.green(`\n✓ Run completed successfully`));
-    } else {
-      console.log(picocolors.red(`\n✗ Run failed`));
-    }
-    console.log(picocolors.dim(`Report: ${run.runId}/final-report.md\n`));
+    await this.gitService.takeBeforeSnapshot(this.rootPath, run.runId);
 
-    const state = await this.stateManager.loadProjectState();
-    if (state) {
-      await this.stateManager.saveProjectState({
-        ...state,
-        status: runSuccess ? "idle" : "has_failed_run",
-        activeRunId: runSuccess ? undefined : run.runId,
-        lastRunId: run.runId,
+    try {
+      const runSuccess = await this.executeTasks(
+        run,
+        prompt,
+        rulesContext,
+        updatedRun,
+        tasksWithRunId,
+      );
+
+      await this.gitService.takeAfterSnapshot(this.rootPath, run.runId);
+
+      const shouldRunQuality = options?.quality ?? this.config.quality.enabledByDefault ?? false;
+      let qualityPassed = true;
+      if (runSuccess && shouldRunQuality) {
+        const qResult = await this.runQualityGate(run.runId, true, this.config.quality.commands);
+        if (qResult && qResult.status !== "passed") {
+          qualityPassed = false;
+        }
+      }
+
+      const finalSuccess = runSuccess && qualityPassed;
+      const finalRun = finalSuccess
+        ? await this.runManager.updateRunStatus(run.runId, "completed")
+        : await this.runManager.updateRunStatus(run.runId, "failed");
+
+      const finalTasks = await this.runManager.loadTasks(run.runId);
+      const report = new ReportGenerator().generate(finalRun, finalTasks);
+      const reportMarkdown = new ReportGenerator().generateMarkdown(report);
+      await this.runManager.saveFinalReport(run.runId, reportMarkdown);
+
+      await this.eventStore.appendToRun(run.runId, {
+        type: runSuccess ? "run_completed" : "run_failed",
+        runId: run.runId,
+        message: `Run ${runSuccess ? "completed" : "failed"}`,
       });
-    }
 
-    return { run: finalRun, success: runSuccess };
+      if (runSuccess) {
+        console.log(picocolors.green(`\n✓ Run completed successfully`));
+      } else {
+        console.log(picocolors.red(`\n✗ Run failed`));
+      }
+      console.log(picocolors.dim(`Report: ${run.runId}/final-report.md\n`));
+
+      const state = await this.stateManager.loadProjectState();
+      if (state) {
+        await this.stateManager.saveProjectState({
+          ...state,
+          status: runSuccess ? "idle" : "has_failed_run",
+          activeRunId: runSuccess ? undefined : run.runId,
+          lastRunId: run.runId,
+        });
+      }
+
+      return { run: finalRun, success: runSuccess };
+    } finally {
+      eventBusUnsubscribe();
+    }
   }
 
   async continueRun(runId: string, _quality?: boolean): Promise<{ success: boolean }> {
@@ -563,6 +593,10 @@ export class RunLifecycle {
     console.log(picocolors.yellow(`  - flowtask inspect ${run.runId}`));
 
     return false;
+  }
+
+  async flushLogs(): Promise<void> {
+    await this.logManager.flush();
   }
 
   async runQualityGate(

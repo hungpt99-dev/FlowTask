@@ -3,12 +3,17 @@ import { spawn } from "node:child_process";
 import { now } from "../utils/time.js";
 import type { ExecutorEntry } from "../schemas/config.schema.js";
 import { ProcessManager } from "../core/process-manager.js";
+import { LogManager } from "../core/log-manager.js";
 import { buildCommandArgs } from "./build-command-args.js";
+import { getEventBus } from "../ui/event-bus.js";
+import { LineBuffer } from "../utils/stream-lines.js";
+import { SecretRedactor } from "../safety/secret-redactor.js";
 
 export class CommandExecutor implements Executor {
   name = "command";
   private configEntry: ExecutorEntry;
   private processManager?: ProcessManager;
+  private logManager?: LogManager;
 
   constructor(configEntry: ExecutorEntry) {
     this.configEntry = configEntry;
@@ -17,6 +22,10 @@ export class CommandExecutor implements Executor {
 
   setProcessManager(pm: ProcessManager): void {
     this.processManager = pm;
+  }
+
+  setLogManager(lm: LogManager): void {
+    this.logManager = lm;
   }
 
   async execute(input: ExecutorInput): Promise<ExecutorResult> {
@@ -43,8 +52,31 @@ export class CommandExecutor implements Executor {
       fileArg: this.configEntry.fileArg,
     });
 
-    const stdoutBuffer: string[] = [];
-    const stderrBuffer: string[] = [];
+    const eventBus = getEventBus();
+    const redactor = new SecretRedactor();
+    const runId = input.runId;
+    const taskId = input.task.id;
+    const executorName = this.name;
+
+    const redact = (text: string): string => redactor.redact(text);
+
+    const writeLog = async (stream: string, text: string): Promise<void> => {
+      if (!this.logManager) return;
+      try {
+        await this.logManager.writeTaskLog(runId, taskId, `[${stream}] ${text}`);
+      } catch {
+        // log writes are non-critical
+      }
+    };
+
+    eventBus.emit({
+      type: "executor_started",
+      runId,
+      taskId,
+      executor: executorName,
+      command: cmd,
+      args: finalArgs,
+    });
 
     try {
       return await new Promise<ExecutorResult>((resolve) => {
@@ -54,8 +86,8 @@ export class CommandExecutor implements Executor {
             ...process.env,
             ...input.env,
             FLOWTASK_CONTEXT_PACK: input.contextPackContent,
-            FLOWTASK_TASK_ID: input.task.id,
-            FLOWTASK_RUN_ID: input.runId,
+            FLOWTASK_TASK_ID: taskId,
+            FLOWTASK_RUN_ID: runId,
           },
           stdio: ["pipe", "pipe", "pipe"],
           signal: input.signal,
@@ -66,10 +98,10 @@ export class CommandExecutor implements Executor {
         if (this.processManager && child.pid) {
           this.processManager
             .save(input.projectRoot, {
-              runId: input.runId,
-              taskId: input.task.id,
+              runId,
+              taskId,
               pid: child.pid,
-              executor: this.name,
+              executor: executorName,
               command: cmd,
               args: finalArgs,
               startedAt,
@@ -85,27 +117,58 @@ export class CommandExecutor implements Executor {
           child.stdin?.end();
         }
 
-        child.stdout?.on("data", (data: Buffer) => {
-          const text = data.toString();
-          process.stdout.write(text);
-          stdoutBuffer.push(text);
-        });
+        const stdoutLines: string[] = [];
+        const stderrLines: string[] = [];
 
-        child.stderr?.on("data", (data: Buffer) => {
-          const text = data.toString();
-          process.stderr.write(text);
-          stderrBuffer.push(text);
-        });
+        const emitAndLog = (stream: "stdout" | "stderr", text: string): void => {
+          const safe = redact(text);
+          eventBus.emit({
+            type: "executor_output",
+            runId,
+            taskId,
+            executor: executorName,
+            stream,
+            text: safe,
+          });
+          writeLog(stream, safe);
+        };
 
-        child.on("close", (exitCode) => {
+        if (child.stdout) {
+          const stdoutBuf = new LineBuffer((line) => {
+            stdoutLines.push(line);
+            emitAndLog("stdout", line);
+          });
+          child.stdout.on("data", (data: Buffer) => stdoutBuf.push(data));
+          child.stdout.on("end", () => stdoutBuf.flush());
+        }
+
+        if (child.stderr) {
+          const stderrBuf = new LineBuffer((line) => {
+            stderrLines.push(line);
+            emitAndLog("stderr", line);
+          });
+          child.stderr.on("data", (data: Buffer) => stderrBuf.push(data));
+          child.stderr.on("end", () => stderrBuf.flush());
+        }
+
+        child.on("close", (exitCode, _signal) => {
           if (this.processManager) {
-            this.processManager.clear(input.projectRoot, input.runId).catch(() => {});
+            this.processManager.clear(input.projectRoot, runId).catch(() => {});
           }
+
+          eventBus.emit({
+            type: "executor_exited",
+            runId,
+            taskId,
+            executor: executorName,
+            exitCode,
+          });
+
           resolve({
             status: exitCode === 0 ? "done" : "failed",
             exitCode: exitCode ?? undefined,
-            output: stdoutBuffer.join(""),
-            error: stderrBuffer.join("") || undefined,
+            output: stdoutLines.join("\n"),
+            error: stderrLines.join("\n") || undefined,
             startedAt,
             finishedAt: now(),
           });
@@ -113,8 +176,17 @@ export class CommandExecutor implements Executor {
 
         child.on("error", (err) => {
           if (this.processManager) {
-            this.processManager.clear(input.projectRoot, input.runId).catch(() => {});
+            this.processManager.clear(input.projectRoot, runId).catch(() => {});
           }
+
+          eventBus.emit({
+            type: "executor_failed",
+            runId,
+            taskId,
+            executor: executorName,
+            reason: err.message,
+          });
+
           resolve({
             status: "failed",
             error: err.message,
@@ -126,6 +198,15 @@ export class CommandExecutor implements Executor {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const isTimeout = message.includes("timeout") || message.includes("ETIMEDOUT");
+
+      eventBus.emit({
+        type: "executor_failed",
+        runId,
+        taskId,
+        executor: executorName,
+        reason: message,
+      });
+
       return {
         status: isTimeout ? "timeout" : "failed",
         error: message,

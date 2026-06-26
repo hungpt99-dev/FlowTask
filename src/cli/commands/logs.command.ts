@@ -2,7 +2,14 @@ import { ProjectManager } from "../../core/project-manager.js";
 import { LogManager } from "../../core/log-manager.js";
 import picocolors from "picocolors";
 import fs from "node:fs";
-import { runtimeLogPath, validationLogPath, taskLogPath } from "../../utils/paths.js";
+import {
+  runtimeLogPath,
+  validationLogPath,
+  taskLogPath,
+  eventsJsonlPath,
+} from "../../utils/paths.js";
+import { getEventBus } from "../../ui/event-bus.js";
+import type { UiEvent } from "../../ui/event-bus.js";
 
 export async function logsCommand(options: {
   follow?: boolean;
@@ -63,6 +70,11 @@ export async function logsCommand(options: {
     return;
   }
 
+  if (options.follow) {
+    await followEventsJsonl(rootPath, runId, tailLines);
+    return;
+  }
+
   const logFiles = await logManager.listLogFiles(runId);
   if (logFiles.length === 0) {
     console.log(picocolors.yellow(`No log files found for run ${runId}`));
@@ -99,6 +111,100 @@ export async function logsCommand(options: {
     }
   }
   console.log("");
+}
+
+async function followEventsJsonl(
+  rootPath: string,
+  runId: string,
+  tailLines: number,
+): Promise<void> {
+  const eventsPath = eventsJsonlPath(rootPath, runId);
+
+  // Try EventBus for active run first
+  const eventBus = getEventBus();
+  const unsubscribe = eventBus.subscribe((event: UiEvent) => {
+    if ("runId" in event && event.runId !== runId) return;
+    if (event.type === "executor_output") {
+      process.stdout.write(
+        `  [${event.taskId}][${event.executor}][${event.stream}] ${event.text}\n`,
+      );
+    } else if (event.type === "executor_started") {
+      process.stdout.write(`  [${event.taskId}][${event.executor}] started\n`);
+    } else if (event.type === "executor_exited") {
+      process.stdout.write(
+        `  [${event.taskId}][${event.executor}] exited (code ${event.exitCode})\n`,
+      );
+    } else if (event.type === "executor_failed") {
+      process.stdout.write(`  [${event.taskId}][${event.executor}] failed: ${event.reason}\n`);
+    }
+  });
+
+  // Also tail events.jsonl for persistence
+  try {
+    const content = await fs.promises.readFile(eventsPath, "utf-8");
+    const lines = content.trim().split("\n");
+    const tail = lines.slice(-tailLines);
+    for (const line of tail) {
+      try {
+        const event = JSON.parse(line) as UiEvent;
+        if (event.type === "executor_output") {
+          process.stdout.write(
+            `  [${event.taskId!}][${event.executor!}][${event.stream!}] ${event.text}\n`,
+          );
+        }
+      } catch {
+        process.stdout.write(`  ${line}\n`);
+      }
+    }
+  } catch {
+    // file doesn't exist yet
+  }
+
+  let currentSize = 0;
+  try {
+    const stat = await fs.promises.stat(eventsPath);
+    currentSize = stat.size;
+  } catch {
+    currentSize = 0;
+  }
+
+  console.log(picocolors.dim(`\n  Following logs for run ${runId}... (Ctrl+C to stop)\n`));
+
+  const timer = setInterval(async () => {
+    try {
+      const newStat = await fs.promises.stat(eventsPath);
+      if (newStat.size > currentSize) {
+        const fd = await fs.promises.open(eventsPath, "r");
+        const buf = Buffer.alloc(newStat.size - currentSize);
+        await fd.read(buf, 0, buf.length, currentSize);
+        await fd.close();
+        const content = buf.toString();
+        for (const line of content.split("\n")) {
+          if (!line.trim()) continue;
+          try {
+            const event = JSON.parse(line) as UiEvent;
+            if (event.type === "executor_output") {
+              process.stdout.write(
+                `  [${event.taskId!}][${event.executor!}][${event.stream!}] ${event.text}\n`,
+              );
+            }
+          } catch {
+            process.stdout.write(`  ${line}\n`);
+          }
+        }
+        currentSize = newStat.size;
+      }
+    } catch {
+      clearInterval(timer);
+      unsubscribe();
+    }
+  }, 500);
+
+  process.on("SIGINT", () => {
+    clearInterval(timer);
+    unsubscribe();
+    console.log(picocolors.dim("\n  Log follow stopped."));
+  });
 }
 
 async function readLastLines(filePath: string, count: number): Promise<string> {
