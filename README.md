@@ -117,8 +117,9 @@ flowtask inspect     # Inspect a run's details, logs, and artifacts
 flowtask stop        # Stop the current running task
 flowtask cancel      # Cancel a run
 flowtask clean       # Clean up old runs
-flowtask doctor      # Check system health and project configuration
-flowtask setup       # Configure AI provider interactively
+flowtask doctor                   # Check system health and project configuration
+flowtask doctor validation        # Check validation setup and Vitest configuration
+flowtask setup                    # Configure AI provider interactively
 flowtask providers   # Manage AI providers (list, test, configure, remove)
 flowtask rules       # Manage FlowTask rule sources
 ```
@@ -551,6 +552,83 @@ cat .flowtask/runs/<runId>/outputs/internal-ai-planner-raw-attempt-1.txt
 | `simple` | Always use the fixed 7-task template. Never calls AI planner.               |
 | `ai`     | Use internal AI planner. Fails if output is invalid after repair retry.     |
 | `auto`   | Try internal AI planner. Falls back to simple planner if invalid. (Default) |
+
+## Memory-Safe Validation
+
+FlowTask runs validation in memory-safe mode by default.
+
+For Vitest projects, FlowTask avoids spawning many workers at once and runs validation serially.
+
+### Default Validation Behavior
+
+- **Serial execution**: Validation commands run one at a time (lint → typecheck → test), never in parallel
+- **Process tree kill**: On timeout or cancel, FlowTask kills the entire process tree (including Vitest worker processes)
+- **Timeout protection**: Each validation command has a configurable timeout (default: 5 minutes)
+- **Memory-safe output**: Output is streamed line by line; only the last 500 lines are kept in memory
+- **Command deduplication**: The same validation command is not run twice in one run
+- **Resource guard**: Heavy test commands (vitest, jest, playwright) are detected and constrained
+
+### Vitest Worker Limits
+
+FlowKit modifies Vitest commands to use worker limits in safe mode:
+
+```bash
+# Generated safe command
+pnpm vitest run --maxWorkers=1
+```
+
+### Validation Profiles
+
+Configure validation behavior in `.flowtask/config.json`:
+
+```json
+{
+  "validation": {
+    "profile": "safe",
+    "concurrency": 1,
+    "timeoutMs": 300000,
+    "dedupeCommands": true,
+    "resourceGuard": true,
+    "vitest": {
+      "enabled": true,
+      "maxWorkers": 1,
+      "runMode": true
+    }
+  }
+}
+```
+
+| Profile  | Behavior                                               |
+| -------- | ------------------------------------------------------ |
+| `quick`  | Lightweight checks only                                |
+| `safe`   | Serial checks with memory-safe worker limits (default) |
+| `full`   | Full validation with timeout and process control       |
+| `custom` | User-defined commands only                             |
+
+### Doctor Validation Check
+
+```bash
+flowtask doctor validation
+```
+
+Shows your current validation setup, detects risky Vitest configurations, and suggests safe alternatives.
+
+### Diagnostic Messages
+
+If validation times out or is killed:
+
+```text
+Validation was stopped because it exceeded safe runtime/resource limits.
+
+Command: pnpm test
+
+Likely cause: Vitest spawned too many workers.
+
+Suggested fixes:
+  1. Use memory-safe Vitest command: pnpm vitest run --maxWorkers=1
+  2. Configure FlowTask: validation.profile = "safe"
+  3. Run a narrower test target: pnpm vitest run path/to/file.test.ts --maxWorkers=1
+```
 
 ## Known Limitations
 

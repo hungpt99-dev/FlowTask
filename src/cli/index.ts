@@ -11,7 +11,11 @@ import { inspectCommand } from "./commands/inspect.command.js";
 import { stopCommand } from "./commands/stop.command.js";
 import { cancelCommand } from "./commands/cancel.command.js";
 import { cleanCommand } from "./commands/clean.command.js";
-import { doctorCommand, doctorProvidersCommand } from "./commands/doctor.command.js";
+import {
+  doctorCommand,
+  doctorProvidersCommand,
+  doctorValidationCommand,
+} from "./commands/doctor.command.js";
 import { rulesCommand } from "./commands/rules.command.js";
 import {
   listProvidersCommand,
@@ -164,7 +168,11 @@ program
   .command("doctor")
   .description("Check system health and project configuration")
   .option("--providers", "Only check AI provider status")
-  .action((opts: { providers?: boolean }) => {
+  .argument("[topic]", "Topic to check: validation", undefined)
+  .action((topic: string | undefined, opts: { providers?: boolean }) => {
+    if (topic === "validation") {
+      return doctorValidationCommand();
+    }
     if (opts.providers) {
       return doctorProvidersCommand();
     }

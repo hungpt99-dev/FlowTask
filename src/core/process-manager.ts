@@ -3,6 +3,7 @@ import path from "node:path";
 import { ensureDir } from "../utils/fs.js";
 import { getRunDir } from "../utils/paths.js";
 import { EventStore } from "./event-store.js";
+import { killProcessTree, isAlive, waitForExit } from "../utils/process-tree-kill.js";
 
 export interface ProcessMetadata {
   runId: string;
@@ -65,12 +66,7 @@ export class ProcessManager {
   }
 
   isAlive(pid: number): boolean {
-    try {
-      process.kill(pid, 0);
-      return true;
-    } catch {
-      return false;
-    }
+    return isAlive(pid);
   }
 
   async stop(rootPath: string, runId: string, options?: StopOptions): Promise<StopResult> {
@@ -93,14 +89,14 @@ export class ProcessManager {
     }
 
     try {
-      process.kill(meta.pid, "SIGTERM");
+      killProcessTree(meta.pid, "SIGTERM");
       await this.updateStatus(rootPath, runId, "stopped");
-      await this.waitForExit(meta.pid, gracefulMs);
+      await waitForExit(meta.pid, gracefulMs);
       await this.clear(rootPath, runId);
       return { success: true, finalStatus: "stopped" };
     } catch {
       try {
-        process.kill(meta.pid, "SIGKILL");
+        killProcessTree(meta.pid, "SIGKILL");
         await this.updateStatus(rootPath, runId, "killed");
         await this.clear(rootPath, runId);
         return { success: true, finalStatus: "killed" };
@@ -143,18 +139,6 @@ export class ProcessManager {
     if (meta) {
       meta.status = status;
       await this.save(rootPath, meta);
-    }
-  }
-
-  private async waitForExit(pid: number, timeoutMs: number): Promise<void> {
-    const start = Date.now();
-    while (Date.now() - start < timeoutMs) {
-      try {
-        process.kill(pid, 0);
-        await new Promise((r) => setTimeout(r, 100));
-      } catch {
-        return;
-      }
     }
   }
 }

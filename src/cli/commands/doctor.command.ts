@@ -4,6 +4,8 @@ import { ProjectManager } from "../../core/project-manager.js";
 import { ConfigLoader } from "../../config/config-loader.js";
 import { spawnWithPromise } from "../../utils/process.js";
 import { ProviderRegistry } from "../../ai/provider-registry.js";
+import { ResourceGuard } from "../../validation/resource-guard.js";
+import { readJsonFile } from "../../utils/fs.js";
 import path from "node:path";
 
 export async function doctorCommand(options?: { providers?: boolean }): Promise<void> {
@@ -193,6 +195,62 @@ export async function doctorCommand(options?: { providers?: boolean }): Promise<
     }
   }
 
+  console.log(picocolors.cyan("\nValidation"));
+  console.log(picocolors.dim("─".repeat(60)));
+  const vc = config.validation ?? {};
+  const profile = vc.profile ?? "safe";
+  console.log(`  Profile: ${picocolors.bold(profile)}`);
+  console.log(`  Concurrency: ${vc.concurrency ?? 1}`);
+  console.log(`  Timeout: ${(vc.timeoutMs ?? 300000) / 1000}s`);
+  console.log(
+    `  ${vc.dedupeCommands !== false ? picocolors.green("✓") : picocolors.yellow("!")} Command deduplication: ${vc.dedupeCommands !== false ? "enabled" : "disabled"}`,
+  );
+  console.log(
+    `  ${vc.resourceGuard !== false ? picocolors.green("✓") : picocolors.yellow("!")} Resource guard: ${vc.resourceGuard !== false ? "enabled" : "disabled"}`,
+  );
+  console.log(`  ${picocolors.green("✓")} Process tree kill: enabled`);
+
+  const qualityCommands = config.quality?.commands ?? [];
+  const resourceGuardCheck = new ResourceGuard(config);
+  for (const cmd of qualityCommands) {
+    const warnings = resourceGuardCheck.inspect(cmd);
+    if (warnings.length > 0) {
+      for (const w of warnings) {
+        const icon =
+          w.severity === "error"
+            ? picocolors.red("✗")
+            : w.severity === "warning"
+              ? picocolors.yellow("!")
+              : picocolors.dim("i");
+        console.log(`  ${icon} ${w.message}`);
+        if (w.suggestion) {
+          console.log(`    ${picocolors.dim(`suggestion: ${w.suggestion}`)}`);
+        }
+      }
+    } else {
+      console.log(`  ${picocolors.green("✓")} ${cmd}`);
+    }
+  }
+
+  const vitestConfig = vc.vitest ?? {};
+  console.log(picocolors.cyan("\nVitest"));
+  console.log(picocolors.dim("─".repeat(60)));
+
+  const hasVitest = await detectVitest(rootPath);
+  if (hasVitest) {
+    console.log(`  ${picocolors.green("✓")} detected`);
+    const maxWorkers = vitestConfig.maxWorkers ?? 1;
+    if (maxWorkers <= 1) {
+      console.log(`  ${picocolors.green("✓")} safe worker limit configured: ${maxWorkers}`);
+    } else {
+      console.log(
+        `  ${picocolors.yellow("!")} worker limit: ${maxWorkers} — consider reducing to 1`,
+      );
+    }
+  } else {
+    console.log(`  ${picocolors.dim("i")} vitest not detected in this project`);
+  }
+
   if (!runProviderChecksOnly) {
     const executorNames = Object.keys(config.executors ?? {});
 
@@ -238,6 +296,82 @@ export async function doctorCommand(options?: { providers?: boolean }): Promise<
   }
 
   console.log("");
+}
+
+export async function doctorValidationCommand(): Promise<void> {
+  const rootPath = process.cwd();
+  const loader = new ConfigLoader();
+  const config = await loader.load(rootPath);
+  const resourceGuard = new ResourceGuard(config);
+
+  console.log(picocolors.cyan("\nFlowTask Doctor — Validation"));
+  console.log(picocolors.dim("─".repeat(60)));
+  console.log("");
+
+  const vc = config.validation ?? {};
+  const profile = vc.profile ?? "safe";
+
+  console.log(`  Profile: ${picocolors.bold(profile)}`);
+  console.log(
+    `  ${vc.dedupeCommands !== false ? picocolors.green("✓") : picocolors.yellow("!")} Deduplication: ${vc.dedupeCommands !== false ? "enabled" : "disabled"}`,
+  );
+  console.log(
+    `  ${vc.resourceGuard !== false ? picocolors.green("✓") : picocolors.yellow("!")} Resource guard: ${vc.resourceGuard !== false ? "enabled" : "disabled"}`,
+  );
+  console.log(`  ${picocolors.green("✓")} Process tree kill: enabled`);
+  console.log(`  Concurrency: ${vc.concurrency ?? 1}`);
+  console.log(`  Timeout: ${(vc.timeoutMs ?? 300000) / 1000}s`);
+
+  const qualityCommands = config.quality?.commands ?? [];
+  if (qualityCommands.length > 0) {
+    console.log(picocolors.cyan("\nQuality Commands"));
+    console.log(picocolors.dim("─".repeat(60)));
+    for (const cmd of qualityCommands) {
+      const warnings = resourceGuard.inspect(cmd);
+      if (warnings.length > 0) {
+        for (const w of warnings) {
+          const icon = w.severity === "warning" ? picocolors.yellow("!") : picocolors.dim("i");
+          console.log(
+            `  ${icon} ${w.severity === "warning" ? "unconstrained" : "safe"} — ${picocolors.dim(cmd)}`,
+          );
+          if (w.suggestion) {
+            console.log(`    ${picocolors.dim(`suggestion: ${w.suggestion}`)}`);
+          }
+        }
+      } else {
+        console.log(`  ${picocolors.green("✓")} ${picocolors.dim(cmd)}`);
+      }
+    }
+  }
+
+  const hasVitest = await detectVitest(rootPath);
+  if (hasVitest) {
+    const maxWorkers = vc.vitest?.maxWorkers ?? 1;
+    console.log(picocolors.cyan("\nVitest"));
+    console.log(picocolors.dim("─".repeat(60)));
+    console.log(`  ${picocolors.green("✓")} detected`);
+    if (maxWorkers <= 1) {
+      console.log(`  ${picocolors.green("✓")} safe worker limit: ${maxWorkers}`);
+    } else {
+      console.log(`  ${picocolors.yellow("!")} worker limit: ${maxWorkers} — consider 1`);
+    }
+  }
+
+  console.log("");
+}
+
+async function detectVitest(rootPath: string): Promise<boolean> {
+  try {
+    const pkgPath = path.join(rootPath, "package.json");
+    const pkg = await readJsonFile<Record<string, unknown>>(pkgPath);
+    const deps = {
+      ...(pkg.dependencies as Record<string, string> | undefined),
+      ...(pkg.devDependencies as Record<string, string> | undefined),
+    };
+    return deps?.vitest !== undefined;
+  } catch {
+    return false;
+  }
 }
 
 export async function doctorProvidersCommand(): Promise<void> {

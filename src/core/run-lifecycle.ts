@@ -57,7 +57,7 @@ export class RunLifecycle {
     this.ruleLoader = new RuleLoader();
     this.planner = planner;
     this.contextPackBuilder = new ContextPackBuilder();
-    this.validationEngine = new ValidationEngine();
+    this.validationEngine = new ValidationEngine(config);
     this.executorRegistry = new ExecutorRegistry();
     this.executorRegistry.setLogManager(this.logManager);
     this.gitService = new GitService();
@@ -680,7 +680,7 @@ export class RunLifecycle {
     }
 
     console.log(picocolors.cyan("\n  Running quality gate..."));
-    const gate = new QualityGate();
+    const gate = new QualityGate(this.config);
     const result = await gate.run(this.rootPath, runId, commands);
 
     await this.eventStore.appendToRun(runId, {

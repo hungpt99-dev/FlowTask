@@ -113,6 +113,24 @@ export function generateDefaultConfig(): FlowTaskConfig {
       gracefulStopTimeoutMs: 5000,
       forceKillTimeoutMs: 10000,
     },
+    validation: {
+      profile: "safe",
+      concurrency: 1,
+      timeoutMs: 300000,
+      killGraceMs: 5000,
+      dedupeCommands: true,
+      resourceGuard: true,
+      commands: [],
+      vitest: {
+        enabled: true,
+        maxWorkers: 1,
+        runMode: true,
+      },
+    },
+    logging: {
+      maxInMemoryLines: 500,
+      maxLineLength: 4000,
+    },
     executors: {
       shell: { type: "shell" as const, args: [], inputMode: "argument", timeoutMs: 1800000 },
       opencode: {

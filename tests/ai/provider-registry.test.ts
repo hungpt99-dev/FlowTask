@@ -15,6 +15,17 @@ function createConfig(overrides?: Partial<FlowTaskConfig>): FlowTaskConfig {
     limits: { maxRunMinutes: 120, maxTaskMinutes: 30, maxRetries: 2, maxLogSizeMb: 20 },
     projectMode: "development",
     process: { gracefulStopTimeoutMs: 5000, forceKillTimeoutMs: 10000 },
+    validation: {
+      profile: "safe",
+      concurrency: 1,
+      timeoutMs: 300000,
+      killGraceMs: 5000,
+      dedupeCommands: true,
+      resourceGuard: true,
+      commands: [],
+      vitest: { enabled: true, maxWorkers: 1, runMode: true },
+    },
+    logging: { maxInMemoryLines: 500, maxLineLength: 4000 },
     planner: {
       default: "auto",
       type: "internal-ai",

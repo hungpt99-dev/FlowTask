@@ -1,59 +1,54 @@
 import { type QualityCommandResult, type QualityGateResult } from "../schemas/quality.schema.js";
-import { spawnWithPromise } from "../utils/process.js";
-import { getShell, getShellCommandFlag } from "../utils/shell.js";
+import type { FlowTaskConfig } from "../schemas/config.schema.js";
 import { now } from "../utils/time.js";
-import { atomicWriteJsonFile, ensureDir, appendToFile } from "../utils/fs.js";
+import { atomicWriteJsonFile, ensureDir } from "../utils/fs.js";
 import { getOutputsDir, getLogsDir } from "../utils/paths.js";
+import { ValidationRunner } from "../validation/validation-runner.js";
 import path from "node:path";
 
 export class QualityGate {
+  private validationRunner: ValidationRunner;
+  private config: FlowTaskConfig;
+
+  constructor(config: FlowTaskConfig) {
+    this.config = config;
+    this.validationRunner = new ValidationRunner(config);
+  }
+
   async run(
     rootPath: string,
     runId: string,
     commands: string[],
-    timeoutMs = 120000,
+    _timeoutMs = 120000,
   ): Promise<QualityGateResult> {
     const startedAt = now();
     const results: QualityCommandResult[] = [];
     const outputsDir = getOutputsDir(rootPath, runId);
-    const logsDir = getLogsDir(rootPath, runId);
     await ensureDir(outputsDir);
-    await ensureDir(logsDir);
 
-    for (const command of commands) {
-      const cmdStartedAt = now();
-      try {
-        const result = await spawnWithPromise(getShell(), [getShellCommandFlag(), command], {
-          cwd: rootPath,
-          timeout: timeoutMs,
-        });
+    const logDir = getLogsDir(rootPath, runId);
+    await ensureDir(logDir);
 
-        const cmdResult: QualityCommandResult = {
-          command,
-          status: result.exitCode === 0 ? "passed" : "failed",
-          exitCode: result.exitCode ?? undefined,
-          startedAt: cmdStartedAt,
-          finishedAt: now(),
-          output: result.stdout.slice(0, 2000),
-          error: result.stderr.slice(0, 2000) || undefined,
-        };
-        results.push(cmdResult);
+    const validationResults = await this.validationRunner.runValidation({
+      commands,
+      cwd: rootPath,
+      runId,
+    });
 
-        const logLine = `[${cmdStartedAt}] COMMAND: ${command}\nEXIT: ${result.exitCode}\nSTDOUT:\n${result.stdout.slice(0, 2000)}\nSTDERR:\n${result.stderr.slice(0, 500)}\n---\n`;
-        await appendToFile(path.join(logsDir, "quality.log"), logLine);
-      } catch (err) {
-        const isTimeout =
-          err instanceof Error &&
-          (err.message.includes("timeout") || err.message.includes("ETIMEDOUT"));
-        results.push({
-          command,
-          status: isTimeout ? "timeout" : "failed",
-          startedAt: cmdStartedAt,
-          finishedAt: now(),
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
+    for (const vr of validationResults) {
+      const cmdResult: QualityCommandResult = {
+        command: vr.command,
+        status: mapStatus(vr.status),
+        exitCode: vr.exitCode,
+        startedAt: vr.startedAt,
+        finishedAt: vr.finishedAt,
+        output: vr.output,
+        error: vr.error,
+      };
+      results.push(cmdResult);
     }
+
+    this.validationRunner.clearDedupeCache();
 
     const finishedAt = now();
     const allPassed = results.every((r) => r.status === "passed");
@@ -67,4 +62,18 @@ export class QualityGate {
     await atomicWriteJsonFile(path.join(outputsDir, "quality-results.json"), gateResult);
     return gateResult;
   }
+
+  cancel(runId: string): void {
+    this.validationRunner.cancel(runId);
+  }
+
+  cancelAll(): void {
+    this.validationRunner.cancelAll();
+  }
+}
+
+function mapStatus(s: string): QualityCommandResult["status"] {
+  if (s === "passed") return "passed";
+  if (s === "timeout") return "timeout";
+  return "failed";
 }

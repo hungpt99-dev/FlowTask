@@ -1,6 +1,7 @@
 import type { ValidationResult, ValidationCheck } from "../schemas/validation.schema.js";
 import type { ExecutorResult } from "../executor/executor.js";
 import type { Task } from "../schemas/task.schema.js";
+import type { FlowTaskConfig } from "../schemas/config.schema.js";
 import { ProcessValidator } from "./process-validator.js";
 import { FileValidator } from "./file-validator.js";
 import { CommandValidator } from "./command-validator.js";
@@ -17,10 +18,10 @@ export class ValidationEngine {
   private fileValidator: FileValidator;
   private commandValidator: CommandValidator;
 
-  constructor() {
+  constructor(config?: FlowTaskConfig) {
     this.processValidator = new ProcessValidator();
     this.fileValidator = new FileValidator();
-    this.commandValidator = new CommandValidator();
+    this.commandValidator = new CommandValidator(config);
   }
 
   async validateTask(input: ValidateTaskInput): Promise<ValidationResult> {

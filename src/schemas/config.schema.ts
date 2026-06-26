@@ -62,6 +62,30 @@ export const ProcessConfigSchema = z.object({
   forceKillTimeoutMs: z.number().int().positive().default(10000),
 });
 
+export const VitestConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  maxWorkers: z.number().int().min(1).default(1),
+  runMode: z.boolean().default(true),
+});
+
+export const ValidationProfileSchema = z.enum(["quick", "safe", "full", "custom"]);
+
+export const ValidationConfigSchema = z.object({
+  profile: ValidationProfileSchema.default("safe"),
+  concurrency: z.number().int().min(1).default(1),
+  timeoutMs: z.number().int().positive().default(300000),
+  killGraceMs: z.number().int().positive().default(5000),
+  dedupeCommands: z.boolean().default(true),
+  resourceGuard: z.boolean().default(true),
+  commands: z.array(z.string()).default([]),
+  vitest: VitestConfigSchema.default({}),
+});
+
+export const LoggingConfigSchema = z.object({
+  maxInMemoryLines: z.number().int().positive().default(500),
+  maxLineLength: z.number().int().positive().default(4000),
+});
+
 export const ProjectModeSchema = z.enum(["development", "writing", "research", "general"]);
 
 export const FlowTaskConfigSchema = z.object({
@@ -74,6 +98,8 @@ export const FlowTaskConfigSchema = z.object({
   rules: RuleSourceConfigSchema.default({}),
   approval: ApprovalConfigSchema.default({}),
   quality: QualityConfigSchema.default({}),
+  validation: ValidationConfigSchema.default({}),
+  logging: LoggingConfigSchema.default({}),
   limits: LimitsConfigSchema.default({}),
   planner: PlannerConfigSchema.default({
     default: "auto",
