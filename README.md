@@ -213,6 +213,108 @@ Prompt → Load Config → Load Rules → Create Run → Generate Tasks
 
 FlowTask orchestrates; AI CLI tools execute the work.
 
+## AI CLI Executor Configuration
+
+Executors are configured in `.flowtask/config.json` under the `executors` key. Each executor specifies a command, arguments, and how input is delivered.
+
+### Input Modes
+
+| Mode       | How Context Is Passed                | Best For                        |
+| ---------- | ------------------------------------ | ------------------------------- |
+| `stdin`    | Written to the process stdin         | opencode, claude, codex, gemini |
+| `argument` | Appended as the final CLI argument   | aider (`--message`)             |
+| `file`     | Path written via `--file <path>` arg | Custom tools needing file input |
+
+### Default Presets
+
+```json
+{
+  "opencode": {
+    "type": "command",
+    "command": "opencode",
+    "args": ["run"],
+    "inputMode": "stdin",
+    "timeoutMs": 1800000
+  },
+  "claude": {
+    "type": "command",
+    "command": "claude",
+    "args": [],
+    "inputMode": "stdin",
+    "timeoutMs": 1800000
+  },
+  "codex": {
+    "type": "command",
+    "command": "codex",
+    "args": [],
+    "inputMode": "stdin",
+    "timeoutMs": 1800000
+  },
+  "gemini": {
+    "type": "command",
+    "command": "gemini",
+    "args": [],
+    "inputMode": "stdin",
+    "timeoutMs": 1800000
+  },
+  "aider": {
+    "type": "command",
+    "command": "aider",
+    "args": ["--message"],
+    "inputMode": "argument",
+    "timeoutMs": 1800000
+  }
+}
+```
+
+### Running with a Specific Executor
+
+```bash
+flowtask run "update readme" --executor opencode
+flowtask run "update readme" --executor claude
+flowtask run "update readme" --executor codex
+flowtask run "update readme" --executor shell
+```
+
+### Check Executor Availability
+
+```bash
+flowtask doctor
+```
+
+Shows all configured executors and whether their CLI binaries are installed.
+
+### Planner Modes with AI Executor
+
+```bash
+flowtask run "update readme" --planner auto --executor opencode   # AI planner, fallback on failure
+flowtask run "update readme" --planner ai --executor opencode     # AI planner only, fail if unavailable
+flowtask run "update readme" --planner simple --executor shell    # Skip AI planner entirely
+```
+
+## Troubleshooting
+
+### "README.md: command not found" / "Permission denied"
+
+If you see errors like:
+
+```text
+README.md: command not found
+zod: command not found
+path.join: command not found
+docs/IDEA.MD: Permission denied
+```
+
+This means the context pack (which contains markdown text) is being executed as shell commands. This was a known bug in the command executor — it has been fixed.
+
+**The fix:** The `CommandExecutor` now uses `spawn(command, args, { shell: false })` and passes context through stdin, argument, or file mode — never through the shell. The `AiPlanner` was also fixed to use direct `spawn` instead of building a shell command string.
+
+If you still see these errors after updating FlowTask, check your `.flowtask/config.json`:
+
+- Ensure each executor uses `"command"` + `"args"` separately (not `"command": "opencode run"`)
+- Set `"inputMode": "stdin"` for most AI CLI tools
+- Run `flowtask doctor` to verify executor configurations
+
 ## Known Limitations
 
 - **No web UI** — CLI only. A local dashboard is planned for the future.

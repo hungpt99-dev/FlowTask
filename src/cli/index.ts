@@ -128,4 +128,5 @@ program
   .argument("[path]", "Path to rule file (for add action)")
   .action(rulesCommand);
 
-program.parse(process.argv);
+const userArgs = process.argv.slice(2).filter((a) => a !== "--");
+program.parse(userArgs, { from: "user" });

@@ -84,38 +84,39 @@ export async function doctorCommand(): Promise<void> {
   console.log(picocolors.cyan("\nConfigured Executors"));
   console.log(picocolors.dim("─".repeat(60)));
 
-  const header = `${"Name".padEnd(14)}${"Type".padEnd(10)}${"Available".padEnd(12)}${"Input Mode".padEnd(14)}${"Timeout"}`;
+  const header = `${"Name".padEnd(12)}${"Type".padEnd(8)}${"Available".padEnd(10)}${"Input Mode".padEnd(12)}${"Args".padEnd(20)}${"Timeout"}`;
   console.log(`  ${picocolors.bold(header)}`);
-  console.log(picocolors.dim(`  ${"─".repeat(60)}`));
+  console.log(picocolors.dim(`  ${"─".repeat(72)}`));
 
   for (const name of executorNames) {
     const entry = config.executors[name]!;
-    const inputMode = entry.inputMode ?? "argument";
+    const inputMode = entry.inputMode ?? "stdin";
     const timeout = entry.timeoutMs ? `${entry.timeoutMs}ms` : "-";
+    const argsDisplay = (entry.args ?? []).join(" ") || "-";
 
     if (entry.type === "shell") {
       const avail = picocolors.green("yes");
       console.log(
-        `  ${name.padEnd(14)}${"shell".padEnd(10)}${avail.padEnd(12)}${"-".padEnd(14)}${timeout}`,
+        `  ${name.padEnd(12)}${"shell".padEnd(8)}${avail.padEnd(10)}${"-".padEnd(12)}${"-".padEnd(20)}${timeout}`,
       );
       continue;
     }
 
-    const cmdName = entry.command?.split(/\s+/)[0] ?? "?";
+    const cmdName = entry.command ?? "?";
     try {
       await spawnWithPromise("which", [cmdName], { timeout: 3000 });
       const avail = picocolors.green("yes");
       console.log(
-        `  ${name.padEnd(14)}${"command".padEnd(10)}${avail.padEnd(12)}${inputMode.padEnd(14)}${timeout}`,
+        `  ${name.padEnd(12)}${"command".padEnd(8)}${avail.padEnd(10)}${inputMode.padEnd(12)}${argsDisplay.padEnd(20)}${timeout}`,
       );
     } catch {
       const avail = picocolors.red("no");
       console.log(
-        `  ${name.padEnd(14)}${"command".padEnd(10)}${avail.padEnd(12)}${inputMode.padEnd(14)}${timeout}`,
+        `  ${name.padEnd(12)}${"command".padEnd(8)}${avail.padEnd(10)}${inputMode.padEnd(12)}${argsDisplay.padEnd(20)}${timeout}`,
       );
       const cmdDisplay = entry.command ?? "?";
       console.log(
-        `  ${"".padEnd(14)}${picocolors.dim(`Command: ${cmdDisplay} — not found. Install or update config.`)}`,
+        `  ${"".padEnd(12)}${picocolors.dim(`Command: ${cmdDisplay} — not found. Install or update config.`)}`,
       );
       allOk = false;
     }

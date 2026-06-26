@@ -94,9 +94,11 @@ export class RunLifecycle {
     let updatedRun = await this.runManager.updateRunStatus(run.runId, "planning");
     await this.runManager.savePrompt(run.runId, prompt);
 
+    console.log(picocolors.dim("  Loading rules..."));
     const rules: LoadedRule[] = await this.ruleLoader.loadRules(this.rootPath, this.config.rules);
     const rulesContext = this.ruleLoader.mergeRules(rules);
     await this.runManager.saveRulesContext(run.runId, rulesContext);
+    console.log(picocolors.dim(`  ${rules.length} rules loaded`));
     await this.eventStore.appendToRun(run.runId, {
       type: "rules_loaded",
       runId: run.runId,
@@ -110,6 +112,7 @@ export class RunLifecycle {
     const usePlanner = this.planner;
     let planResult;
 
+    console.log(picocolors.cyan("\n  Planning..."));
     if (usePlanner && (options?.plannerMode === "ai" || options?.plannerMode === "auto")) {
       try {
         planResult = await usePlanner.createPlan({
@@ -149,6 +152,7 @@ export class RunLifecycle {
     }
 
     await this.runManager.savePlan(run.runId, planResult.planMarkdown);
+    console.log(picocolors.green(`  Plan created: ${planResult.tasks.length} tasks`));
 
     const tasksWithRunId = planResult.tasks.map((t) => ({
       ...t,
