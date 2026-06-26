@@ -162,8 +162,7 @@ program
 const userArgs = process.argv.slice(2).filter((a) => a !== "--");
 
 if (userArgs.length === 0 && process.stdin.isTTY) {
-  const { startInteractiveMode } = await import("./interactive/repl.js");
-  await startInteractiveMode();
+  program.help();
 } else {
   program.parse(userArgs, { from: "user" });
 }

@@ -23,6 +23,11 @@ export class ExecutorRegistry {
       },
     });
     this.register("manual", new ManualExecutor());
+
+    for (const [name, entry] of Object.entries(this.mergedExecutors)) {
+      if (name === "shell" || name === "manual") continue;
+      this.registerCommandExecutor(name, entry);
+    }
   }
 
   setLogManager(lm: LogManager): void {
