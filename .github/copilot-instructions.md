@@ -33,6 +33,16 @@ You are working on FlowTask, a local-first AI task runtime CLI.
 - Support Windows, macOS, and Linux.
 - Never hardcode Unix-only paths or commands in core logic.
 
+## Planner Modes
+
+- `simple` — always uses 7-task template, never calls AI planner
+- `ai` — uses AI planner, fails if JSON output is invalid after retry
+- `auto` — tries AI planner, falls back to simple if invalid (default)
+
+## AI Planner Rules
+
+The AI planner must return **only JSON**. No markdown, no code fences. The first character must be `{` and the last must be `}`. Raw AI planner output is saved to `.flowtask/runs/<runId>/outputs/` for debugging.
+
 ## Validation Rule
 
 Never trust "AI says done". Trust evidence:

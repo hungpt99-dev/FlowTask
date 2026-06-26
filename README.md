@@ -315,6 +315,39 @@ If you still see these errors after updating FlowTask, check your `.flowtask/con
 - Set `"inputMode": "stdin"` for most AI CLI tools
 - Run `flowtask doctor` to verify executor configurations
 
+### AI planner returned non-JSON output (e.g. `Unexpected token 'R', "README for"...`)
+
+This happens when the AI CLI returns prose or markdown instead of a strict JSON task plan.
+
+The AI planner is designed to handle this:
+
+1. It extracts JSON from common output formats (raw JSON, fenced ` ```json ` blocks, etc.)
+2. If extraction fails, it saves the raw output to `.flowtask/runs/<runId>/outputs/ai-planner-raw-attempt-1.txt`
+3. It retries once with a JSON-repair prompt
+4. If retry also fails:
+   - `--planner auto` (default): falls back to the simple planner with a warning
+   - `--planner ai`: fails with a clear error message
+
+**To skip AI planning entirely:**
+
+```bash
+flowtask run "update readme" --planner simple --executor opencode
+```
+
+**To debug AI planner output:**
+
+```bash
+cat .flowtask/runs/<runId>/outputs/ai-planner-raw-attempt-1.txt
+```
+
+**Planner modes:**
+
+| Mode     | Behavior                                                           |
+| -------- | ------------------------------------------------------------------ |
+| `simple` | Always use the fixed 7-task template. Never calls AI planner.      |
+| `ai`     | Use AI planner. Fails if output is invalid after repair retry.     |
+| `auto`   | Try AI planner. Falls back to simple planner if invalid. (Default) |
+
 ## Known Limitations
 
 - **No web UI** — CLI only. A local dashboard is planned for the future.

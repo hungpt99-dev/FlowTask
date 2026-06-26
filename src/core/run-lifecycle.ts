@@ -114,6 +114,10 @@ export class RunLifecycle {
 
     console.log(picocolors.cyan("\n  Planning..."));
     if (usePlanner && (options?.plannerMode === "ai" || options?.plannerMode === "auto")) {
+      await this.eventStore.appendToRun(run.runId, {
+        type: "ai_planner_started",
+        runId: run.runId,
+      });
       try {
         planResult = await usePlanner.createPlan({
           projectRoot: this.rootPath,
@@ -122,21 +126,46 @@ export class RunLifecycle {
           template: options?.template,
           availableExecutors: Object.keys(this.config.executors ?? {}),
         });
+        await this.eventStore.appendToRun(run.runId, {
+          type: "ai_planner_validation_passed",
+          runId: run.runId,
+          message: `AI planner created ${planResult.tasks.length} tasks`,
+        });
         if (debug) console.log(picocolors.yellow(`[debug] AI planner used`));
       } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        await this.eventStore.appendToRun(run.runId, {
+          type: errorMessage.includes("after repair")
+            ? "ai_planner_repair_failed"
+            : "ai_planner_validation_failed",
+          runId: run.runId,
+          details: { error: errorMessage },
+        });
+
         if (options?.plannerMode === "ai") {
+          console.log(picocolors.red(`\n  AI planner failed: ${errorMessage}`));
+          console.log(
+            picocolors.yellow(
+              "  Run with --planner simple to skip AI planning, or check the raw output in .flowtask/runs/<runId>/outputs/",
+            ),
+          );
           throw err;
         }
-        console.log(
-          picocolors.yellow(
-            `AI planner failed: ${err instanceof Error ? err.message : String(err)}. Falling back to simple planner.`,
-          ),
-        );
+
         await this.eventStore.appendToRun(run.runId, {
-          type: "planner_fallback",
+          type: "ai_planner_fallback_to_simple",
           runId: run.runId,
-          details: { error: String(err) },
+          details: { error: errorMessage },
         });
+
+        console.log(picocolors.yellow(`\n  AI planner still returned invalid JSON after retry.`));
+        console.log(
+          picocolors.yellow(`  Falling back to simple planner because planner mode is "auto".`),
+        );
+        console.log(picocolors.dim(`  Tip: Run with --planner simple to skip AI planning.`));
+        console.log(
+          picocolors.dim(`  Tip: Run with --planner ai to fail instead of falling back.`),
+        );
       }
     }
 

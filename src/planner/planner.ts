@@ -7,6 +7,7 @@ export interface PlannerInput {
   template?: string;
   projectFiles?: string[];
   availableExecutors?: string[];
+  runId?: string;
 }
 
 export interface PlannerResult {

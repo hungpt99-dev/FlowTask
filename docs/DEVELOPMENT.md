@@ -80,6 +80,26 @@ Prompt → Load Config → Load Rules → Create Run → Generate Tasks
 
 FlowTask orchestrates; AI CLI tools execute the work.
 
+## Planner Modes
+
+| Mode     | Description                                                          |
+| -------- | -------------------------------------------------------------------- |
+| `simple` | Always uses fixed 7-task template. Never calls AI planner.           |
+| `ai`     | Uses AI planner. Fails if JSON output is invalid after repair retry. |
+| `auto`   | Tries AI planner. Falls back to simple planner if invalid. (Default) |
+
+### AI Planner JSON Contract
+
+The AI planner must return **only JSON** — no markdown, no explanation, no code fences.
+If the planner returns prose, FlowTask:
+
+1. Extracts JSON from common formats (raw JSON, fenced ```json blocks, balanced braces)
+2. Saves raw output to `.flowtask/runs/<runId>/outputs/ai-planner-raw-attempt-N.txt`
+3. Retries once with a repair prompt
+4. Falls back to simple planner in `auto` mode, or fails in `ai` mode
+
+Raw output and error files are saved to `.flowtask/runs/<runId>/outputs/` for debugging.
+
 ## Cross-Platform Notes
 
 - All paths use `path.join` (cross-platform).

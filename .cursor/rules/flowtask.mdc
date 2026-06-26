@@ -46,3 +46,15 @@ globs: ["src/**/*.ts", "tests/**/*.ts"]
 - CLI commands must be thin — no business logic in CLI files.
 - Core logic lives in `src/core/`, `src/validation/`, `src/executor/`, etc.
 - Keep modules small and focused.
+
+## Planner Modes
+
+- `simple` — always uses fixed 7-task template, never calls AI planner
+- `ai` — uses AI planner, fails if output is invalid after retry
+- `auto` — tries AI planner, falls back to simple if invalid (default)
+
+## AI Planner Contract
+
+The AI planner must return **only JSON** — no markdown, no explanation, no code fences.
+The first character must be `{` and the last must be `}`.
+FlowTask extracts JSON from raw, fenced, or embedded formats. Invalid output triggers a single repair retry, then fallback (auto) or failure (ai).

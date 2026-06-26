@@ -1,26 +1,28 @@
 import { z } from "zod";
 
-export const AiPlanTaskSchema = z.object({
-  title: z.string().min(1).max(200),
+export const PlannerRiskLevelSchema = z.enum(["safe", "risky", "dangerous"]);
+
+export const PlannerTaskValidationSchema = z.object({
+  commands: z.array(z.string()).optional().default([]),
+  requiredFiles: z.array(z.string()).optional().default([]),
+  requiredArtifacts: z.array(z.string()).optional().default([]),
+  requireGitDiff: z.boolean().optional().default(false),
+});
+
+export const AiPlannerTaskSchema = z.object({
+  title: z.string().min(1),
   description: z.string().min(1),
   executor: z.string().min(1),
   dependsOn: z.array(z.string()).optional().default([]),
-  riskLevel: z.enum(["safe", "risky", "dangerous"]).optional().default("safe"),
-  acceptanceCriteria: z.array(z.string()).min(1, "Acceptance criteria must not be empty"),
-  validation: z
-    .object({
-      commands: z.array(z.string()).optional(),
-      requiredFiles: z.array(z.string()).optional(),
-      requiredArtifacts: z.array(z.string()).optional(),
-      requireGitDiff: z.boolean().optional(),
-    })
-    .optional(),
+  riskLevel: PlannerRiskLevelSchema.optional().default("safe"),
+  acceptanceCriteria: z.array(z.string().min(1)).min(1),
+  validation: PlannerTaskValidationSchema.optional().default({}),
 });
 
-export const AiPlanOutputSchema = z.object({
-  title: z.string().min(1).max(200),
+export const AiPlannerOutputSchema = z.object({
+  title: z.string().min(1),
   summary: z.string().min(1),
-  tasks: z.array(AiPlanTaskSchema).min(1).max(50),
+  tasks: z.array(AiPlannerTaskSchema).min(1).max(30),
 });
 
 export const PlannerConfigSchema = z.object({
@@ -30,6 +32,6 @@ export const PlannerConfigSchema = z.object({
   fallbackToSimple: z.boolean().default(true),
 });
 
-export type AiPlanOutput = z.infer<typeof AiPlanOutputSchema>;
-export type AiPlanTask = z.infer<typeof AiPlanTaskSchema>;
+export type AiPlannerOutput = z.infer<typeof AiPlannerOutputSchema>;
+export type AiPlannerTask = z.infer<typeof AiPlannerTaskSchema>;
 export type PlannerConfig = z.infer<typeof PlannerConfigSchema>;

@@ -48,6 +48,21 @@ FlowTask orchestrates; AI CLI tools execute.
 - `src/config/` — Configuration loading with zod validation
 - `src/utils/` — Shared utilities (fs, paths, ids, time, process, errors, glob, shell)
 
+## Planner Modes
+
+| Mode     | Description                                                          |
+| -------- | -------------------------------------------------------------------- |
+| `simple` | Always uses fixed 7-task template. Never calls AI planner.           |
+| `ai`     | Uses AI planner. Fails if JSON output is invalid after repair retry. |
+| `auto`   | Tries AI planner. Falls back to simple planner if invalid. (Default) |
+
+## AI Planner Contract
+
+- AI planner must return **only JSON** — no markdown, no explanation, no code fences
+- First character must be `{`, last must be `}`
+- If the planner returns prose, FlowTask extracts JSON from common formats, retries once, and falls back to simple planner in `auto` mode
+- Raw AI planner output is saved to `.flowtask/runs/<runId>/outputs/` for debugging
+
 ## Key Rules
 
 - No `any` types

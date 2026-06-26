@@ -26,6 +26,23 @@ Core principle: Prompt → Rules → Tasks → Execution → Validation → Repo
 - Keep modules small and focused.
 - CLI commands must be thin — no business logic.
 
+## Planner Modes
+
+- `simple` — always uses fixed 7-task template, never calls AI
+- `ai` — uses AI planner, fails if output is invalid after retry
+- `auto` — tries AI planner, falls back to simple if invalid (default)
+
+## AI Planner Contract
+
+The AI planner must return **only JSON** — no markdown, no explanation, no code fences. The first character must be `{` and the last must be `}`.
+
+If the planner returns prose (e.g. README content), FlowTask will:
+
+1. Extract JSON from common formats (raw, fenced, balanced braces)
+2. Save raw output to `.flowtask/runs/<runId>/outputs/`
+3. Retry once with a repair prompt
+4. Fall back to simple planner in `auto` mode, or fail in `ai` mode
+
 ## Do Not
 
 - Do not add databases or external services.
