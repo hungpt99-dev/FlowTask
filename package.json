@@ -1,0 +1,67 @@
+{
+  "name": "flowtask",
+  "version": "0.1.0",
+  "description": "Local-first AI task runtime CLI — turn prompts into visible, validated, resumable AI task flows",
+  "type": "module",
+  "bin": {
+    "flowtask": "./dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsx src/cli/index.ts",
+    "build": "tsup",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier . --write",
+    "format:check": "prettier . --check",
+    "quality": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test",
+    "quality:fix": "pnpm lint:fix && pnpm format",
+    "doctor": "node scripts/doctor.mjs",
+    "codegraph": "node scripts/codegraph-trigger.mjs",
+    "validate:docs": "node scripts/validate-docs.mjs",
+    "prepare": "husky"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "enquirer": "^2.4.1",
+    "fast-glob": "^3.3.2",
+    "ora": "^8.1.0",
+    "picocolors": "^1.1.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.5.0",
+    "@commitlint/config-conventional": "^19.5.0",
+    "@types/node": "^22.9.0",
+    "eslint": "^9.14.0",
+    "eslint-config-prettier": "^9.1.0",
+    "husky": "^9.1.6",
+    "lint-staged": "^15.2.10",
+    "prettier": "^3.4.1",
+    "tsup": "^8.3.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "typescript-eslint": "^8.62.0",
+    "vitest": "^2.1.5"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,yaml,yml}": [
+      "prettier --write"
+    ]
+  },
+  "commitlint": {
+    "extends": [
+      "@commitlint/config-conventional"
+    ]
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "packageManager": "pnpm@9.14.0"
+}

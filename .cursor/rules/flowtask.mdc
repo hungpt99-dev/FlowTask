@@ -1,0 +1,48 @@
+---
+description: FlowTask AI Task Runtime Development Rules
+globs: ["src/**/*.ts", "tests/**/*.ts"]
+---
+
+# FlowTask Development Rules
+
+## Must Read First
+
+- Read `docs/IDEA.MD` and `docs/TECHNICAL.MD` before making changes.
+- Read `docs/AI_AGENT_RULES.md` for AI agent behavior guidelines.
+- Read `docs/CODE_QUALITY.md` for quality requirements.
+- Read `README.md` for current project status.
+
+## TypeScript Standards
+
+- Strict TypeScript only. No `any` types.
+- Use `zod` for schema validation.
+- Named exports only (no default exports).
+- Use `path.join` for file paths (cross-platform).
+- Use `path.isAbsolute` (not `startsWith("/")`).
+- Use `getShell()` from `src/utils/shell.ts` (not hardcoded `"sh"`).
+- Use `spawn` instead of `exec` for long-running commands.
+- Use atomic writes for state files.
+
+## Do Not
+
+- Do not implement full runtime logic in foundation setup.
+- Do not create databases.
+- Do not create web UIs.
+- Do not add unnecessary dependencies.
+- Do not skip tests.
+- Do not bypass safety/validation rules.
+- Do not mark task done without validation evidence.
+- Do not hardcode Unix paths.
+
+## Testing
+
+- Write tests for all new code.
+- Use `testDir` from `tests/setup.ts` (not hardcoded `/tmp`).
+- Tests must pass before marking work complete.
+- Run `pnpm quality` before committing.
+
+## Architecture
+
+- CLI commands must be thin — no business logic in CLI files.
+- Core logic lives in `src/core/`, `src/validation/`, `src/executor/`, etc.
+- Keep modules small and focused.
