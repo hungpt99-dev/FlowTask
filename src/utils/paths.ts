@@ -2,6 +2,7 @@ import path from "node:path";
 
 export const FLOWTASK_DIR = ".flowtask";
 export const RULES_DIR = ".flowtask/rules";
+export const STEPS_DIR = ".flowtask/steps";
 export const RUNS_DIR = ".flowtask/runs";
 
 export function projectJsonPath(rootPath: string): string {

@@ -28,8 +28,12 @@ program
   .command("init")
   .description("Initialize a FlowTask project in the current directory")
   .option("--name <name>", "Project name")
+  .option("--mode <mode>", "Project mode: development | writing | research | general")
   .option("--force", "Force reinitialization")
-  .action(initCommand);
+  .option("--show-modes", "List available init modes and descriptions")
+  .action((opts: { name?: string; mode?: string; force?: boolean; showModes?: boolean }) => {
+    initCommand(opts);
+  });
 
 program
   .command("run")

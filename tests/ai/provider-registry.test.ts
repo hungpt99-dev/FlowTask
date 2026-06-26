@@ -13,6 +13,7 @@ function createConfig(overrides?: Partial<FlowTaskConfig>): FlowTaskConfig {
     approval: { enabled: true, requireFor: [] },
     quality: { enabledByDefault: false, commands: [] },
     limits: { maxRunMinutes: 120, maxTaskMinutes: 30, maxRetries: 2, maxLogSizeMb: 20 },
+    projectMode: "development",
     process: { gracefulStopTimeoutMs: 5000, forceKillTimeoutMs: 10000 },
     planner: {
       default: "auto",

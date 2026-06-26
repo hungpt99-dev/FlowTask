@@ -50,6 +50,7 @@ export const DEFAULT_EXECUTORS: Record<
 export function generateDefaultConfig(): FlowTaskConfig {
   return {
     version: "1.0",
+    projectMode: "development",
     defaultExecutor: "opencode",
     runsDir: ".flowtask/runs",
     logLevel: "info",

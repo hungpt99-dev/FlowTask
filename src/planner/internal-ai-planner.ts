@@ -428,6 +428,12 @@ export class InternalAiPlanner implements Planner {
     parts.push(input.prompt);
     parts.push("");
 
+    const projectMode = this.config.projectMode ?? "development";
+    parts.push("## Project Mode");
+    parts.push(`This project is in **${projectMode}** mode.`);
+    parts.push(this.getModeHint(projectMode));
+    parts.push("");
+
     const availableExecutors = input.availableExecutors ?? Object.keys(this.config.executors ?? {});
     parts.push("## Available Executors");
     parts.push(availableExecutors.join(", "));
@@ -619,6 +625,21 @@ export class InternalAiPlanner implements Planner {
     await ensureDir(outputsDir);
     const filePath = path.join(outputsDir, "internal-ai-planner-provider.json");
     await writeTextFile(filePath, JSON.stringify(metadata, null, 2));
+  }
+
+  private getModeHint(mode: string): string {
+    switch (mode) {
+      case "development":
+        return "Coding assumptions are allowed. Use development validation when configured.";
+      case "writing":
+        return "Do NOT assume this is a coding task unless the user explicitly asks for code. Focus on document structure and clarity.";
+      case "research":
+        return "Do NOT invent facts. Separate facts from assumptions. Track sources.";
+      case "general":
+        return "Avoid developer-specific assumptions unless the prompt is clearly about code.";
+      default:
+        return "";
+    }
   }
 
   private async savePlannerError(

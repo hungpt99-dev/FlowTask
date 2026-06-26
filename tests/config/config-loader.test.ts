@@ -15,6 +15,7 @@ describe("ConfigLoader", () => {
       join(flowtaskDir, "config.json"),
       JSON.stringify({
         version: "1.0",
+        projectMode: "development",
         defaultExecutor: "shell",
         logLevel: "debug",
         rules: {

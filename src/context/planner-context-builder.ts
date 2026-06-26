@@ -54,6 +54,12 @@ export class PlannerContextBuilder {
     parts.push("## Project\n");
     parts.push(`- Root: ${input.projectRoot}\n`);
 
+    const projectMode = input.config.projectMode ?? "development";
+    parts.push("## Project Mode\n");
+    parts.push(`This project is in **${projectMode}** mode.\n`);
+    parts.push(getModeContextHint(projectMode));
+    parts.push("\n");
+
     parts.push("## Available Executors\n");
     parts.push(
       `Valid executors: ${input.availableExecutors.join(", ")}, plus shell, manual, opencode.\n`,
@@ -111,5 +117,20 @@ export class PlannerContextBuilder {
     );
 
     return parts.join("\n");
+  }
+}
+
+function getModeContextHint(mode: string): string {
+  switch (mode) {
+    case "development":
+      return "This is a software development project. Coding assumptions are allowed. Use development validation (lint, typecheck, test) when configured.";
+    case "writing":
+      return "This is a writing/document project. Do NOT assume this is a software development task unless the user explicitly asks for code. Focus on document structure, clarity, and completeness.";
+    case "research":
+      return "This is a research project. Do NOT invent facts. Separate facts from assumptions. Track sources. Do NOT assume this is a software development task.";
+    case "general":
+      return "This is a general AI task workflow. Avoid developer-specific assumptions unless the prompt is clearly about code. Focus on producing useful artifacts.";
+    default:
+      return "";
   }
 }

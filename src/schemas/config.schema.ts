@@ -62,8 +62,11 @@ export const ProcessConfigSchema = z.object({
   forceKillTimeoutMs: z.number().int().positive().default(10000),
 });
 
+export const ProjectModeSchema = z.enum(["development", "writing", "research", "general"]);
+
 export const FlowTaskConfigSchema = z.object({
   version: z.string().default("1.0"),
+  projectMode: ProjectModeSchema.default("development"),
   defaultExecutor: z.string().default("opencode"),
   runsDir: z.string().default(".flowtask/runs"),
   logLevel: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),

@@ -15,7 +15,14 @@ FlowTask core runtime is implemented and operational.
 - Status, runs, tasks, logs, inspect, doctor, and rules commands are implemented
 - Validation engine checks process exit codes and file existence
 - Event store, state manager, and log manager persist all state
-- 70+ tests cover core functionality
+- AI provider architecture with 8 provider types (OpenAI, Anthropic, Gemini, Mistral, Azure, Ollama, OpenAI-compatible, Custom)
+- Custom provider registration API for extending planner backends
+- Provider health checks via `flowtask doctor --providers` and `flowtask providers doctor`
+- Command safety classification, approval system, and secret redaction
+- Git snapshot support (before/after run snapshots)
+- Init-time project mode selection (development, writing, research, general)
+- Mode-specific rules, steps, validation, and safety defaults
+- 227+ tests across 37 test files cover all modules
 - All quality gates pass
 
 ## Requirements
@@ -29,8 +36,16 @@ FlowTask core runtime is implemented and operational.
 # Install
 pnpm install
 
-# Initialize a project
-pnpm dev init --name "My Project"
+# Initialize a project (interactive — choose mode)
+pnpm dev init
+
+# Initialize with a specific mode
+pnpm dev init --name "My Project" --mode development
+pnpm dev init --name "Writing Project" --mode writing
+pnpm dev init --name "Research Project" --mode research
+
+# Show available init modes
+pnpm dev init --show-modes
 
 # List configured rules
 pnpm dev rules list
@@ -61,7 +76,12 @@ pnpm dev doctor
 ## Commands
 
 ```bash
-flowtask init        # Initialize a FlowTask project in the current directory
+flowtask init        # Initialize a FlowTask project (interactive mode selection)
+flowtask init --mode development   # Initialize as development project
+flowtask init --mode writing       # Initialize as writing/document project
+flowtask init --mode research      # Initialize as research project
+flowtask init --mode general       # Initialize as general project
+flowtask init --show-modes         # List available project modes
 flowtask run         # Start a new run from a prompt
 flowtask status      # Show current project and run status
 flowtask runs        # List all runs in the project
@@ -74,6 +94,7 @@ flowtask stop        # Stop the current running task
 flowtask cancel      # Cancel a run
 flowtask clean       # Clean up old runs
 flowtask doctor      # Check system health and project configuration
+flowtask providers   # Manage AI providers (list, doctor)
 flowtask rules       # Manage FlowTask rule sources
 ```
 
@@ -85,11 +106,39 @@ flowtask rules       # Manage FlowTask rule sources
 - `dry-run` — show what would happen without executing
 - `debug` — show detailed state, config, and execution info
 
+### Project Modes
+
+FlowTask chooses a project mode during initialization.
+
+Mode is selected once during `flowtask init` and stored in `.flowtask/config.json` as `projectMode`.
+
+During normal `flowtask run`, no mode flag is needed — the project rules already define how FlowTask behaves.
+
+| Mode          | Use Case                             | Validation                                   | Default Executor     |
+| ------------- | ------------------------------------ | -------------------------------------------- | -------------------- |
+| `development` | Software projects, coding, debugging | Code validation (lint/typecheck/test)        | AI CLI executor      |
+| `writing`     | Documents, prompts, proposals        | Document validation (file exists, non-empty) | Internal AI provider |
+| `research`    | Research, analysis, briefs           | Research validation (source notes, brief)    | Internal AI provider |
+| `general`     | Generic AI task workflows            | Manual/basic artifact validation             | Internal AI provider |
+
+Each mode generates:
+
+- `.flowtask/rules/mode.md` — mode-specific rules loaded by the rule system
+- `.flowtask/steps/default.md` — mode-specific default workflow
+- Mode-specific validation and safety defaults in config
+
 ### Planner Modes
 
 - `simple` — always use the fixed 7-task template, never calls AI
 - `ai` — use internal AI planner (requires `OPENAI_API_KEY`); fails if invalid
 - `auto` — try internal AI planner, fall back to simple if invalid or missing API key (default)
+
+### Providers Command
+
+```bash
+flowtask providers list            # List configured AI providers with type and key status
+flowtask providers doctor          # Check health of all configured AI providers
+```
 
 ### Planner Provider
 
@@ -104,6 +153,24 @@ Mistral              native /chat/completions (mistral-large-latest)
 Azure OpenAI         deployment-based provider
 Ollama               native local /api/chat (llama3.1)
 ```
+
+### Custom Provider Registration
+
+FlowTask exposes a provider registration API for adding custom AI backends:
+
+```typescript
+import { ProviderRegistry, type AiProviderFactory } from "flowtask";
+
+const registry = new ProviderRegistry();
+
+// Register a custom provider type
+registry.registerProviderType("my-vendor", myFactory: AiProviderFactory);
+
+// Register a named provider instance
+registry.registerProvider("my-model", { type: "my-vendor", ...config });
+```
+
+Providers registered via the API are checked during health checks and planning alongside built-in providers.
 
 ```bash
 # Set API key
@@ -163,15 +230,16 @@ flowtask logs --follow --validation     # Follow validation logs
 
 ### Stop / Cancel
 
-````bash
+```bash
 flowtask stop                      # Stop running task + signal executor process
 flowtask cancel <runId>            # Cancel run + kill executor process
+```
 
 ## Build
 
 ```bash
 pnpm build
-````
+```
 
 Output goes to `dist/`.
 
@@ -402,8 +470,7 @@ cat .flowtask/runs/<runId>/outputs/internal-ai-planner-raw-attempt-1.txt
 - **No database** — All state is file-based using JSON and JSONL intentionally.
 - **Windows testing** — Cross-platform utilities (`getShell()`, `path.join`) are in place but Windows has not been tested end-to-end.
 - **AI planner** — The internal AI planner requires an API key for the selected provider and will fall back to the simple planner if unavailable.
-- **External AI CLI integration** — AI CLI tools (opencode, claude, codex) are used as task executors, not as the planner.
-- **External AI CLI integration** — The command executor supports argument, stdin, and file input modes, but end-to-end integration with specific tools may require configuration tuning.
+- **External AI CLI integration** — AI CLI tools (opencode, claude, codex) are used as task executors, not as the planner. The command executor supports argument, stdin, and file input modes, but end-to-end integration with specific tools may require configuration tuning.
 
 ## License
 

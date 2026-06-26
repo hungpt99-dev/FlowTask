@@ -82,6 +82,36 @@ export async function doctorCommand(options?: { providers?: boolean }): Promise<
     const loader = new ConfigLoader();
     const config = await loader.load(rootPath);
 
+    console.log(picocolors.cyan("\nProject Mode"));
+    console.log(picocolors.dim("─".repeat(60)));
+    const mode = config.projectMode ?? "development";
+    console.log(`  Mode: ${picocolors.bold(mode)}`);
+
+    const { fileExists: fe } = await import("../../utils/fs.js");
+    const rulesDir = path.join(rootPath, ".flowtask", "rules");
+    const stepsDir = path.join(rootPath, ".flowtask", "steps");
+    const modeRuleExists = await fe(path.join(rulesDir, "mode.md"));
+    const stepsExist = await fe(path.join(stepsDir, "default.md"));
+    if (modeRuleExists) {
+      console.log(
+        `  ${picocolors.green("✓")} Mode rules: ${picocolors.dim(".flowtask/rules/mode.md")}`,
+      );
+    } else {
+      console.log(
+        `  ${picocolors.yellow("!")} Mode rules: ${picocolors.dim(".flowtask/rules/mode.md — not found")}`,
+      );
+    }
+    if (stepsExist) {
+      console.log(
+        `  ${picocolors.green("✓")} Steps: ${picocolors.dim(".flowtask/steps/default.md")}`,
+      );
+    } else {
+      console.log(
+        `  ${picocolors.yellow("!")} Steps: ${picocolors.dim(".flowtask/steps/default.md — not found")}`,
+      );
+    }
+    console.log("");
+
     console.log(picocolors.cyan("\nPlanner"));
     console.log(picocolors.dim("─".repeat(60)));
     const plannerConfig = config.planner!;
