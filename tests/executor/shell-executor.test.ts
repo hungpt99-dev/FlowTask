@@ -22,6 +22,7 @@ describe("ShellExecutor", () => {
         executor: "shell",
         dependsOn: [],
         acceptanceCriteria: [],
+        validation: { commands: ["echo hello"], requiredArtifacts: [] },
         retryCount: 0,
         maxRetries: 2,
         createdAt: now(),
@@ -47,6 +48,7 @@ describe("ShellExecutor", () => {
         executor: "shell",
         dependsOn: [],
         acceptanceCriteria: [],
+        validation: { commands: ["exit 1"], requiredArtifacts: [] },
         retryCount: 0,
         maxRetries: 2,
         createdAt: now(),
@@ -58,5 +60,31 @@ describe("ShellExecutor", () => {
 
     expect(result.status).toBe("failed");
     expect(result.exitCode).toBe(1);
+  });
+
+  it("should succeed when no commands are defined", async () => {
+    const result = await executor.execute({
+      projectRoot: testDir,
+      runId: "test-run",
+      task: {
+        id: "task_003",
+        runId: "test-run",
+        title: "Read project rules",
+        status: "running",
+        executor: "shell",
+        dependsOn: [],
+        acceptanceCriteria: [],
+        validation: { requiredArtifacts: [] },
+        retryCount: 0,
+        maxRetries: 2,
+        createdAt: now(),
+        updatedAt: now(),
+      },
+      contextPackPath: "/dev/null",
+      contextPackContent: "",
+    });
+
+    expect(result.status).toBe("done");
+    expect(result.exitCode).toBe(0);
   });
 });

@@ -53,7 +53,7 @@ export async function runCommand(
         "AI planner requested but no AI executor configured. Using simple planner.",
       ),
     );
-  } else if (plannerMode === "ai") {
+  } else if (planResult.mode === "ai") {
     console.log(
       picocolors.cyan(`Using AI planner (executor: ${config.planner?.executor ?? "unknown"})`),
     );
@@ -68,7 +68,7 @@ export async function runCommand(
       mode: resolvedMode,
       template: options.template,
       debug: options.debug,
-      plannerMode: planResult.mode,
+      plannerMode: plannerMode,
     });
 
     if (!result.success) {

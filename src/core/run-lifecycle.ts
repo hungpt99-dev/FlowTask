@@ -110,7 +110,7 @@ export class RunLifecycle {
     const usePlanner = this.planner;
     let planResult;
 
-    if (usePlanner && options?.plannerMode === "ai") {
+    if (usePlanner && (options?.plannerMode === "ai" || options?.plannerMode === "auto")) {
       try {
         planResult = await usePlanner.createPlan({
           projectRoot: this.rootPath,
@@ -325,6 +325,9 @@ export class RunLifecycle {
         runSuccess = false;
         break;
       }
+
+      tasks.length = 0;
+      tasks.push(...(await this.runManager.loadTasks(run.runId)));
     }
 
     return runSuccess;
