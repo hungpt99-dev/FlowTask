@@ -60,8 +60,9 @@ program
   );
 
 program
-  .command("run")
+  .command("run", { isDefault: false })
   .description("Start a new run from a prompt")
+  .allowUnknownOption(true)
   .argument("<prompt>", "The prompt describing the work to be done")
   .option("--executor <name>", "Executor to use (shell, opencode, claude, codex)", "shell")
   .option("--mode <mode>", "Run mode: auto | manual | plan-only | dry-run | debug", "auto")
@@ -206,10 +207,23 @@ program
   .argument("[path]", "Path to rule file (for add action)")
   .action(rulesCommand);
 
-const userArgs = process.argv.slice(2).filter((a) => a !== "--");
+let rawArgs = process.argv.slice(2);
 
-if (userArgs.length === 0 && process.stdin.isTTY) {
+if (rawArgs.length === 0 && process.stdin.isTTY) {
   program.help();
 } else {
-  program.parse(userArgs, { from: "user" });
+  if (rawArgs[0] === "run" && rawArgs.length > 1 && rawArgs[1]!.startsWith("-")) {
+    const stdin = await new Promise<string>((resolve) => {
+      let data = "";
+      process.stdin.setEncoding("utf-8");
+      process.stdin.on("data", (chunk: string) => {
+        data += chunk;
+      });
+      process.stdin.on("end", () => resolve(data.trim()));
+    });
+    if (stdin) {
+      rawArgs = ["run", stdin, ...rawArgs.slice(1)];
+    }
+  }
+  program.parse(rawArgs, { from: "user" });
 }
