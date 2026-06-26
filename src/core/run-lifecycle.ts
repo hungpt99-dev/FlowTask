@@ -23,6 +23,7 @@ import type { QualityGateResult } from "../schemas/quality.schema.js";
 import { writeTextFile, ensureDir } from "../utils/fs.js";
 import { getContextDir } from "../utils/paths.js";
 import { now } from "../utils/time.js";
+import { commandExists } from "../utils/command-exists.js";
 import path from "node:path";
 import picocolors from "picocolors";
 import { getEventBus } from "../ui/event-bus.js";
@@ -137,13 +138,27 @@ export class RunLifecycle {
         type: startedEvent as never,
         runId: run.runId,
       });
+      const executors = this.config.executors ?? {};
+      const availableExecutors = (
+        await Promise.all(
+          Object.entries(executors).map(async ([name, cfg]) => {
+            if (cfg.type === "shell" || cfg.type === "manual") return name;
+            if (cfg.type === "command" && cfg.command) {
+              const exists = await commandExists(cfg.command);
+              return exists ? name : null;
+            }
+            return name;
+          }),
+        )
+      ).filter((n): n is string => n !== null);
+
       try {
         planResult = await usePlanner.createPlan({
           projectRoot: this.rootPath,
           prompt,
           rulesContext,
           template: options?.template,
-          availableExecutors: Object.keys(this.config.executors ?? {}),
+          availableExecutors,
         });
         await this.eventStore.appendToRun(run.runId, {
           type: passedEvent as never,
@@ -200,10 +215,34 @@ export class RunLifecycle {
     await this.runManager.savePlan(run.runId, planResult.planMarkdown);
     console.log(picocolors.green(`  Plan created: ${planResult.tasks.length} tasks`));
 
-    const tasksWithRunId = planResult.tasks.map((t) => ({
-      ...t,
-      runId: run.runId,
-    }));
+    const defaultExecutor = this.config.defaultExecutor ?? "shell";
+    const tasksWithRunId = planResult.tasks.map((t) => {
+      const executor = this.executorRegistry.has(t.executor) ? t.executor : defaultExecutor;
+      if (executor !== t.executor) {
+        console.log(
+          picocolors.yellow(
+            `  Task "${t.title}" uses unknown executor "${t.executor}", falling back to "${defaultExecutor}"`,
+          ),
+        );
+      }
+      return { ...t, executor, runId: run.runId };
+    });
+
+    // Check command executors exist; fall back to default if not
+    for (const task of tasksWithRunId) {
+      const cfg = this.executorRegistry.getConfig(task.executor);
+      if (cfg && cfg.type === "command" && cfg.command) {
+        const exists = await commandExists(cfg.command);
+        if (!exists) {
+          console.log(
+            picocolors.yellow(
+              `  Task "${task.title}" uses executor "${task.executor}" (command "${cfg.command}" not found), falling back to "${defaultExecutor}"`,
+            ),
+          );
+          task.executor = defaultExecutor;
+        }
+      }
+    }
 
     await this.runManager.saveTasks(run.runId, tasksWithRunId);
 
@@ -548,6 +587,23 @@ export class RunLifecycle {
       if (validationResult.status === "passed") {
         console.log(picocolors.green(`  Status: done (all validations passed)`));
         break;
+      }
+
+      const errMsg = executorResult.error ?? "";
+      const fatalError =
+        errMsg.includes("ENOENT") ||
+        errMsg.includes("not found") ||
+        errMsg.includes("No such file");
+      if (fatalError) {
+        const defaultExecutor = this.config.defaultExecutor ?? "shell";
+        console.log(
+          picocolors.yellow(
+            `  Executor "${task.executor}" not available, falling back to "${defaultExecutor}"`,
+          ),
+        );
+        task.executor = defaultExecutor;
+        retryCount = 0;
+        continue;
       }
 
       retryCount++;

@@ -80,6 +80,13 @@ export class CommandExecutor implements Executor {
 
     try {
       return await new Promise<ExecutorResult>((resolve) => {
+        let settled = false;
+        const resolveOnce = (result: ExecutorResult): void => {
+          if (settled) return;
+          settled = true;
+          resolve(result);
+        };
+
         const child = spawn(cmd, finalArgs, {
           cwd: input.projectRoot,
           env: {
@@ -119,6 +126,7 @@ export class CommandExecutor implements Executor {
 
         const stdoutLines: string[] = [];
         const stderrLines: string[] = [];
+        let spawnError: string | undefined;
 
         const emitAndLog = (stream: "stdout" | "stderr", text: string): void => {
           const safe = redact(text);
@@ -164,17 +172,18 @@ export class CommandExecutor implements Executor {
             exitCode,
           });
 
-          resolve({
+          resolveOnce({
             status: exitCode === 0 ? "done" : "failed",
             exitCode: exitCode ?? undefined,
             output: stdoutLines.join("\n"),
-            error: stderrLines.join("\n") || undefined,
+            error: stderrLines.join("\n") || spawnError,
             startedAt,
             finishedAt: now(),
           });
         });
 
         child.on("error", (err) => {
+          spawnError = err.message;
           if (this.processManager) {
             this.processManager.clear(input.projectRoot, runId).catch(() => {});
           }
@@ -187,9 +196,11 @@ export class CommandExecutor implements Executor {
             reason: err.message,
           });
 
-          resolve({
+          resolveOnce({
             status: "failed",
+            exitCode: undefined,
             error: err.message,
+            output: stdoutLines.join("\n"),
             startedAt,
             finishedAt: now(),
           });
