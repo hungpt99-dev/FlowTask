@@ -5,6 +5,8 @@ export interface PlannerInput {
   prompt: string;
   rulesContext: string;
   template?: string;
+  projectFiles?: string[];
+  availableExecutors?: string[];
 }
 
 export interface PlannerResult {

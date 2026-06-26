@@ -1,6 +1,7 @@
 import { RunLifecycle } from "../../core/run-lifecycle.js";
 import { ProjectManager } from "../../core/project-manager.js";
 import { EventStore } from "../../core/event-store.js";
+import { PlannerRegistry } from "../../planner/planner-registry.js";
 import picocolors from "picocolors";
 import type { Run } from "../../schemas/run.schema.js";
 
@@ -9,6 +10,7 @@ export async function runCommand(
   options: {
     executor?: string;
     mode?: string;
+    planner?: string;
     quality?: boolean;
     planOnly?: boolean;
     dryRun?: boolean;
@@ -41,25 +43,32 @@ export async function runCommand(
   if (options.dryRun) resolvedMode = "dry-run";
   if (options.debug) resolvedMode = "debug";
 
-  const lifecycle = new RunLifecycle(rootPath, project.projectId, config);
+  const plannerRegistry = new PlannerRegistry(config);
+  const plannerMode = plannerRegistry.resolveMode(options.planner);
+  const planResult = plannerRegistry.getPlanner(plannerMode);
 
-  if (options.executor && options.executor !== "shell") {
-    const configExecutors = config.executors;
-    if (configExecutors && configExecutors[options.executor]) {
-      const executorConfig = configExecutors[options.executor]!;
-      if (executorConfig.type === "command" && executorConfig.command) {
-        const { ExecutorRegistry } = await import("../../executor/executor-registry.js");
-        const reg = new ExecutorRegistry();
-        reg.registerCommandExecutor(options.executor, executorConfig.command);
-      }
-    }
+  if (plannerMode === "ai" && planResult.mode === "simple") {
+    console.log(
+      picocolors.yellow(
+        "AI planner requested but no AI executor configured. Using simple planner.",
+      ),
+    );
+  } else if (plannerMode === "ai") {
+    console.log(
+      picocolors.cyan(`Using AI planner (executor: ${config.planner?.executor ?? "unknown"})`),
+    );
+  } else {
+    console.log(picocolors.dim("Using simple planner"));
   }
+
+  const lifecycle = new RunLifecycle(rootPath, project.projectId, config, planResult.planner);
 
   try {
     const result = await lifecycle.executeRun(prompt, {
       mode: resolvedMode,
       template: options.template,
       debug: options.debug,
+      plannerMode: planResult.mode,
     });
 
     if (!result.success) {

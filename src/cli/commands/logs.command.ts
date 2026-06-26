@@ -1,12 +1,16 @@
 import { ProjectManager } from "../../core/project-manager.js";
 import { LogManager } from "../../core/log-manager.js";
 import picocolors from "picocolors";
+import fs from "node:fs";
+import { runtimeLogPath, validationLogPath, taskLogPath } from "../../utils/paths.js";
 
 export async function logsCommand(options: {
   follow?: boolean;
   run?: string;
   task?: string;
   validation?: boolean;
+  runtime?: boolean;
+  tail?: string;
 }): Promise<void> {
   const rootPath = process.cwd();
   const manager = new ProjectManager();
@@ -28,51 +32,136 @@ export async function logsCommand(options: {
   }
 
   const logManager = new LogManager(rootPath);
+  const tailLines = parseInt(options.tail ?? "80", 10);
 
-  if (options.task) {
-    const logContent = await logManager.readTaskLog(runId, options.task);
-    if (!logContent) {
-      console.log(picocolors.yellow(`No logs found for task ${options.task} in run ${runId}`));
-      process.exit(0);
-    }
-    console.log(picocolors.cyan(`\nLogs for task ${options.task} in run ${runId}:`));
-    console.log(picocolors.dim("─".repeat(60)));
-    console.log(logContent);
-  } else if (options.validation) {
-    const logContent = await logManager.readValidation(runId);
-    if (!logContent) {
-      console.log(picocolors.yellow(`No validation logs for run ${runId}`));
-      process.exit(0);
-    }
-    console.log(picocolors.cyan(`\nValidation logs for run ${runId}:`));
-    console.log(picocolors.dim("─".repeat(60)));
-    console.log(logContent);
-  } else {
-    const logFiles = await logManager.listLogFiles(runId);
-    if (logFiles.length === 0) {
-      console.log(picocolors.yellow(`No log files found for run ${runId}`));
-      process.exit(0);
-    }
+  const resolveLogPath = (): string | null => {
+    if (options.task) return taskLogPath(rootPath, runId, options.task);
+    if (options.validation) return validationLogPath(rootPath, runId);
+    if (options.runtime) return runtimeLogPath(rootPath, runId);
+    return null;
+  };
 
-    console.log(picocolors.cyan(`\nLog files for run ${runId}:`));
-    console.log(picocolors.dim("─".repeat(60)));
-    for (const file of logFiles) {
-      console.log(`  ${picocolors.dim("📄")} ${file}`);
-    }
-    console.log(picocolors.dim("\nUse --task <taskId> to view specific task logs."));
-    console.log(picocolors.dim("Use --validation to view validation logs."));
-    console.log(picocolors.dim("Use --follow for real-time log streaming (coming soon)."));
+  const logPath = resolveLogPath();
 
-    if (logFiles.includes("runtime.log")) {
-      const runtime = await logManager.readRuntime(runId);
-      if (runtime) {
-        const lines = runtime.trim().split("\n").slice(-10);
-        console.log(picocolors.cyan("\nRecent runtime log entries:"));
-        console.log(picocolors.dim("─".repeat(60)));
-        for (const line of lines) {
-          console.log(`  ${line}`);
-        }
+  if (logPath) {
+    if (options.follow) {
+      await followFile(logPath, tailLines);
+    } else {
+      const content = await readLastLines(logPath, tailLines);
+      if (!content) {
+        console.log(picocolors.yellow(`No log content found.`));
+        process.exit(0);
+      }
+      console.log(
+        picocolors.cyan(
+          `\nLogs for ${options.task ? `task ${options.task}` : options.validation ? "validation" : options.runtime ? "runtime" : ""} in run ${runId}:`,
+        ),
+      );
+      console.log(picocolors.dim("─".repeat(60)));
+      console.log(content);
+    }
+    return;
+  }
+
+  // No specific log type selected — show list
+  const logFiles = await logManager.listLogFiles(runId);
+  if (logFiles.length === 0) {
+    console.log(picocolors.yellow(`No log files found for run ${runId}`));
+    process.exit(0);
+  }
+
+  console.log(picocolors.cyan(`\nLog files for run ${runId}:`));
+  console.log(picocolors.dim("─".repeat(60)));
+  for (const file of logFiles) {
+    console.log(`  ${picocolors.dim("📄")} ${file}`);
+  }
+  console.log(picocolors.dim("\nUse --task <taskId> to view specific task logs."));
+  console.log(picocolors.dim("Use --validation to view validation logs."));
+  console.log(picocolors.dim("Use --runtime to view runtime logs."));
+  console.log(picocolors.dim("Use --follow to stream logs in real time."));
+
+  if (logFiles.includes("runtime.log")) {
+    const runtime = await logManager.readRuntime(runId);
+    if (runtime) {
+      const lines = runtime.trim().split("\n").slice(-10);
+      console.log(picocolors.cyan("\nRecent runtime log entries:"));
+      console.log(picocolors.dim("─".repeat(60)));
+      for (const line of lines) {
+        console.log(`  ${line}`);
       }
     }
+  }
+}
+
+async function readLastLines(filePath: string, count: number): Promise<string> {
+  try {
+    const content = await fs.promises.readFile(filePath, "utf-8");
+    const lines = content.trim().split("\n");
+    return lines.slice(-count).join("\n");
+  } catch {
+    return "";
+  }
+}
+
+async function followFile(filePath: string, tailLines: number): Promise<void> {
+  try {
+    const content = await fs.promises.readFile(filePath, "utf-8");
+    const lines = content.split("\n");
+    const tail = lines.slice(-tailLines).join("\n");
+    if (tail) {
+      process.stdout.write(tail + "\n");
+    }
+
+    let currentSize = content.length;
+    const pollInterval = 500;
+
+    console.log(picocolors.dim(`\nWatching for new log entries... (Ctrl+C to stop)\n`));
+
+    return new Promise((resolve) => {
+      const timer = setInterval(async () => {
+        try {
+          const newStats = await fs.promises.stat(filePath);
+          if (newStats.size > currentSize) {
+            const fd = await fs.promises.open(filePath, "r");
+            const buf = Buffer.alloc(newStats.size - currentSize);
+            await fd.read(buf, 0, buf.length, currentSize);
+            await fd.close();
+            process.stdout.write(buf.toString());
+            currentSize = newStats.size;
+          }
+        } catch {
+          clearInterval(timer);
+          resolve();
+        }
+      }, pollInterval);
+
+      process.on("SIGINT", () => {
+        clearInterval(timer);
+        console.log(picocolors.dim("\nLog follow stopped."));
+        resolve();
+      });
+    });
+  } catch {
+    console.log(picocolors.yellow(`Log file not yet available: ${filePath}`));
+    console.log(picocolors.dim("Waiting for log file to appear... (Ctrl+C to stop)"));
+
+    return new Promise((resolve) => {
+      const timer = setInterval(async () => {
+        try {
+          await fs.promises.stat(filePath);
+          clearInterval(timer);
+          await followFile(filePath, tailLines);
+          resolve();
+        } catch {
+          // file not available yet
+        }
+      }, 1000);
+
+      process.on("SIGINT", () => {
+        clearInterval(timer);
+        console.log(picocolors.dim("\nLog follow stopped."));
+        resolve();
+      });
+    });
   }
 }

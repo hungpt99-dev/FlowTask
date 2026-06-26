@@ -1,15 +1,19 @@
 import picocolors from "picocolors";
 import ora from "ora";
 import { ProjectManager } from "../../core/project-manager.js";
+import { ConfigLoader } from "../../config/config-loader.js";
 import path from "node:path";
 
 export async function doctorCommand(): Promise<void> {
   const rootPath = process.cwd();
   console.log(picocolors.cyan("\nFlowTask Doctor"));
-  console.log(picocolors.dim("─".repeat(40)));
+  console.log(picocolors.dim("─".repeat(50)));
   console.log("");
 
-  const checks: Array<{ name: string; run: () => Promise<{ ok: boolean; message: string }> }> = [
+  const checks: Array<{
+    name: string;
+    run: () => Promise<{ ok: boolean; message: string }>;
+  }> = [
     {
       name: "Node.js version",
       run: async () => {
@@ -84,6 +88,35 @@ export async function doctorCommand(): Promise<void> {
         return missing.length === 0
           ? { ok: true, message: "all files present" }
           : { ok: false, message: `missing: ${missing.join(", ")}` };
+      },
+    },
+    {
+      name: "Configured executors",
+      run: async () => {
+        const loader = new ConfigLoader();
+        try {
+          const config = await loader.load(rootPath);
+          const executorNames = Object.keys(config.executors ?? {});
+          const results: string[] = [];
+          for (const name of executorNames) {
+            const entry = config.executors[name]!;
+            if (entry.type === "shell") {
+              results.push(`${name}: available (built-in)`);
+            } else if (entry.command) {
+              const { spawnWithPromise } = await import("../../utils/process.js");
+              try {
+                const cmd = entry.command.split(/\s+/)[0]!;
+                await spawnWithPromise("which", [cmd], { timeout: 3000 });
+                results.push(`${name}: available (${entry.command})`);
+              } catch {
+                results.push(`${name}: ${picocolors.yellow("not found")} (${entry.command})`);
+              }
+            }
+          }
+          return { ok: true, message: results.join("\n            ") };
+        } catch {
+          return { ok: false, message: "could not check executors" };
+        }
       },
     },
   ];

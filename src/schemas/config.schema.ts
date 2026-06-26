@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PlannerConfigSchema } from "./planner.schema.js";
 
 export const RuleSourceConfigSchema = z.object({
   enabled: z.boolean().default(true),
@@ -43,12 +44,21 @@ export const LimitsConfigSchema = z.object({
   maxLogSizeMb: z.number().int().positive().default(20),
 });
 
-export const ExecutorConfigSchema = z.record(
-  z.object({
-    type: z.enum(["shell", "command"]),
-    command: z.string().optional(),
-  }),
-);
+export const ExecutorEntrySchema = z.object({
+  type: z.enum(["shell", "command"]),
+  command: z.string().optional(),
+  args: z.array(z.string()).optional().default([]),
+  inputMode: z.enum(["argument", "stdin", "file"]).optional().default("argument"),
+  fileArg: z.string().optional(),
+  timeoutMs: z.number().int().positive().optional().default(1800000),
+});
+
+export const ExecutorConfigSchema = z.record(ExecutorEntrySchema);
+
+export const ProcessConfigSchema = z.object({
+  gracefulStopTimeoutMs: z.number().int().positive().default(5000),
+  forceKillTimeoutMs: z.number().int().positive().default(10000),
+});
 
 export const FlowTaskConfigSchema = z.object({
   version: z.string().default("1.0"),
@@ -60,7 +70,10 @@ export const FlowTaskConfigSchema = z.object({
   approval: ApprovalConfigSchema.default({}),
   quality: QualityConfigSchema.default({}),
   limits: LimitsConfigSchema.default({}),
+  planner: PlannerConfigSchema.default({}),
+  process: ProcessConfigSchema.default({}),
   executors: ExecutorConfigSchema.default({}),
 });
 
 export type FlowTaskConfig = z.infer<typeof FlowTaskConfigSchema>;
+export type ExecutorEntry = z.infer<typeof ExecutorEntrySchema>;

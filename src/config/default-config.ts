@@ -42,11 +42,39 @@ export function generateDefaultConfig(): FlowTaskConfig {
       maxRetries: 2,
       maxLogSizeMb: 20,
     },
+    planner: {
+      default: "auto",
+      executor: "opencode",
+      maxRetries: 1,
+      fallbackToSimple: true,
+    },
+    process: {
+      gracefulStopTimeoutMs: 5000,
+      forceKillTimeoutMs: 10000,
+    },
     executors: {
-      shell: { type: "shell" },
-      opencode: { type: "command", command: "opencode run" },
-      claude: { type: "command", command: "claude" },
-      codex: { type: "command", command: "codex" },
+      shell: { type: "shell", args: [], inputMode: "argument", timeoutMs: 1800000 },
+      opencode: {
+        type: "command",
+        command: "opencode",
+        args: ["run"],
+        inputMode: "argument",
+        timeoutMs: 1800000,
+      },
+      claude: {
+        type: "command",
+        command: "claude",
+        args: [],
+        inputMode: "stdin",
+        timeoutMs: 1800000,
+      },
+      codex: {
+        type: "command",
+        command: "codex",
+        args: [],
+        inputMode: "argument",
+        timeoutMs: 1800000,
+      },
     },
   };
 }

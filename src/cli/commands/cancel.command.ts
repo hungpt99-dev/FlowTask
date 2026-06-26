@@ -1,7 +1,9 @@
 import picocolors from "picocolors";
 import { ProjectManager } from "../../core/project-manager.js";
 import { RunManager } from "../../core/run-manager.js";
+import { ProcessManager } from "../../core/process-manager.js";
 import { EventStore } from "../../core/event-store.js";
+import { ConfigLoader } from "../../config/config-loader.js";
 
 export async function cancelCommand(runId: string): Promise<void> {
   const rootPath = process.cwd();
@@ -26,18 +28,31 @@ export async function cancelCommand(runId: string): Promise<void> {
     process.exit(0);
   }
 
+  const eventStore = new EventStore(rootPath);
+  const configLoader = new ConfigLoader();
+  const config = await configLoader.load(rootPath);
+  const gracefulTimeout = config.process?.gracefulStopTimeoutMs ?? 5000;
+
+  const processManager = new ProcessManager();
+  const hasProcess = processManager.hasActiveProcess(runId);
+
+  if (hasProcess) {
+    console.log(picocolors.yellow(`\nStopping executor process for run: ${run.title}...`));
+    await processManager.stopProcess(rootPath, runId, gracefulTimeout);
+    console.log(picocolors.green("  Executor process stopped."));
+  }
+
   await runManager.updateRunStatus(runId, "cancelled");
 
   const tasks = await runManager.loadTasks(runId);
   for (const task of tasks) {
-    if (task.status === "running" || task.status === "pending") {
+    if (task.status === "running" || task.status === "pending" || task.status === "interrupted") {
       await runManager.updateTaskStatus(runId, task.id, "cancelled");
     }
   }
 
-  const eventStore = new EventStore(rootPath);
   await eventStore.appendToRun(runId, {
-    type: "run_failed",
+    type: "run_cancelled",
     runId,
     message: "Run cancelled by user",
   });

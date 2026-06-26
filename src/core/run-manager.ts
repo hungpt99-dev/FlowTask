@@ -1,3 +1,4 @@
+import path from "node:path";
 import { type Run, type RunIndex, RunSchema, RunIndexSchema } from "../schemas/run.schema.js";
 import { type Task, type TaskIndex, TaskSchema, TaskIndexSchema } from "../schemas/task.schema.js";
 import {
@@ -230,5 +231,34 @@ export class RunManager {
     tasks[idx] = updated;
     await this.saveTasks(runId, tasks);
     return updated;
+  }
+
+  async loadTaskOutput(runId: string, taskId: string): Promise<string> {
+    const logDir = getLogsDir(this.rootPath, runId);
+    const logPath = path.join(logDir, `${taskId}.log`);
+    try {
+      const { readTextFile } = await import("../utils/fs.js");
+      return await readTextFile(logPath);
+    } catch {
+      return "";
+    }
+  }
+
+  async loadPrompt(runId: string): Promise<string> {
+    try {
+      const { readTextFile } = await import("../utils/fs.js");
+      return await readTextFile(promptMdPath(this.rootPath, runId));
+    } catch {
+      return runId;
+    }
+  }
+
+  async loadRulesContext(runId: string): Promise<string> {
+    try {
+      const { readTextFile } = await import("../utils/fs.js");
+      return await readTextFile(rulesContextPath(this.rootPath, runId));
+    } catch {
+      return "";
+    }
   }
 }

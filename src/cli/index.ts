@@ -1,5 +1,3 @@
-#!/usr/bin/env node
-
 import { Command } from "commander";
 import { initCommand } from "./commands/init.command.js";
 import { runCommand } from "./commands/run.command.js";
@@ -38,6 +36,7 @@ program
   .argument("<prompt>", "The prompt describing the work to be done")
   .option("--executor <name>", "Executor to use (shell, opencode, claude, codex)", "shell")
   .option("--mode <mode>", "Run mode: auto | manual | plan-only | dry-run | debug", "auto")
+  .option("--planner <mode>", "Planner mode: simple | ai | auto", "auto")
   .option("--quality", "Run quality checks after completion")
   .option("--plan-only", "Only generate the plan, do not execute")
   .option("--dry-run", "Show what would happen without executing")
@@ -65,24 +64,31 @@ program
 program
   .command("logs")
   .description("Show logs for runs and tasks")
-  .option("--follow", "Follow logs in real time")
+  .option("--follow", "Follow logs in real time (tail -f style)")
   .option("--run <runId>", "Filter by run ID")
   .option("--task <taskId>", "Filter by task ID")
   .option("--validation", "Show validation logs only")
+  .option("--runtime", "Show runtime logs only")
+  .option("--tail <number>", "Number of lines to show from the end", "80")
   .action(logsCommand);
 
 program
   .command("resume")
-  .description("Resume an interrupted run")
+  .description("Resume an interrupted run and continue execution")
   .argument("[runId]", "Run ID to resume")
+  .option("--from <taskId>", "Continue from a specific task ID")
+  .option("--skip-interrupted", "Skip interrupted tasks instead of retrying them")
+  .option("--dry-run", "Show what would resume without executing")
   .action(resumeCommand);
 
 program
   .command("retry")
-  .description("Retry a failed task")
+  .description("Retry a failed task immediately")
   .argument("<taskId>", "Task ID to retry")
   .option("--run <runId>", "Run ID containing the task")
-  .option("--force", "Force retry even if task was not failed")
+  .option("--continue", "Continue remaining pending tasks after retry")
+  .option("--force", "Force retry even if maxRetries reached")
+  .option("--dry-run", "Show retry plan without executing")
   .action(retryCommand);
 
 program
@@ -91,11 +97,14 @@ program
   .argument("<runId>", "Run ID to inspect")
   .action(inspectCommand);
 
-program.command("stop").description("Stop the current running task").action(stopCommand);
+program
+  .command("stop")
+  .description("Stop the current running task and its executor process")
+  .action(stopCommand);
 
 program
   .command("cancel")
-  .description("Cancel a run")
+  .description("Cancel a run and stop its executor process if running")
   .argument("<runId>", "Run ID to cancel")
   .action(cancelCommand);
 

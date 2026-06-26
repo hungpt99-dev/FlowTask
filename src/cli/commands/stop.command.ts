@@ -1,7 +1,9 @@
 import picocolors from "picocolors";
 import { ProjectManager } from "../../core/project-manager.js";
 import { RunManager } from "../../core/run-manager.js";
+import { ProcessManager } from "../../core/process-manager.js";
 import { EventStore } from "../../core/event-store.js";
+import { ConfigLoader } from "../../config/config-loader.js";
 
 export async function stopCommand(): Promise<void> {
   const rootPath = process.cwd();
@@ -14,7 +16,6 @@ export async function stopCommand(): Promise<void> {
   }
 
   const state = await manager.loadState(rootPath);
-
   if (!state?.activeRunId) {
     console.log(picocolors.yellow("No active run to stop."));
     process.exit(0);
@@ -28,13 +29,35 @@ export async function stopCommand(): Promise<void> {
     process.exit(1);
   }
 
-  await runManager.updateRunStatus(state.activeRunId, "interrupted");
+  const configLoader = new ConfigLoader();
+  const config = await configLoader.load(rootPath);
+  const gracefulTimeout = config.process?.gracefulStopTimeoutMs ?? 5000;
+
   const eventStore = new EventStore(rootPath);
-  await eventStore.appendToRun(state.activeRunId, {
-    type: "run_interrupted",
-    runId: state.activeRunId,
-    message: "Run stopped by user",
-  });
+  const processManager = new ProcessManager();
+
+  const hasProcess = processManager.hasActiveProcess(state.activeRunId);
+
+  if (hasProcess) {
+    console.log(picocolors.yellow(`\nStopping executor process for run: ${run.title}...`));
+    const stopped = await processManager.stopProcess(rootPath, state.activeRunId, gracefulTimeout);
+
+    await eventStore.appendToRun(state.activeRunId, {
+      type: stopped ? "process_stopped" : "process_stop_failed",
+      runId: state.activeRunId,
+      message: stopped ? "Process stopped" : "Failed to stop process",
+    });
+
+    if (stopped) {
+      console.log(picocolors.green("  Executor process stopped."));
+    } else {
+      console.log(picocolors.red("  Could not stop executor process."));
+    }
+  } else {
+    console.log(picocolors.dim("  No active executor process found."));
+  }
+
+  await runManager.updateRunStatus(state.activeRunId, "interrupted");
 
   const tasks = await runManager.loadTasks(state.activeRunId);
   const runningTasks = tasks.filter((t) => t.status === "running");
@@ -50,7 +73,13 @@ export async function stopCommand(): Promise<void> {
     });
   }
 
-  console.log(picocolors.yellow(`\nRun stopped: ${run.title}`));
+  await eventStore.appendToRun(state.activeRunId, {
+    type: "run_interrupted",
+    runId: state.activeRunId,
+    message: "Run stopped by user via flowtask stop",
+  });
+
+  console.log(picocolors.yellow(`\n✓ Run stopped: ${run.title}`));
   console.log(picocolors.dim(`  Run ID: ${state.activeRunId}`));
   console.log(picocolors.cyan(`  Resume: flowtask resume ${state.activeRunId}`));
 }

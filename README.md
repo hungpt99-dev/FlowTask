@@ -85,11 +85,50 @@ flowtask rules       # Manage FlowTask rule sources
 - `dry-run` — show what would happen without executing
 - `debug` — show detailed state, config, and execution info
 
+### Planner Modes
+
+- `simple` — always use the fixed 7-task template
+- `ai` — use AI planner (requires configured AI executor); fails if AI unavailable
+- `auto` — try AI planner, fall back to simple if unavailable (default)
+
+### Resume
+
+```bash
+flowtask resume                    # Auto-continue from interruption
+flowtask resume <runId>            # Resume a specific run
+flowtask resume <runId> --from task_004  # Continue from a specific task
+flowtask resume <runId> --dry-run  # Show resume plan without executing
+```
+
+### Retry
+
+```bash
+flowtask retry task_005            # Retry a failed task immediately
+flowtask retry task_005 --continue # Retry then continue remaining tasks
+flowtask retry task_005 --force    # Bypass maxRetries check
+flowtask retry task_005 --dry-run  # Show retry plan without executing
+```
+
+### Logs
+
+```bash
+flowtask logs --follow             # Stream logs in real time (tail -f style)
+flowtask logs --follow --tail 100  # Show last 100 lines then follow
+flowtask logs --follow --task task_005  # Follow a specific task log
+flowtask logs --follow --validation     # Follow validation logs
+```
+
+### Stop / Cancel
+
+````bash
+flowtask stop                      # Stop running task + signal executor process
+flowtask cancel <runId>            # Cancel run + kill executor process
+
 ## Build
 
 ```bash
 pnpm build
-```
+````
 
 Output goes to `dist/`.
 
@@ -179,15 +218,11 @@ FlowTask orchestrates; AI CLI tools execute the work.
 - **No web UI** — CLI only. A local dashboard is planned for the future.
 - **No cloud sync** — All data is local to the project. No cloud backup or sharing.
 - **No parallel task execution** — Tasks run sequentially within a run.
-- **No advanced AI planner** — The simple planner generates a fixed 7-task template. AI-driven planning is not yet implemented.
-- **Resume** — Basic: marks interrupted tasks but does not auto-continue execution.
-- **Retry** — Basic: resets task status to pending for manual re-run.
-- **Stop** — Graceful stop via state update but no process signal to running executor.
-- **Logs --follow** — The flag is accepted but real-time log streaming is not yet implemented.
-- **External AI CLI executors** — Shell executor is functional. Command executor for tools like `opencode`, `claude`, `codex` is registered but requires configuration.
 - **No team features** — Single-user, local-only.
-- **No database** — All state is file-based using JSON and JSONL.
+- **No database** — All state is file-based using JSON and JSONL intentionally.
 - **Windows testing** — Cross-platform utilities (`getShell()`, `path.join`) are in place but Windows has not been tested end-to-end.
+- **AI planner** — The AI planner requires a configured AI executor (e.g., opencode, claude) and will fall back to the simple planner if unavailable.
+- **External AI CLI integration** — The command executor supports argument, stdin, and file input modes, but end-to-end integration with specific tools may require configuration tuning.
 
 ## License
 
