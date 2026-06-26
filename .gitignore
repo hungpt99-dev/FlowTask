@@ -8,3 +8,4 @@ coverage/
 *.log
 .flowtask/runs/
 .flowtask/
+.flowtask/rules/
