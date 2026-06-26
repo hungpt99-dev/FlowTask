@@ -30,7 +30,7 @@ describe("ConfigLoader", () => {
   it("should return default config when no config file exists", async () => {
     const config = await loader.load(join(testDir, "nonexistent-project"));
     expect(config.version).toBe("1.0");
-    expect(config.defaultExecutor).toBe("shell");
+    expect(config.defaultExecutor).toBe("opencode");
     expect(config.rules.enabled).toBe(true);
   });
 

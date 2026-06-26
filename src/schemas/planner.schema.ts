@@ -1,6 +1,13 @@
 import { z } from "zod";
 
-export const PlannerRiskLevelSchema = z.enum(["safe", "risky", "dangerous"]);
+export const PlannerRiskLevelSchema = z.enum([
+  "safe",
+  "risky",
+  "dangerous",
+  "low",
+  "medium",
+  "high",
+]);
 
 export const PlannerTaskValidationSchema = z.object({
   commands: z.array(z.string()).optional().default([]),
@@ -16,6 +23,7 @@ export const AiPlannerTaskSchema = z.object({
   dependsOn: z.array(z.string()).optional().default([]),
   riskLevel: PlannerRiskLevelSchema.optional().default("safe"),
   acceptanceCriteria: z.array(z.string().min(1)).min(1),
+  commands: z.array(z.string()).optional().default([]),
   validation: PlannerTaskValidationSchema.optional().default({}),
 });
 
@@ -27,10 +35,46 @@ export const AiPlannerOutputSchema = z.object({
 
 export const PlannerConfigSchema = z.object({
   default: z.enum(["simple", "ai", "auto"]).default("auto"),
-  executor: z.string().default("shell"),
+  type: z.enum(["internal-ai", "external-ai", "simple"]).optional().default("internal-ai"),
+  executor: z.string().default("opencode"),
+  provider: z.string().default("openai"),
+  model: z.string().default("gpt-4.1-mini"),
   maxRetries: z.number().int().min(0).default(1),
   fallbackToSimple: z.boolean().default(true),
 });
+
+export function normalizeRiskLevel(risk: string): "safe" | "risky" | "dangerous" {
+  switch (risk) {
+    case "low":
+      return "safe";
+    case "medium":
+      return "risky";
+    case "high":
+      return "dangerous";
+    case "safe":
+    case "risky":
+    case "dangerous":
+      return risk;
+    default:
+      return "safe";
+  }
+}
+
+export function isValidRequiredArtifact(path: string): boolean {
+  const knownExtensions =
+    /\.(md|json|txt|log|yaml|yml|toml|xml|csv|html|css|js|ts|mjs|cjs|tsx|jsx)$/i;
+  return path.includes("/") && knownExtensions.test(path);
+}
+
+export function validateArtifactPaths(paths: string[]): string[] {
+  const invalid: string[] = [];
+  for (const p of paths) {
+    if (!isValidRequiredArtifact(p)) {
+      invalid.push(p);
+    }
+  }
+  return invalid;
+}
 
 export type AiPlannerOutput = z.infer<typeof AiPlannerOutputSchema>;
 export type AiPlannerTask = z.infer<typeof AiPlannerTaskSchema>;

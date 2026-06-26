@@ -65,6 +65,16 @@ export const EventTypeSchema = z.enum([
   "ai_planner_repair_succeeded",
   "ai_planner_repair_failed",
   "ai_planner_fallback_to_simple",
+  "internal_ai_planner_started",
+  "internal_ai_planner_provider_selected",
+  "internal_ai_planner_output_received",
+  "internal_ai_planner_json_extracted",
+  "internal_ai_planner_validation_passed",
+  "internal_ai_planner_validation_failed",
+  "internal_ai_planner_repair_started",
+  "internal_ai_planner_repair_succeeded",
+  "internal_ai_planner_repair_failed",
+  "internal_ai_planner_fallback_to_simple",
 ]);
 
 export const FlowTaskEventSchema = z.object({

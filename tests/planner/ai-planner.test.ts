@@ -222,9 +222,17 @@ describe("PlannerRegistry", () => {
     expect(result.mode).toBe("simple");
   });
 
-  it("should use AI planner when executor is configured", () => {
+  it("should use external AI planner when executor is configured", () => {
     const config = {
-      planner: { default: "auto", executor: "opencode", maxRetries: 1, fallbackToSimple: true },
+      planner: {
+        default: "auto",
+        type: "external-ai" as const,
+        executor: "opencode",
+        provider: "openai",
+        model: "gpt-4.1-mini",
+        maxRetries: 1,
+        fallbackToSimple: true,
+      },
       executors: {
         opencode: {
           type: "command",
@@ -243,7 +251,15 @@ describe("PlannerRegistry", () => {
 
   it("should return simple planner for --planner simple even with AI executor", () => {
     const config = {
-      planner: { default: "auto", executor: "opencode", maxRetries: 1, fallbackToSimple: true },
+      planner: {
+        default: "auto",
+        type: "external-ai" as const,
+        executor: "opencode",
+        provider: "openai",
+        model: "gpt-4.1-mini",
+        maxRetries: 1,
+        fallbackToSimple: true,
+      },
       executors: {
         opencode: {
           type: "command",
@@ -262,7 +278,15 @@ describe("PlannerRegistry", () => {
 
   it("should resolve planner modes correctly", () => {
     const config = {
-      planner: { default: "auto", executor: "shell", maxRetries: 1, fallbackToSimple: true },
+      planner: {
+        default: "auto",
+        type: "external-ai" as const,
+        executor: "shell",
+        provider: "openai",
+        model: "gpt-4.1-mini",
+        maxRetries: 1,
+        fallbackToSimple: true,
+      },
       executors: {},
     } as unknown as FlowTaskConfig;
 

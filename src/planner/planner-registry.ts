@@ -1,13 +1,16 @@
 import { type Planner } from "./planner.js";
 import { SimplePlanner } from "./simple-planner.js";
+import { InternalAiPlanner } from "./internal-ai-planner.js";
 import { AiPlanner } from "./ai-planner.js";
 import type { FlowTaskConfig } from "../schemas/config.schema.js";
+import { ProviderRegistry } from "../ai/provider-registry.js";
 
 export type PlannerMode = "simple" | "ai" | "auto";
 
 export class PlannerRegistry {
   private simplePlanner: SimplePlanner;
-  private aiPlanner?: AiPlanner;
+  private internalAiPlanner?: InternalAiPlanner;
+  private externalAiPlanner?: AiPlanner;
   private config: FlowTaskConfig;
 
   constructor(config: FlowTaskConfig) {
@@ -21,25 +24,61 @@ export class PlannerRegistry {
         return { planner: this.simplePlanner, mode: "simple" };
 
       case "ai": {
-        if (!this.aiPlanner) {
-          this.aiPlanner = new AiPlanner(this.config);
+        const plannerType = this.config.planner?.type ?? "internal-ai";
+        if (plannerType === "internal-ai") {
+          if (!this.internalAiPlanner) {
+            this.internalAiPlanner = new InternalAiPlanner(this.config);
+          }
+          return { planner: this.internalAiPlanner, mode: "ai" };
         }
-        return { planner: this.aiPlanner, mode: "ai" };
+        if (!this.externalAiPlanner) {
+          this.externalAiPlanner = new AiPlanner(this.config);
+        }
+        return { planner: this.externalAiPlanner, mode: "ai" };
       }
 
       case "auto": {
-        const hasAiExecutor =
-          this.config.planner?.executor &&
-          this.config.executors?.[this.config.planner.executor] !== undefined;
+        const plannerType = this.config.planner?.type ?? "internal-ai";
 
-        if (!hasAiExecutor) {
-          return { planner: this.simplePlanner, mode: "simple" };
+        if (plannerType === "internal-ai") {
+          const providers = new ProviderRegistry(this.config);
+          const hasProvider =
+            this.config.planner?.provider &&
+            this.config.ai?.providers?.[this.config.planner.provider] !== undefined;
+
+          if (!hasProvider) {
+            return { planner: this.simplePlanner, mode: "simple" };
+          }
+
+          const apiKeyEnv = providers.getApiKeyEnv();
+          const hasKey = apiKeyEnv ? !!process.env[apiKeyEnv] : false;
+
+          if (!hasKey) {
+            return { planner: this.simplePlanner, mode: "simple" };
+          }
+
+          if (!this.internalAiPlanner) {
+            this.internalAiPlanner = new InternalAiPlanner(this.config);
+          }
+          return { planner: this.internalAiPlanner, mode: "ai" };
         }
 
-        if (!this.aiPlanner) {
-          this.aiPlanner = new AiPlanner(this.config);
+        if (plannerType === "external-ai") {
+          const hasAiExecutor =
+            this.config.planner?.executor &&
+            this.config.executors?.[this.config.planner.executor] !== undefined;
+
+          if (!hasAiExecutor) {
+            return { planner: this.simplePlanner, mode: "simple" };
+          }
+
+          if (!this.externalAiPlanner) {
+            this.externalAiPlanner = new AiPlanner(this.config);
+          }
+          return { planner: this.externalAiPlanner, mode: "ai" };
         }
-        return { planner: this.aiPlanner, mode: "ai" };
+
+        return { planner: this.simplePlanner, mode: "simple" };
       }
 
       default:

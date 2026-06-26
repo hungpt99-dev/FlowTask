@@ -3,6 +3,7 @@ import ora from "ora";
 import { ProjectManager } from "../../core/project-manager.js";
 import { ConfigLoader } from "../../config/config-loader.js";
 import { spawnWithPromise } from "../../utils/process.js";
+import { ProviderRegistry } from "../../ai/provider-registry.js";
 import path from "node:path";
 
 export async function doctorCommand(): Promise<void> {
@@ -79,6 +80,35 @@ export async function doctorCommand(): Promise<void> {
 
   const loader = new ConfigLoader();
   const config = await loader.load(rootPath);
+
+  console.log(picocolors.cyan("\nPlanner"));
+  console.log(picocolors.dim("─".repeat(60)));
+  const plannerConfig = config.planner!;
+  console.log(`  Mode: ${picocolors.bold(plannerConfig.default)}`);
+  console.log(`  Type: ${picocolors.bold(plannerConfig.type ?? "internal-ai")}`);
+
+  if (plannerConfig.type === "internal-ai") {
+    console.log(`  Provider: ${picocolors.bold(plannerConfig.provider)}`);
+    console.log(`  Model: ${picocolors.bold(plannerConfig.model)}`);
+
+    const providers = new ProviderRegistry(config);
+    const apiKeyEnv = providers.getApiKeyEnv();
+    if (apiKeyEnv) {
+      console.log(`  API key env: ${apiKeyEnv}`);
+      if (process.env[apiKeyEnv]) {
+        console.log(`  API key available: ${picocolors.green("yes")}`);
+      } else {
+        console.log(
+          `  API key available: ${picocolors.red("no")} — ${picocolors.yellow("AI planner will fallback to simple planner")}`,
+        );
+        console.log(
+          `  ${picocolors.dim(`    Set ${apiKeyEnv}=your-api-key or run with --planner simple`)}`,
+        );
+        allOk = false;
+      }
+    }
+  }
+
   const executorNames = Object.keys(config.executors ?? {});
 
   console.log(picocolors.cyan("\nConfigured Executors"));

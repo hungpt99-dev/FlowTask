@@ -1606,47 +1606,83 @@ This gives predictable behavior.
 
 ---
 
-## 15.4 AI Planner
+## 15.4 AI Planner (Internal)
 
-Future AI planner can generate custom tasks.
+FlowTask uses an internal AI/API provider for planning, not an external AI CLI.
 
-Output must be structured and validated.
+This is a key architectural decision:
 
-Example output:
+```text
+Planner = internal AI API (OpenAI-compatible)
+Executor = external AI CLI (opencode, claude, codex)
+```
+
+### Why Internal AI for Planning?
+
+AI CLI output (opencode, claude, codex, aider) includes:
+
+```text
+model banners
+tool logs
+file read logs
+markdown fences
+normal prose before/after JSON
+partial JSON
+implementation text
+```
+
+This makes JSON extraction unreliable. The internal AI API uses `response_format: { type: "json_object" }` to return clean structured JSON.
+
+### Internal AI Planner Architecture
+
+```text
+src/ai/
+  ai-provider.ts       # AiProvider interface
+  openai-provider.ts   # OpenAI-compatible provider using fetch
+  provider-registry.ts # Provider instance management
+  ai.schema.ts         # AI config schema
+
+src/planner/
+  internal-ai-planner.ts  # Internal AI planner implementation
+  simple-planner.ts       # Fixed 7-task template
+  planner.ts               # Planner interface
+  planner-registry.ts     # Planner mode resolution
+```
+
+### Config
 
 ```json
 {
-  "title": "Implement OCR module",
-  "tasks": [
-    {
-      "title": "Inspect OCR-related files",
-      "description": "Find existing OCR-related files and dependencies.",
-      "executor": "shell",
-      "acceptanceCriteria": ["Project analysis artifact exists"],
-      "validation": {
-        "requiredArtifacts": ["artifacts/task_002/project-analysis.md"]
-      }
-    },
-    {
-      "title": "Implement OCR service",
-      "description": "Create OCR service, types, and tests.",
-      "executor": "opencode",
-      "acceptanceCriteria": [
-        "OCR service file exists",
-        "OCR type file exists",
-        "OCR test file exists",
-        "Tests pass"
-      ],
-      "validation": {
-        "commands": ["pnpm typecheck", "pnpm test"],
-        "requiredFiles": ["src/ocr/ocr.service.ts", "src/ocr/ocr.types.ts", "src/ocr/ocr.test.ts"]
+  "planner": {
+    "mode": "auto",
+    "type": "internal-ai",
+    "provider": "openai",
+    "model": "gpt-4.1-mini",
+    "maxRetries": 1
+  },
+  "ai": {
+    "providers": {
+      "openai": {
+        "type": "openai",
+        "apiKeyEnv": "OPENAI_API_KEY",
+        "baseUrl": "https://api.openai.com/v1"
       }
     }
-  ]
+  }
 }
 ```
 
-If validation fails, fallback to simple planner.
+### Planner Output Validation
+
+Output is validated with Zod (`AiPlannerOutputSchema`), including:
+
+- Risk level normalization (`low` → `safe`, `medium` → `risky`, `high` → `dangerous`)
+- Artifact path validation (must be relative file paths with extensions)
+- Shell task validation (must have non-empty commands if executor=shell)
+- Executor validation (must exist in config or built-in presets)
+- Dependency normalization (title references → task IDs)
+
+If validation fails, retry once with repair prompt, then fallback or fail by mode.
 
 ---
 

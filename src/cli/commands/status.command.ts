@@ -1,6 +1,8 @@
 import { ProjectManager } from "../../core/project-manager.js";
 import { RunManager } from "../../core/run-manager.js";
 import picocolors from "picocolors";
+import { coloredSymbol, projectStatusLabel } from "../../ui/formatters/status-format.js";
+import { formatTimeAgo } from "../../ui/formatters/duration-format.js";
 
 export async function statusCommand(): Promise<void> {
   const rootPath = process.cwd();
@@ -16,11 +18,11 @@ export async function statusCommand(): Promise<void> {
   const state = await manager.loadState(rootPath);
   const config = await manager.loadConfig(rootPath);
 
-  console.log(picocolors.cyan("\nFlowTask Status"));
-  console.log(picocolors.dim("─".repeat(40)));
-  console.log(`  Project: ${picocolors.bold(project.name)}`);
-  console.log(`  ID:      ${picocolors.dim(project.projectId)}`);
-  console.log(`  Status:  ${formatStatus(state?.status ?? "unknown")}`);
+  console.log("");
+  console.log(picocolors.bold("  FlowTask Project"));
+  console.log(picocolors.dim("  " + "─".repeat(50)));
+  console.log(`  ${picocolors.dim("Project:")}  ${picocolors.bold(project.name)}`);
+  console.log(`  ${picocolors.dim("Status:")}   ${projectStatusLabel(state?.status ?? "unknown")}`);
 
   const runManager = new RunManager(rootPath);
   const targetRunId = state?.activeRunId ?? state?.lastRunId;
@@ -29,82 +31,49 @@ export async function statusCommand(): Promise<void> {
     const run = await runManager.loadRun(targetRunId);
     if (run) {
       const label = run.runId === state?.activeRunId ? "Active Run" : "Last Run";
-      console.log(`\n  ${label}: ${picocolors.cyan(run.title)}`);
-      console.log(`  Run ID:     ${picocolors.dim(run.runId)}`);
-      console.log(`  Status:     ${formatRunStatus(run.status)}`);
-      console.log(`  Mode:       ${picocolors.dim(run.mode)}`);
-      console.log(`  Progress:   ${run.completedTaskCount}/${run.taskCount} tasks`);
+      console.log(picocolors.dim(`  ${"─".repeat(50)}`));
+      console.log(`  ${picocolors.bold(label)}`);
+      console.log(`  ${picocolors.dim("Title:")}    ${picocolors.cyan(run.title)}`);
+      console.log(`  ${picocolors.dim("Run ID:")}   ${picocolors.dim(run.runId)}`);
+      console.log(`  ${picocolors.dim("Status:")}   ${coloredSymbol(run.status)} ${run.status}`);
+      console.log(
+        `  ${picocolors.dim("Created:")}  ${new Date(run.createdAt).toLocaleString()} (${formatTimeAgo(run.createdAt)})`,
+      );
+      console.log(
+        `  ${picocolors.dim("Updated:")}  ${new Date(run.updatedAt).toLocaleString()} (${formatTimeAgo(run.updatedAt)})`,
+      );
+      console.log(
+        `  ${picocolors.dim("Progress:")} ${run.completedTaskCount}/${run.taskCount} tasks completed`,
+      );
 
       const tasks = await runManager.loadTasks(run.runId);
       if (tasks.length > 0) {
-        console.log(picocolors.dim("\n  Tasks:"));
+        console.log(picocolors.dim(`  ${"─".repeat(50)}`));
+        console.log(`  Tasks:`);
         for (let i = 0; i < tasks.length; i++) {
           const t = tasks[i]!;
-          const icon = statusIcon(t.status);
-          console.log(`    ${icon} [${i + 1}/${tasks.length}] ${t.title}`);
+          const icon = coloredSymbol(t.status);
+          const isCurrent = t.status === "running" ? picocolors.cyan(" ◀ current") : "";
+          console.log(`    ${icon} ${t.title}${isCurrent}`);
         }
       }
     }
   }
 
-  console.log(picocolors.dim("\n  Config:"));
-  console.log(`    Default executor: ${config.defaultExecutor}`);
-  console.log(`    Log level:        ${config.logLevel}`);
-  console.log(`    Auto resume:      ${config.autoResume ? "yes" : "no"}`);
+  console.log(picocolors.dim(`  ${"─".repeat(50)}`));
+  console.log(`  ${picocolors.dim("Config:")}`);
+  console.log(`    ${picocolors.dim("Default executor:")} ${config.defaultExecutor}`);
+  console.log(`    ${picocolors.dim("Planner mode:")}      ${config.planner?.default ?? "auto"}`);
+  console.log(
+    `    ${picocolors.dim("Planner type:")}      ${config.planner?.type ?? "internal-ai"}`,
+  );
   console.log("");
-}
 
-function formatStatus(status: string): string {
-  switch (status) {
-    case "idle":
-      return picocolors.green("idle");
-    case "has_running_run":
-      return picocolors.cyan("running");
-    case "has_failed_run":
-      return picocolors.red("failed");
-    case "has_interrupted_run":
-      return picocolors.yellow("interrupted");
-    default:
-      return picocolors.dim(status);
-  }
-}
-
-function formatRunStatus(status: string): string {
-  switch (status) {
-    case "completed":
-      return picocolors.green("completed");
-    case "running":
-      return picocolors.cyan("running");
-    case "failed":
-      return picocolors.red("failed");
-    case "cancelled":
-      return picocolors.yellow("cancelled");
-    case "paused":
-      return picocolors.yellow("paused");
-    case "interrupted":
-      return picocolors.yellow("interrupted");
-    default:
-      return picocolors.dim(status);
-  }
-}
-
-function statusIcon(status: string): string {
-  switch (status) {
-    case "done":
-      return "✓";
-    case "running":
-      return "◌";
-    case "failed":
-      return "✗";
-    case "pending":
-      return "·";
-    case "skipped":
-      return "−";
-    case "cancelled":
-      return "−";
-    case "blocked":
-      return "⊘";
-    default:
-      return "·";
+  if (state?.activeRunId) {
+    console.log(`  ${picocolors.cyan("Next commands:")}`);
+    console.log(`    ${picocolors.dim("flowtask logs --follow")}`);
+    console.log(`    ${picocolors.dim("flowtask stop")}`);
+    console.log(`    ${picocolors.dim(`flowtask inspect ${state.activeRunId}`)}`);
+    console.log("");
   }
 }

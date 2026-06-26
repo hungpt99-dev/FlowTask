@@ -45,7 +45,7 @@ export async function logsCommand(options: {
 
   if (logPath) {
     if (options.follow) {
-      await followFile(logPath, tailLines);
+      await followFile(runId, logPath, tailLines, options.task);
     } else {
       const content = await readLastLines(logPath, tailLines);
       if (!content) {
@@ -63,7 +63,6 @@ export async function logsCommand(options: {
     return;
   }
 
-  // No specific log type selected — show list
   const logFiles = await logManager.listLogFiles(runId);
   if (logFiles.length === 0) {
     console.log(picocolors.yellow(`No log files found for run ${runId}`));
@@ -73,12 +72,15 @@ export async function logsCommand(options: {
   console.log(picocolors.cyan(`\nLog files for run ${runId}:`));
   console.log(picocolors.dim("─".repeat(60)));
   for (const file of logFiles) {
-    console.log(`  ${picocolors.dim("📄")} ${file}`);
+    console.log(`  ${picocolors.dim("•")} ${file}`);
   }
-  console.log(picocolors.dim("\nUse --task <taskId> to view specific task logs."));
-  console.log(picocolors.dim("Use --validation to view validation logs."));
-  console.log(picocolors.dim("Use --runtime to view runtime logs."));
-  console.log(picocolors.dim("Use --follow to stream logs in real time."));
+  console.log("");
+  console.log(picocolors.dim("  Use these options to view logs:"));
+  console.log(picocolors.dim(`  --task <taskId>    View specific task logs`));
+  console.log(picocolors.dim(`  --validation       View validation logs`));
+  console.log(picocolors.dim(`  --runtime          View runtime logs`));
+  console.log(picocolors.dim(`  --follow           Stream logs in real time`));
+  console.log(picocolors.dim(`  --tail <N>         Show last N lines (default: 80)`));
 
   if (logFiles.includes("runtime.log")) {
     const runtime = await logManager.readRuntime(runId);
@@ -87,10 +89,16 @@ export async function logsCommand(options: {
       console.log(picocolors.cyan("\nRecent runtime log entries:"));
       console.log(picocolors.dim("─".repeat(60)));
       for (const line of lines) {
-        console.log(`  ${line}`);
+        const match = line.match(/\[([^\]]+)\]\s*(.+)/);
+        if (match) {
+          console.log(`  ${picocolors.dim(match[1]!)} ${match[2]}`);
+        } else {
+          console.log(`  ${line}`);
+        }
       }
     }
   }
+  console.log("");
 }
 
 async function readLastLines(filePath: string, count: number): Promise<string> {
@@ -103,19 +111,30 @@ async function readLastLines(filePath: string, count: number): Promise<string> {
   }
 }
 
-async function followFile(filePath: string, tailLines: number): Promise<void> {
+async function followFile(
+  runId: string,
+  filePath: string,
+  tailLines: number,
+  taskId?: string,
+): Promise<void> {
+  const prefix = taskId ? `[${taskId}] ` : `[${runId}] `;
+
   try {
     const content = await fs.promises.readFile(filePath, "utf-8");
     const lines = content.split("\n");
     const tail = lines.slice(-tailLines).join("\n");
     if (tail) {
-      process.stdout.write(tail + "\n");
+      for (const line of tail.split("\n")) {
+        if (line.trim()) {
+          console.log(`${picocolors.dim(prefix)}${line}`);
+        }
+      }
     }
 
     let currentSize = content.length;
     const pollInterval = 500;
 
-    console.log(picocolors.dim(`\nWatching for new log entries... (Ctrl+C to stop)\n`));
+    console.log(picocolors.dim(`\n  Watching for new log entries... (Ctrl+C to stop)\n`));
 
     return new Promise((resolve) => {
       const timer = setInterval(async () => {
@@ -126,7 +145,12 @@ async function followFile(filePath: string, tailLines: number): Promise<void> {
             const buf = Buffer.alloc(newStats.size - currentSize);
             await fd.read(buf, 0, buf.length, currentSize);
             await fd.close();
-            process.stdout.write(buf.toString());
+            const newContent = buf.toString();
+            for (const line of newContent.split("\n")) {
+              if (line.trim()) {
+                console.log(`${picocolors.dim(prefix)}${line}`);
+              }
+            }
             currentSize = newStats.size;
           }
         } catch {
@@ -137,20 +161,20 @@ async function followFile(filePath: string, tailLines: number): Promise<void> {
 
       process.on("SIGINT", () => {
         clearInterval(timer);
-        console.log(picocolors.dim("\nLog follow stopped."));
+        console.log(picocolors.dim("\n  Log follow stopped."));
         resolve();
       });
     });
   } catch {
-    console.log(picocolors.yellow(`Log file not yet available: ${filePath}`));
-    console.log(picocolors.dim("Waiting for log file to appear... (Ctrl+C to stop)"));
+    console.log(picocolors.yellow(`  Log file not yet available: ${filePath}`));
+    console.log(picocolors.dim("  Waiting for log file to appear... (Ctrl+C to stop)"));
 
     return new Promise((resolve) => {
       const timer = setInterval(async () => {
         try {
           await fs.promises.stat(filePath);
           clearInterval(timer);
-          await followFile(filePath, tailLines);
+          await followFile(runId, filePath, tailLines, taskId);
           resolve();
         } catch {
           // file not available yet
@@ -159,7 +183,7 @@ async function followFile(filePath: string, tailLines: number): Promise<void> {
 
       process.on("SIGINT", () => {
         clearInterval(timer);
-        console.log(picocolors.dim("\nLog follow stopped."));
+        console.log(picocolors.dim("\n  Log follow stopped."));
         resolve();
       });
     });

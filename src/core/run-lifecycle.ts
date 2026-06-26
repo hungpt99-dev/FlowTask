@@ -114,8 +114,24 @@ export class RunLifecycle {
 
     console.log(picocolors.cyan("\n  Planning..."));
     if (usePlanner && (options?.plannerMode === "ai" || options?.plannerMode === "auto")) {
+      const plannerType = this.config.planner?.type ?? "internal-ai";
+      const isExternal = plannerType === "external-ai";
+      const startedEvent = isExternal ? "ai_planner_started" : "internal_ai_planner_started";
+      const passedEvent = isExternal
+        ? "ai_planner_validation_passed"
+        : "internal_ai_planner_validation_passed";
+      const failedEvent = isExternal
+        ? "ai_planner_validation_failed"
+        : "internal_ai_planner_validation_failed";
+      const repairFailedEvent = isExternal
+        ? "ai_planner_repair_failed"
+        : "internal_ai_planner_repair_failed";
+      const fallbackEvent = isExternal
+        ? "ai_planner_fallback_to_simple"
+        : "internal_ai_planner_fallback_to_simple";
+
       await this.eventStore.appendToRun(run.runId, {
-        type: "ai_planner_started",
+        type: startedEvent as never,
         runId: run.runId,
       });
       try {
@@ -127,23 +143,21 @@ export class RunLifecycle {
           availableExecutors: Object.keys(this.config.executors ?? {}),
         });
         await this.eventStore.appendToRun(run.runId, {
-          type: "ai_planner_validation_passed",
+          type: passedEvent as never,
           runId: run.runId,
-          message: `AI planner created ${planResult.tasks.length} tasks`,
+          message: `Planner created ${planResult.tasks.length} tasks`,
         });
-        if (debug) console.log(picocolors.yellow(`[debug] AI planner used`));
+        if (debug) console.log(picocolors.yellow(`[debug] Planner used`));
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : String(err);
         await this.eventStore.appendToRun(run.runId, {
-          type: errorMessage.includes("after repair")
-            ? "ai_planner_repair_failed"
-            : "ai_planner_validation_failed",
+          type: (errorMessage.includes("after repair") ? repairFailedEvent : failedEvent) as never,
           runId: run.runId,
           details: { error: errorMessage },
         });
 
         if (options?.plannerMode === "ai") {
-          console.log(picocolors.red(`\n  AI planner failed: ${errorMessage}`));
+          console.log(picocolors.red(`\n  Planner failed: ${errorMessage}`));
           console.log(
             picocolors.yellow(
               "  Run with --planner simple to skip AI planning, or check the raw output in .flowtask/runs/<runId>/outputs/",
@@ -153,12 +167,12 @@ export class RunLifecycle {
         }
 
         await this.eventStore.appendToRun(run.runId, {
-          type: "ai_planner_fallback_to_simple",
+          type: fallbackEvent as never,
           runId: run.runId,
           details: { error: errorMessage },
         });
 
-        console.log(picocolors.yellow(`\n  AI planner still returned invalid JSON after retry.`));
+        console.log(picocolors.yellow(`\n  Planner still returned invalid output after retry.`));
         console.log(
           picocolors.yellow(`  Falling back to simple planner because planner mode is "auto".`),
         );
@@ -422,16 +436,14 @@ export class RunLifecycle {
       const executor = this.executorRegistry.get(task.executor);
 
       if (!executor) {
-        console.log(picocolors.red(`  Unknown executor: ${task.executor}, falling back to shell`));
-        const shellExecutor = this.executorRegistry.get("shell")!;
-        executorResult = await shellExecutor.execute({
-          projectRoot: this.rootPath,
-          runId: run.runId,
-          task,
-          contextPackPath,
-          contextPackContent: contextPack.markdown,
-          signal: abortController.signal,
-        });
+        console.log(
+          picocolors.red(`\n  Unknown executor: "${task.executor}". Task cannot be executed.`),
+        );
+        console.log(
+          picocolors.yellow(`  Configure "${task.executor}" in .flowtask/config.json executors.`),
+        );
+        await this.runManager.updateTaskStatus(run.runId, task.id, "failed");
+        return false;
       } else {
         await this.eventStore.appendToRun(run.runId, {
           type: "executor_started",

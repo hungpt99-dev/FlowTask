@@ -82,19 +82,29 @@ FlowTask orchestrates; AI CLI tools execute the work.
 
 ## Planner Modes
 
-| Mode     | Description                                                          |
-| -------- | -------------------------------------------------------------------- |
-| `simple` | Always uses fixed 7-task template. Never calls AI planner.           |
-| `ai`     | Uses AI planner. Fails if JSON output is invalid after repair retry. |
-| `auto`   | Tries AI planner. Falls back to simple planner if invalid. (Default) |
+| Mode     | Description                                                               |
+| -------- | ------------------------------------------------------------------------- |
+| `simple` | Always uses fixed 7-task template. Never calls AI planner.                |
+| `ai`     | Uses internal AI API provider (OpenAI). Fails if output is invalid.       |
+| `auto`   | Tries internal AI API. Falls back to simple planner if invalid. (Default) |
 
-### AI Planner JSON Contract
+## Architecture: Planner vs Executor
 
-The AI planner must return **only JSON** — no markdown, no explanation, no code fences.
-If the planner returns prose, FlowTask:
+FlowTask intentionally separates planning from execution:
+
+- **Planner** = internal AI/API provider (OpenAI-compatible via `src/ai/`) — returns structured JSON
+- **Executor** = external AI CLI (opencode, claude, codex, aider via `src/executor/`) — edits files, runs commands
+
+The planner needs structured JSON. AI CLI output includes logs, banners, tool output, and markdown — making JSON extraction unreliable. The internal AI API returns clean JSON via `response_format: json_object`.
+
+### Internal AI Planner Contract
+
+Configuration: `.flowtask/config.json` → `ai.providers.openai`, env `OPENAI_API_KEY`.
+
+If the planner returns invalid output, FlowTask:
 
 1. Extracts JSON from common formats (raw JSON, fenced ```json blocks, balanced braces)
-2. Saves raw output to `.flowtask/runs/<runId>/outputs/ai-planner-raw-attempt-N.txt`
+2. Saves raw output to `.flowtask/runs/<runId>/outputs/internal-ai-planner-raw-attempt-N.txt`
 3. Retries once with a repair prompt
 4. Falls back to simple planner in `auto` mode, or fails in `ai` mode
 

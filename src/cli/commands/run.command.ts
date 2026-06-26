@@ -1,9 +1,13 @@
 import { RunLifecycle } from "../../core/run-lifecycle.js";
 import { ProjectManager } from "../../core/project-manager.js";
 import { EventStore } from "../../core/event-store.js";
-import { PlannerRegistry } from "../../planner/planner-registry.js";
 import picocolors from "picocolors";
 import type { Run } from "../../schemas/run.schema.js";
+import { selectPlanner } from "./run-planner.js";
+import { JsonRenderer } from "../../ui/renderers/json-renderer.js";
+import { getEventBus, type UiEvent } from "../../ui/event-bus.js";
+import { formatErrorBlock } from "../../ui/formatters/error-format.js";
+import { createOutputOptions, type OutputOptions } from "../../ui/output-mode.js";
 
 export async function runCommand(
   prompt: string,
@@ -11,6 +15,13 @@ export async function runCommand(
     executor?: string;
     mode?: string;
     planner?: string;
+    plannerProvider?: string;
+    plannerModel?: string;
+    ui?: boolean;
+    noUi?: boolean;
+    json?: boolean;
+    quiet?: boolean;
+    verbose?: boolean;
     quality?: boolean;
     planOnly?: boolean;
     dryRun?: boolean;
@@ -18,6 +29,10 @@ export async function runCommand(
     template?: string;
   },
 ): Promise<void> {
+  const out = createOutputOptions(options);
+  const eventBus = getEventBus();
+  const jsonRenderer = new JsonRenderer();
+
   const rootPath = process.cwd();
   const manager = new ProjectManager();
 
@@ -31,6 +46,13 @@ export async function runCommand(
   const project = (await manager.load(rootPath))!;
   const config = await manager.loadConfig(rootPath);
 
+  if (options.plannerProvider) {
+    config.planner = { ...config.planner!, provider: options.plannerProvider };
+  }
+  if (options.plannerModel) {
+    config.planner = { ...config.planner!, model: options.plannerModel };
+  }
+
   const eventStore = new EventStore(rootPath);
   await eventStore.appendGlobal({
     type: "run_created",
@@ -43,25 +65,22 @@ export async function runCommand(
   if (options.dryRun) resolvedMode = "dry-run";
   if (options.debug) resolvedMode = "debug";
 
-  const plannerRegistry = new PlannerRegistry(config);
-  const plannerMode = plannerRegistry.resolveMode(options.planner);
-  const planResult = plannerRegistry.getPlanner(plannerMode);
+  const { plannerMode, plannerRegistry, plannerType } = selectPlanner(config, options.planner);
+  const { planner } = plannerRegistry.getPlanner(plannerMode);
 
-  if (plannerMode === "ai" && planResult.mode === "simple") {
-    console.log(
-      picocolors.yellow(
-        "AI planner requested but no AI executor configured. Using simple planner.",
-      ),
-    );
-  } else if (planResult.mode === "ai") {
-    console.log(
-      picocolors.cyan(`Using AI planner (executor: ${config.planner?.executor ?? "unknown"})`),
-    );
-  } else {
-    console.log(picocolors.dim("Using simple planner"));
+  if (out.mode !== "json") {
+    printRunHeader(prompt, options.executor, plannerMode, plannerType, config, out);
   }
 
-  const lifecycle = new RunLifecycle(rootPath, project.projectId, config, planResult.planner);
+  const lifecycle = new RunLifecycle(rootPath, project.projectId, config, planner);
+
+  if (out.mode === "plain") {
+    eventBus.on("planner_fallback", (e) => {
+      if ("reason" in e) {
+        console.log(picocolors.yellow(`  ${(e as { reason: string }).reason}`));
+      }
+    });
+  }
 
   try {
     const result = await lifecycle.executeRun(prompt, {
@@ -71,14 +90,59 @@ export async function runCommand(
       plannerMode: plannerMode,
     });
 
+    if (out.mode === "json") {
+      jsonRenderer.write({
+        type: "run_completed",
+        success: result.success,
+        reason: result.success ? undefined : "Run completed with failures",
+      } as UiEvent);
+    }
+
     if (!result.success) {
       process.exit(1);
     }
   } catch (err) {
-    console.error(
-      picocolors.red(`\n✗ Run error:`),
-      err instanceof Error ? err.message : String(err),
-    );
+    const errorMessage = err instanceof Error ? err.message : String(err);
+
+    if (out.mode === "json") {
+      jsonRenderer.write({
+        type: "run_failed",
+        reason: errorMessage,
+      } as UiEvent);
+    } else {
+      console.log(
+        formatErrorBlock("Run error", errorMessage, [
+          { label: "Check logs", command: `flowtask logs --run <runId>` },
+          { label: "Retry", command: `flowtask run "${prompt.slice(0, 40)}..."` },
+        ]),
+      );
+    }
+
     process.exit(1);
+  }
+}
+
+function printRunHeader(
+  prompt: string,
+  executor?: string,
+  plannerMode?: string,
+  plannerType?: string,
+  config?: { planner?: { provider?: string; model?: string } },
+  out?: OutputOptions,
+): void {
+  if (out?.quiet) {
+    return;
+  }
+
+  console.log(picocolors.cyan(`\nFlowTask Run`));
+  console.log(picocolors.dim(`  Prompt: ${prompt.slice(0, 100)}`));
+
+  if (out?.verbose) {
+    console.log(picocolors.dim(`  Planner: ${plannerType ?? "simple"}`));
+    if (plannerMode === "ai") {
+      console.log(picocolors.dim(`  Provider: ${config?.planner?.provider ?? "openai"}`));
+      console.log(picocolors.dim(`  Model: ${config?.planner?.model ?? "default"}`));
+    }
+    console.log(picocolors.dim(`  Executor: ${executor ?? "shell"}`));
   }
 }

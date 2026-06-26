@@ -50,18 +50,27 @@ FlowTask orchestrates; AI CLI tools execute.
 
 ## Planner Modes
 
-| Mode     | Description                                                          |
-| -------- | -------------------------------------------------------------------- |
-| `simple` | Always uses fixed 7-task template. Never calls AI planner.           |
-| `ai`     | Uses AI planner. Fails if JSON output is invalid after repair retry. |
-| `auto`   | Tries AI planner. Falls back to simple planner if invalid. (Default) |
+| Mode     | Description                                                               |
+| -------- | ------------------------------------------------------------------------- |
+| `simple` | Always uses fixed 7-task template. Never calls AI planner.                |
+| `ai`     | Uses internal AI API provider (OpenAI). Fails if output is invalid.       |
+| `auto`   | Tries internal AI API. Falls back to simple planner if invalid. (Default) |
+
+## Architecture: Planner vs Executor
+
+FlowTask intentionally separates planning from execution:
+
+- **Planner** = internal AI/API provider (OpenAI-compatible) — returns structured JSON
+- **Executor** = external AI CLI (opencode, claude, codex, aider) — edits files, runs commands
+
+This separation exists because AI CLI output includes logs, banners, tool output, and markdown — making JSON extraction unreliable. The internal AI API returns clean JSON via `response_format: json_object`.
 
 ## AI Planner Contract
 
-- AI planner must return **only JSON** — no markdown, no explanation, no code fences
-- First character must be `{`, last must be `}`
+- Configuration: `.flowtask/config.json` → `ai.providers.openai`, env `OPENAI_API_KEY`
+- The planner uses `response_format: json_object` for structured output
 - If the planner returns prose, FlowTask extracts JSON from common formats, retries once, and falls back to simple planner in `auto` mode
-- Raw AI planner output is saved to `.flowtask/runs/<runId>/outputs/` for debugging
+- Raw planner output is saved to `.flowtask/runs/<runId>/outputs/internal-ai-planner-raw-attempt-1.txt` for debugging
 
 ## Key Rules
 

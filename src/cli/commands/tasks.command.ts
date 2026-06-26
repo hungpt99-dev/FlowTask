@@ -1,6 +1,7 @@
 import { ProjectManager } from "../../core/project-manager.js";
 import { RunManager } from "../../core/run-manager.js";
 import picocolors from "picocolors";
+import { coloredStatus } from "../../ui/formatters/status-format.js";
 
 export async function tasksCommand(options: {
   run?: string;
@@ -43,55 +44,19 @@ export async function tasksCommand(options: {
   const filtered = options.status ? tasks.filter((t) => t.status === options.status) : tasks;
 
   console.log(picocolors.cyan(`\nTasks for run: ${options.run}`));
-  console.log(picocolors.dim("─".repeat(60)));
+  console.log("");
+  console.log(
+    `  ${picocolors.bold("ID".padEnd(14))} ${picocolors.bold("Status".padEnd(12))} ${picocolors.bold("Executor".padEnd(12))} ${picocolors.bold("Title")}`,
+  );
+  console.log(picocolors.dim(`  ${"─".repeat(72)}`));
 
-  for (let i = 0; i < filtered.length; i++) {
-    const t = filtered[i]!;
-    const icon = statusIcon(t.status);
-    const statusColor = taskStatusColor(t.status);
-    const deps = t.dependsOn.length > 0 ? ` [depends: ${t.dependsOn.join(", ")}]` : "";
+  for (const t of filtered) {
     console.log(
-      `  ${icon} ${statusColor(t.status.padEnd(14))} ${picocolors.cyan(t.title)}${picocolors.dim(deps)}`,
+      `  ${picocolors.dim(t.id.padEnd(14))} ${coloredStatus(t.status.padEnd(10))} ${picocolors.dim((t.executor ?? "shell").padEnd(12))} ${picocolors.cyan(t.title)}`,
     );
     if (t.description) {
-      console.log(`  ${"".padEnd(16)}${picocolors.dim(t.description)}`);
+      console.log(`  ${"".padEnd(38)}${picocolors.dim(t.description)}`);
     }
-    console.log("");
   }
-}
-
-function statusIcon(status: string): string {
-  switch (status) {
-    case "done":
-      return "✓";
-    case "running":
-      return "◌";
-    case "failed":
-      return "✗";
-    case "pending":
-      return "·";
-    case "skipped":
-      return "−";
-    case "cancelled":
-      return "−";
-    default:
-      return "·";
-  }
-}
-
-function taskStatusColor(status: string): (s: string) => string {
-  switch (status) {
-    case "done":
-      return picocolors.green;
-    case "running":
-      return picocolors.cyan;
-    case "failed":
-      return picocolors.red;
-    case "pending":
-      return picocolors.dim;
-    case "skipped":
-      return picocolors.yellow;
-    default:
-      return picocolors.dim;
-  }
+  console.log("");
 }

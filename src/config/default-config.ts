@@ -1,9 +1,56 @@
 import { type FlowTaskConfig } from "../schemas/config.schema.js";
 
+export const DEFAULT_EXECUTORS: Record<
+  string,
+  {
+    type: string;
+    command: string;
+    args: string[];
+    inputMode: string;
+    timeoutMs: number;
+  }
+> = {
+  opencode: {
+    type: "command",
+    command: "opencode",
+    args: ["run"],
+    inputMode: "stdin",
+    timeoutMs: 1800000,
+  },
+  claude: {
+    type: "command",
+    command: "claude",
+    args: [],
+    inputMode: "stdin",
+    timeoutMs: 1800000,
+  },
+  codex: {
+    type: "command",
+    command: "codex",
+    args: [],
+    inputMode: "stdin",
+    timeoutMs: 1800000,
+  },
+  gemini: {
+    type: "command",
+    command: "gemini",
+    args: [],
+    inputMode: "stdin",
+    timeoutMs: 1800000,
+  },
+  aider: {
+    type: "command",
+    command: "aider",
+    args: ["--message"],
+    inputMode: "argument",
+    timeoutMs: 1800000,
+  },
+};
+
 export function generateDefaultConfig(): FlowTaskConfig {
   return {
     version: "1.0",
-    defaultExecutor: "shell",
+    defaultExecutor: "opencode",
     runsDir: ".flowtask/runs",
     logLevel: "info",
     autoResume: true,
@@ -45,16 +92,28 @@ export function generateDefaultConfig(): FlowTaskConfig {
     },
     planner: {
       default: "auto",
+      type: "internal-ai",
       executor: "opencode",
+      provider: "openai",
+      model: "gpt-4.1-mini",
       maxRetries: 1,
       fallbackToSimple: true,
+    },
+    ai: {
+      providers: {
+        openai: {
+          type: "openai",
+          apiKeyEnv: "OPENAI_API_KEY",
+          baseUrl: "https://api.openai.com/v1",
+        },
+      },
     },
     process: {
       gracefulStopTimeoutMs: 5000,
       forceKillTimeoutMs: 10000,
     },
     executors: {
-      shell: { type: "shell", args: [], inputMode: "argument", timeoutMs: 1800000 },
+      shell: { type: "shell" as const, args: [], inputMode: "argument", timeoutMs: 1800000 },
       opencode: {
         type: "command",
         command: "opencode",

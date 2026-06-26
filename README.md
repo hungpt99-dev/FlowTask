@@ -87,9 +87,28 @@ flowtask rules       # Manage FlowTask rule sources
 
 ### Planner Modes
 
-- `simple` — always use the fixed 7-task template
-- `ai` — use AI planner (requires configured AI executor); fails if AI unavailable
-- `auto` — try AI planner, fall back to simple if unavailable (default)
+- `simple` — always use the fixed 7-task template, never calls AI
+- `ai` — use internal AI planner (requires `OPENAI_API_KEY`); fails if invalid
+- `auto` — try internal AI planner, fall back to simple if invalid or missing API key (default)
+
+### Planner Provider
+
+FlowTask uses an internal AI/API provider for planning (OpenAI-compatible).
+External AI CLIs (opencode, claude, codex, etc.) remain as task executors.
+
+```bash
+# Set API key
+export OPENAI_API_KEY=sk-your-key
+
+# Use AI planner
+flowtask run "update readme" --planner ai
+
+# Override provider/model
+flowtask run "update readme" --planner ai --planner-provider openai --planner-model gpt-4.1-mini
+
+# Skip AI planner entirely
+flowtask run "update readme" --planner simple
+```
 
 ### Resume
 
@@ -315,14 +334,16 @@ If you still see these errors after updating FlowTask, check your `.flowtask/con
 - Set `"inputMode": "stdin"` for most AI CLI tools
 - Run `flowtask doctor` to verify executor configurations
 
-### AI planner returned non-JSON output (e.g. `Unexpected token 'R', "README for"...`)
+### AI planner returned non-JSON output
 
-This happens when the AI CLI returns prose or markdown instead of a strict JSON task plan.
+This happens when the planner returns prose or markdown instead of a strict JSON task plan.
 
-The AI planner is designed to handle this:
+FlowTask now uses an internal AI/API provider (OpenAI-compatible) for planning. The internal provider uses `response_format: json_object` for structured output.
 
-1. It extracts JSON from common output formats (raw JSON, fenced ` ```json ` blocks, etc.)
-2. If extraction fails, it saves the raw output to `.flowtask/runs/<runId>/outputs/ai-planner-raw-attempt-1.txt`
+The planner handles non-JSON output as follows:
+
+1. It extracts JSON from common output formats (raw JSON, fenced ```json blocks, etc.)
+2. If extraction fails, it saves the raw output to `.flowtask/runs/<runId>/outputs/internal-ai-planner-raw-attempt-1.txt`
 3. It retries once with a JSON-repair prompt
 4. If retry also fails:
    - `--planner auto` (default): falls back to the simple planner with a warning
@@ -334,19 +355,19 @@ The AI planner is designed to handle this:
 flowtask run "update readme" --planner simple --executor opencode
 ```
 
-**To debug AI planner output:**
+**To debug planner output:**
 
 ```bash
-cat .flowtask/runs/<runId>/outputs/ai-planner-raw-attempt-1.txt
+cat .flowtask/runs/<runId>/outputs/internal-ai-planner-raw-attempt-1.txt
 ```
 
 **Planner modes:**
 
-| Mode     | Behavior                                                           |
-| -------- | ------------------------------------------------------------------ |
-| `simple` | Always use the fixed 7-task template. Never calls AI planner.      |
-| `ai`     | Use AI planner. Fails if output is invalid after repair retry.     |
-| `auto`   | Try AI planner. Falls back to simple planner if invalid. (Default) |
+| Mode     | Behavior                                                                    |
+| -------- | --------------------------------------------------------------------------- |
+| `simple` | Always use the fixed 7-task template. Never calls AI planner.               |
+| `ai`     | Use internal AI planner. Fails if output is invalid after repair retry.     |
+| `auto`   | Try internal AI planner. Falls back to simple planner if invalid. (Default) |
 
 ## Known Limitations
 
@@ -356,7 +377,8 @@ cat .flowtask/runs/<runId>/outputs/ai-planner-raw-attempt-1.txt
 - **No team features** — Single-user, local-only.
 - **No database** — All state is file-based using JSON and JSONL intentionally.
 - **Windows testing** — Cross-platform utilities (`getShell()`, `path.join`) are in place but Windows has not been tested end-to-end.
-- **AI planner** — The AI planner requires a configured AI executor (e.g., opencode, claude) and will fall back to the simple planner if unavailable.
+- **AI planner** — The internal AI planner requires an `OPENAI_API_KEY` environment variable and will fall back to the simple planner if unavailable.
+- **External AI CLI integration** — AI CLI tools (opencode, claude, codex) are used as task executors, not as the planner.
 - **External AI CLI integration** — The command executor supports argument, stdin, and file input modes, but end-to-end integration with specific tools may require configuration tuning.
 
 ## License

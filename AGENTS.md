@@ -29,14 +29,25 @@ Core principle: Prompt → Rules → Tasks → Execution → Validation → Repo
 ## Planner Modes
 
 - `simple` — always uses fixed 7-task template, never calls AI
-- `ai` — uses AI planner, fails if output is invalid after retry
-- `auto` — tries AI planner, falls back to simple if invalid (default)
+- `ai` — uses internal AI planner, fails if output is invalid after retry
+- `auto` — tries internal AI planner, falls back to simple if invalid (default)
+
+## Internal AI Planner
+
+FlowTask uses an **internal AI/API provider** (OpenAI-compatible) for planning, not an external AI CLI.
+
+- **Planner** = internal AI API (returns structured JSON with `response_format: json_object`)
+- **Executor** = external AI CLI (edits files, runs commands)
+
+### Why Separate Planner from Executor?
+
+AI CLI output includes logs, banners, tool output, and markdown — making JSON extraction unreliable. The internal AI API returns clean JSON via `response_format: json_object`.
 
 ## AI Planner Contract
 
-The AI planner must return **only JSON** — no markdown, no explanation, no code fences. The first character must be `{` and the last must be `}`.
+Configuration: `.flowtask/config.json` → `ai.providers.openai`, env `OPENAI_API_KEY`.
 
-If the planner returns prose (e.g. README content), FlowTask will:
+If the planner returns invalid output, FlowTask will:
 
 1. Extract JSON from common formats (raw, fenced, balanced braces)
 2. Save raw output to `.flowtask/runs/<runId>/outputs/`

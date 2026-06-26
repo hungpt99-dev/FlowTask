@@ -101,7 +101,7 @@ describe("Schema validation", () => {
     const result = FlowTaskConfigSchema.safeParse({});
     expect(result.success).toBe(true);
     expect(result.data!.version).toBe("1.0");
-    expect(result.data!.defaultExecutor).toBe("shell");
+    expect(result.data!.defaultExecutor).toBe("opencode");
     expect(result.data!.rules.enabled).toBe(true);
   });
 });

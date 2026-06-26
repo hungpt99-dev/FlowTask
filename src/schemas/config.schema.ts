@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { PlannerConfigSchema } from "./planner.schema.js";
+import { AiConfigSchema } from "../ai/ai.schema.js";
 
 export const RuleSourceConfigSchema = z.object({
   enabled: z.boolean().default(true),
@@ -46,7 +47,7 @@ export const LimitsConfigSchema = z.object({
 });
 
 export const ExecutorEntrySchema = z.object({
-  type: z.enum(["shell", "command"]),
+  type: z.enum(["shell", "command", "manual"]),
   command: z.string().optional(),
   args: z.array(z.string()).optional().default([]),
   inputMode: z.enum(["argument", "stdin", "file"]).optional().default("argument"),
@@ -63,7 +64,7 @@ export const ProcessConfigSchema = z.object({
 
 export const FlowTaskConfigSchema = z.object({
   version: z.string().default("1.0"),
-  defaultExecutor: z.string().default("shell"),
+  defaultExecutor: z.string().default("opencode"),
   runsDir: z.string().default(".flowtask/runs"),
   logLevel: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
   autoResume: z.boolean().default(true),
@@ -71,7 +72,16 @@ export const FlowTaskConfigSchema = z.object({
   approval: ApprovalConfigSchema.default({}),
   quality: QualityConfigSchema.default({}),
   limits: LimitsConfigSchema.default({}),
-  planner: PlannerConfigSchema.default({}),
+  planner: PlannerConfigSchema.default({
+    default: "auto",
+    type: "internal-ai",
+    executor: "opencode",
+    provider: "openai",
+    model: "gpt-4.1-mini",
+    maxRetries: 1,
+    fallbackToSimple: true,
+  }),
+  ai: AiConfigSchema.default({}),
   process: ProcessConfigSchema.default({}),
   executors: ExecutorConfigSchema.default({}),
 });

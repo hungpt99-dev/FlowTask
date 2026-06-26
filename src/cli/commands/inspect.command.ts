@@ -3,6 +3,8 @@ import { RunManager } from "../../core/run-manager.js";
 import { EventStore } from "../../core/event-store.js";
 import { LogManager } from "../../core/log-manager.js";
 import picocolors from "picocolors";
+import { coloredSymbol, coloredStatus } from "../../ui/formatters/status-format.js";
+import { formatTimeAgo } from "../../ui/formatters/duration-format.js";
 
 export async function inspectCommand(runId: string): Promise<void> {
   const rootPath = process.cwd();
@@ -22,83 +24,77 @@ export async function inspectCommand(runId: string): Promise<void> {
     process.exit(1);
   }
 
-  console.log(picocolors.cyan(`\nInspect Run: ${run.title}`));
-  console.log(picocolors.dim("─".repeat(60)));
-  console.log(`  Run ID:     ${run.runId}`);
-  console.log(`  Status:     ${runStatusColor(run)}`);
-  console.log(`  Mode:       ${run.mode}`);
-  console.log(`  Created:    ${new Date(run.createdAt).toLocaleString()}`);
-  console.log(`  Updated:    ${new Date(run.updatedAt).toLocaleString()}`);
-  console.log(`  Progress:   ${run.completedTaskCount}/${run.taskCount} tasks`);
+  // Section: Summary
+  console.log(picocolors.cyan(`\n  Inspect Run`));
+  console.log(picocolors.dim(`  ${"─".repeat(60)}`));
+  console.log(`  ${picocolors.bold(run.title)}`);
+  console.log(`  ${picocolors.dim("Run ID:")}     ${run.runId}`);
+  console.log(
+    `  ${picocolors.dim("Status:")}     ${coloredSymbol(run.status)} ${coloredStatus(run.status)}`,
+  );
+  console.log(`  ${picocolors.dim("Mode:")}       ${run.mode}`);
+  console.log(
+    `  ${picocolors.dim("Created:")}    ${new Date(run.createdAt).toLocaleString()} (${formatTimeAgo(run.createdAt)})`,
+  );
+  console.log(
+    `  ${picocolors.dim("Updated:")}    ${new Date(run.updatedAt).toLocaleString()} (${formatTimeAgo(run.updatedAt)})`,
+  );
+  console.log(
+    `  ${picocolors.dim("Progress:")}   ${run.completedTaskCount}/${run.taskCount} tasks`,
+  );
 
+  // Section: Tasks
   const tasks = await runManager.loadTasks(runId);
   if (tasks.length > 0) {
-    console.log(picocolors.cyan("\n  Tasks:"));
+    console.log(picocolors.cyan(`\n  Tasks (${tasks.length})`));
+    console.log(picocolors.dim(`  ${"─".repeat(60)}`));
     for (let i = 0; i < tasks.length; i++) {
       const t = tasks[i]!;
-      console.log(`    ${taskIcon(t.status)} ${t.title}`);
-      console.log(`       ID: ${t.id}, Status: ${t.status}, Executor: ${t.executor}`);
+      const icon = coloredSymbol(t.status);
+      console.log(`  ${icon} ${t.title}`);
+      console.log(
+        `      ${picocolors.dim(`ID: ${t.id}, Status: ${t.status}, Executor: ${t.executor}`)}`,
+      );
       if (t.retryCount > 0) {
-        console.log(`       Retries: ${t.retryCount}/${t.maxRetries}`);
+        console.log(`      ${picocolors.dim(`Retries: ${t.retryCount}/${t.maxRetries}`)}`);
+      }
+      if (t.dependsOn.length > 0) {
+        console.log(`      ${picocolors.dim(`Depends: ${t.dependsOn.join(", ")}`)}`);
       }
     }
   }
 
+  // Section: Events
   const eventStore = new EventStore(rootPath);
   const events = await eventStore.readRunEvents(runId);
   if (events.length > 0) {
-    console.log(picocolors.cyan(`\n  Events (${events.length}):`));
-    const lastEvents = events.slice(-5);
+    console.log(picocolors.cyan(`\n  Events (${events.length})`));
+    console.log(picocolors.dim(`  ${"─".repeat(60)}`));
+    const lastEvents = events.slice(-8);
     for (const event of lastEvents) {
-      console.log(
-        `    ${picocolors.dim(new Date(event.time).toLocaleTimeString())} ${event.type}${event.message ? ` — ${event.message}` : ""}`,
-      );
+      const time = picocolors.dim(new Date(event.time).toLocaleTimeString());
+      const msg = event.message ? ` — ${picocolors.dim(event.message)}` : "";
+      console.log(`  ${time} ${event.type}${msg}`);
     }
   }
 
+  // Section: Logs
   const logManager = new LogManager(rootPath);
   const logFiles = await logManager.listLogFiles(runId);
   if (logFiles.length > 0) {
-    console.log(picocolors.cyan(`\n  Log files (${logFiles.length}):`));
+    console.log(picocolors.cyan(`\n  Log files (${logFiles.length})`));
+    console.log(picocolors.dim(`  ${"─".repeat(60)}`));
     for (const file of logFiles) {
-      console.log(`    📄 ${file}`);
+      console.log(`  ${picocolors.dim("•")} ${file}`);
     }
   }
 
-  console.log(picocolors.dim(`\n  Run directory: .flowtask/runs/${runId}`));
+  // Section: Commands
+  console.log(picocolors.cyan(`\n  Commands`));
+  console.log(picocolors.dim(`  ${"─".repeat(60)}`));
+  console.log(`  ${picocolors.cyan("  flowtask logs --run")} ${runId}`);
+  console.log(`  ${picocolors.cyan("  flowtask tasks --run")} ${runId}`);
+  console.log(`  ${picocolors.cyan("  flowtask resume")} ${runId}`);
+  console.log(`  ${picocolors.dim(`  Run directory: .flowtask/runs/${runId}`)}`);
   console.log("");
-  console.log(picocolors.cyan("  Commands:"));
-  console.log(picocolors.cyan(`    flowtask logs --run ${runId}`));
-  console.log(picocolors.cyan(`    flowtask tasks --run ${runId}`));
-  console.log(picocolors.cyan(`    flowtask runs`));
-}
-
-function runStatusColor(run: { status: string }): string {
-  switch (run.status) {
-    case "completed":
-      return picocolors.green("completed");
-    case "running":
-      return picocolors.cyan("running");
-    case "failed":
-      return picocolors.red("failed");
-    case "cancelled":
-      return picocolors.yellow("cancelled");
-    default:
-      return picocolors.dim(run.status);
-  }
-}
-
-function taskIcon(status: string): string {
-  switch (status) {
-    case "done":
-      return picocolors.green("✓");
-    case "running":
-      return picocolors.cyan("◌");
-    case "failed":
-      return picocolors.red("✗");
-    case "pending":
-      return picocolors.dim("·");
-    default:
-      return picocolors.dim("·");
-  }
 }
