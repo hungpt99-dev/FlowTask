@@ -93,8 +93,17 @@ flowtask rules       # Manage FlowTask rule sources
 
 ### Planner Provider
 
-FlowTask uses an internal AI/API provider for planning (OpenAI-compatible).
-External AI CLIs (opencode, claude, codex, etc.) remain as task executors.
+FlowTask supports dedicated AI provider implementations for planning:
+
+```text
+OpenAI               native OpenAI (gpt-4.1-mini)
+OpenAI-compatible    OpenRouter, DeepSeek, Groq, Together, Fireworks, LM Studio
+Anthropic            native /v1/messages (claude-3-5-sonnet-latest)
+Gemini               native generateContent (gemini-1.5-pro)
+Mistral              native /chat/completions (mistral-large-latest)
+Azure OpenAI         deployment-based provider
+Ollama               native local /api/chat (llama3.1)
+```
 
 ```bash
 # Set API key
@@ -105,6 +114,21 @@ flowtask run "update readme" --planner ai
 
 # Override provider/model
 flowtask run "update readme" --planner ai --planner-provider openai --planner-model gpt-4.1-mini
+
+# Use Anthropic provider
+flowtask run "update readme" --planner ai --planner-provider anthropic --planner-model claude-3-5-sonnet-latest
+
+# Use Gemini provider
+flowtask run "refactor" --planner ai --planner-provider gemini --planner-model gemini-1.5-pro
+
+# Use Ollama local provider
+flowtask run "update docs" --planner ai --planner-provider ollama --planner-model llama3.1
+
+# Provider health check
+flowtask doctor --providers
+
+# List all providers
+flowtask providers list
 
 # Skip AI planner entirely
 flowtask run "update readme" --planner simple
@@ -377,7 +401,7 @@ cat .flowtask/runs/<runId>/outputs/internal-ai-planner-raw-attempt-1.txt
 - **No team features** — Single-user, local-only.
 - **No database** — All state is file-based using JSON and JSONL intentionally.
 - **Windows testing** — Cross-platform utilities (`getShell()`, `path.join`) are in place but Windows has not been tested end-to-end.
-- **AI planner** — The internal AI planner requires an `OPENAI_API_KEY` environment variable and will fall back to the simple planner if unavailable.
+- **AI planner** — The internal AI planner requires an API key for the selected provider and will fall back to the simple planner if unavailable.
 - **External AI CLI integration** — AI CLI tools (opencode, claude, codex) are used as task executors, not as the planner.
 - **External AI CLI integration** — The command executor supports argument, stdin, and file input modes, but end-to-end integration with specific tools may require configuration tuning.
 

@@ -32,12 +32,27 @@ Core principle: Prompt → Rules → Tasks → Execution → Validation → Repo
 - `ai` — uses internal AI planner, fails if output is invalid after retry
 - `auto` — tries internal AI planner, falls back to simple if invalid (default)
 
-## Internal AI Planner
+## AI Provider Architecture
 
-FlowTask uses an **internal AI/API provider** (OpenAI-compatible) for planning, not an external AI CLI.
+FlowTask supports **dedicated AI provider classes** for planning:
 
-- **Planner** = internal AI API (returns structured JSON with `response_format: json_object`)
-- **Executor** = external AI CLI (edits files, runs commands)
+| Provider          | Type                 | Endpoint            |
+| ----------------- | -------------------- | ------------------- |
+| OpenAI            | `openai`             | `/chat/completions` |
+| OpenAI-Compatible | `openai-compatible`  | `/chat/completions` |
+| Anthropic         | `anthropic`          | `/v1/messages`      |
+| Gemini            | `gemini`             | `generateContent`   |
+| Mistral           | `mistral`            | `/chat/completions` |
+| Azure OpenAI      | `azure-openai`       | deployment-based    |
+| Ollama            | `ollama`             | `/api/chat`         |
+| Custom            | via registration API | configurable        |
+
+Features:
+
+- `response_format` fallback (retries without JSON mode if unsupported)
+- SSE/NDJSON streaming support
+- Provider health checks
+- Custom provider registration API
 
 ### Why Separate Planner from Executor?
 
@@ -45,7 +60,7 @@ AI CLI output includes logs, banners, tool output, and markdown — making JSON 
 
 ## AI Planner Contract
 
-Configuration: `.flowtask/config.json` → `ai.providers.openai`, env `OPENAI_API_KEY`.
+Configuration: `.flowtask/config.json` → `ai.providers.<name>`, env `<NAME>_API_KEY`.
 
 If the planner returns invalid output, FlowTask will:
 

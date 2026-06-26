@@ -97,9 +97,28 @@ FlowTask intentionally separates planning from execution:
 
 The planner needs structured JSON. AI CLI output includes logs, banners, tool output, and markdown — making JSON extraction unreliable. The internal AI API returns clean JSON via `response_format: json_object`.
 
-### Internal AI Planner Contract
+### AI Provider Architecture
 
-Configuration: `.flowtask/config.json` → `ai.providers.openai`, env `OPENAI_API_KEY`.
+FlowTask supports dedicated provider classes for different AI APIs:
+
+- **OpenAI** — native `/chat/completions` with `response_format: json_object`
+- **OpenAI-Compatible** — OpenRouter, DeepSeek, Groq, LM Studio, Together, Fireworks, custom endpoints
+- **Anthropic** — native `/v1/messages` API
+- **Gemini** — native `generateContent` API with `responseMimeType`
+- **Mistral** — native `/chat/completions` API
+- **Azure OpenAI** — deployment-based `/openai/deployments/{deployment}/chat/completions`
+- **Ollama** — native `/api/chat` with NDJSON streaming
+
+Providers support:
+
+- `response_format` fallback (retry without JSON mode if unsupported)
+- SSE/NDJSON streaming
+- Health checks (`flowtask doctor --providers`)
+- Custom provider registration API
+
+## Internal AI Planner Contract
+
+Configuration: `.flowtask/config.json` → `ai.providers.<name>`, env `<NAME>_API_KEY`.
 
 If the planner returns invalid output, FlowTask:
 

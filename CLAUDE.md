@@ -56,19 +56,35 @@ FlowTask orchestrates; AI CLI tools execute.
 | `ai`     | Uses internal AI API provider (OpenAI). Fails if output is invalid.       |
 | `auto`   | Tries internal AI API. Falls back to simple planner if invalid. (Default) |
 
+## AI Provider Architecture
+
+FlowTask uses dedicated AI provider implementations for planning:
+
+- **OpenAI** — native `/chat/completions` with `response_format: json_object`
+- **OpenAI-Compatible** — OpenRouter, DeepSeek, Groq, LM Studio, Together, Fireworks
+- **Anthropic** — native `/v1/messages` API (no OpenAI response_format)
+- **Gemini** — native `generateContent` API with `responseMimeType`
+- **Mistral** — native `/chat/completions` API
+- **Azure OpenAI** — deployment-based provider
+- **Ollama** — native `/api/chat` with NDJSON streaming
+- **Custom** — via provider registration API
+
+All providers support: response_format fallback, SSE/NDJSON streaming, health checks.
+
 ## Architecture: Planner vs Executor
 
 FlowTask intentionally separates planning from execution:
 
-- **Planner** = internal AI/API provider (OpenAI-compatible) — returns structured JSON
+- **Planner** = internal AI API via dedicated provider — returns structured JSON
 - **Executor** = external AI CLI (opencode, claude, codex, aider) — edits files, runs commands
 
 This separation exists because AI CLI output includes logs, banners, tool output, and markdown — making JSON extraction unreliable. The internal AI API returns clean JSON via `response_format: json_object`.
 
 ## AI Planner Contract
 
-- Configuration: `.flowtask/config.json` → `ai.providers.openai`, env `OPENAI_API_KEY`
+- Configuration: `.flowtask/config.json` → `ai.providers.<name>`, env `<NAME>_API_KEY`
 - The planner uses `response_format: json_object` for structured output
+- If the provider does not support native JSON mode, FlowTask retries without it and uses strict JSON prompting
 - If the planner returns prose, FlowTask extracts JSON from common formats, retries once, and falls back to simple planner in `auto` mode
 - Raw planner output is saved to `.flowtask/runs/<runId>/outputs/internal-ai-planner-raw-attempt-1.txt` for debugging
 
