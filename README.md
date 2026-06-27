@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="temp/flowtask.png" alt="FlowTask Icon" width="120">
+</p>
+
 # FlowTask — AI Workflow Orchestrator
 
 <p align="center">
