@@ -650,6 +650,15 @@ export class RunLifecycle {
         break;
       }
 
+      if (validationResult.status === "warning" && failedChecks.length === 0) {
+        console.log(
+          picocolors.yellow(
+            "  Status: done (validations passed with warnings — acceptance criteria unverifiable)",
+          ),
+        );
+        break;
+      }
+
       const errMsg = executorResult.error ?? "";
       const fatalError =
         errMsg.includes("ENOENT") ||
@@ -694,7 +703,10 @@ export class RunLifecycle {
 
     this.processManager.clear(this.rootPath, run.runId);
 
-    if (validationResult && validationResult.status === "passed") {
+    if (
+      validationResult &&
+      (validationResult.status === "passed" || validationResult.status === "warning")
+    ) {
       await this.runManager.updateTaskStatus(run.runId, task.id, "done");
       await this.eventStore.appendToRun(run.runId, {
         type: "task_completed",
