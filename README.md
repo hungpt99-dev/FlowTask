@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="temp/flowtask.png" alt="FlowTask Icon" width="120">
+  <img src="assets/images/flowtask-icon.png" alt="FlowTask Icon" width="120">
 </p>
 
 # FlowTask — AI Workflow Orchestrator
