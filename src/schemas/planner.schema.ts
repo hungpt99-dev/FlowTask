@@ -67,7 +67,7 @@ export function normalizeRiskLevel(risk: string): "safe" | "risky" | "dangerous"
 
 export function isValidRequiredArtifact(path: string): boolean {
   const knownExtensions =
-    /\.(md|json|txt|log|yaml|yml|toml|xml|csv|html|css|js|ts|mjs|cjs|tsx|jsx)$/i;
+    /\.(md|json|txt|log|yaml|yml|toml|xml|csv|html|css|js|ts|mjs|cjs|tsx|jsx|svg|png|jpg|jpeg|gif|pdf|docx|xlsx|pptx|r|py|ipynb|rmd|tex|bib|njk|hbs)$/i;
   return path.includes("/") && knownExtensions.test(path);
 }
 

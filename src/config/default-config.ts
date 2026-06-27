@@ -109,6 +109,11 @@ export function generateDefaultConfig(): FlowTaskConfig {
         },
       },
     },
+    useCase: {
+      enabled: true,
+      customPatterns: [],
+      confidenceThreshold: 0.3,
+    },
     process: {
       gracefulStopTimeoutMs: 5000,
       forceKillTimeoutMs: 10000,

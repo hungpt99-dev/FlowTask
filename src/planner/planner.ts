@@ -1,4 +1,5 @@
 import type { Task } from "../schemas/task.schema.js";
+import type { UseCaseDetection } from "../usecase/usecase-types.js";
 
 export interface PlannerInput {
   projectRoot: string;
@@ -8,6 +9,7 @@ export interface PlannerInput {
   projectFiles?: string[];
   availableExecutors?: string[];
   runId?: string;
+  useCase?: UseCaseDetection;
 }
 
 export interface PlannerResult {

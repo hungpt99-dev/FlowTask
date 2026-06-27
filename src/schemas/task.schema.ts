@@ -23,6 +23,8 @@ export const ValidationConfigSchema = z.object({
     }),
   /** Files the task must produce/output after execution. NOT for input/reference files. */
   requiredFiles: z.array(z.string()).optional(),
+  /** Files that must exist with content (non-empty) after execution. */
+  requiredContent: z.array(z.string()).optional(),
   requiredArtifacts: z.array(z.string()).optional(),
   requireGitDiff: z.boolean().optional(),
 });

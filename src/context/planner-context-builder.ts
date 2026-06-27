@@ -1,4 +1,7 @@
 import type { FlowTaskConfig } from "../schemas/config.schema.js";
+import { UseCaseDetector } from "../usecase/usecase-detector.js";
+import { getUseCaseName } from "../usecase/task-templates.js";
+import type { UseCaseDetection } from "../usecase/usecase-types.js";
 
 export interface PlannerContextInput {
   prompt: string;
@@ -9,7 +12,14 @@ export interface PlannerContextInput {
 }
 
 export class PlannerContextBuilder {
+  private detector: UseCaseDetector;
+
+  constructor(config: FlowTaskConfig) {
+    this.detector = new UseCaseDetector(config.useCase);
+  }
+
   build(input: PlannerContextInput): string {
+    const useCase: UseCaseDetection = this.detector.detect(input.prompt);
     const parts: string[] = [];
 
     parts.push("# FlowTask Planner Context\n");
@@ -59,6 +69,14 @@ export class PlannerContextBuilder {
     parts.push(`This project is in **${projectMode}** mode.\n`);
     parts.push(getModeContextHint(projectMode));
     parts.push("\n");
+
+    if (useCase.type !== "general") {
+      const useCaseName = getUseCaseName(useCase.type);
+      parts.push("## Detected Use Case\n");
+      parts.push(`**${useCaseName}** (confidence: ${Math.round(useCase.confidence * 100)}%)\n`);
+      parts.push(getUseCaseContextHint(useCase.type));
+      parts.push("\n");
+    }
 
     parts.push("## Available Executors\n");
     parts.push(
@@ -133,4 +151,33 @@ function getModeContextHint(mode: string): string {
     default:
       return "";
   }
+}
+
+function getUseCaseContextHint(useCase: string): string {
+  const hints: Record<string, string> = {
+    coding:
+      "Focus this plan on implementation tasks — generating code, creating modules, building features.",
+    documentation:
+      "Focus this plan on writing and organizing documentation. Avoid coding tasks unless explicitly required.",
+    debugging:
+      "Focus this plan on investigation and targeted fixes. Create tasks for analyzing the issue before implementing the fix.",
+    research:
+      "Focus this plan on investigation and analysis. Create tasks for gathering information before drawing conclusions.",
+    planning:
+      "Focus this plan on analysis and design. Create tasks for documenting the plan structure and approach.",
+    "project-setup":
+      "Focus this plan on configuration and scaffolding. Each setup step should be a separate task.",
+    testing:
+      "Focus this plan on test creation and verification. Create tasks for test design, implementation, and execution.",
+    devops:
+      "Focus this plan on infrastructure and automation. Create tasks for configuration and validation.",
+    "data-analysis":
+      "Focus this plan on data processing and analysis. Create tasks for data gathering, analysis, and visualization.",
+    "ui-design":
+      "Focus this plan on UI/UX work. Create tasks for design review, implementation, and quality verification.",
+    writing:
+      "Focus this plan on content creation. Create tasks for outlining, writing, and reviewing.",
+    general: "",
+  };
+  return hints[useCase] ?? "";
 }

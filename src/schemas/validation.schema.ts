@@ -10,12 +10,25 @@ export const ValidationCheckStatusSchema = z.enum([
 ]);
 
 export const ValidationCheckSchema = z.object({
-  type: z.enum(["process", "file", "artifact", "command", "git_diff", "manual", "ai_review"]),
+  type: z.enum([
+    "process",
+    "file",
+    "artifact",
+    "command",
+    "git_diff",
+    "manual",
+    "ai_review",
+    "acceptance_criteria",
+    "content",
+  ]),
   status: ValidationCheckStatusSchema,
   message: z.string().optional(),
   command: z.string().optional(),
   path: z.string().optional(),
   exitCode: z.number().int().optional(),
+  criteria: z.string().optional(),
+  evidence: z.string().optional(),
+  details: z.record(z.unknown()).optional(),
 });
 
 export const ValidationResultSchema = z.object({

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { PlannerConfigSchema } from "./planner.schema.js";
 import { AiConfigSchema } from "../ai/ai.schema.js";
+import { UseCaseConfigSchema } from "../usecase/usecase-types.js";
 
 export const RuleSourceConfigSchema = z.object({
   enabled: z.boolean().default(true),
@@ -118,6 +119,7 @@ export const FlowTaskConfigSchema = z.object({
     fallbackToSimple: true,
   }),
   ai: AiConfigSchema.default({}),
+  useCase: UseCaseConfigSchema.default({}),
   process: ProcessConfigSchema.default({}),
   executors: ExecutorConfigSchema.default({}),
 });

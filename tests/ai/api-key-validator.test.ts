@@ -39,6 +39,7 @@ function createConfig(overrides?: Partial<FlowTaskConfig>): FlowTaskConfig {
       fallbackToSimple: true,
     },
     ai: { providers: {} },
+    useCase: { enabled: true, customPatterns: [], confidenceThreshold: 0.3 },
     executors: {},
     ...overrides,
   };

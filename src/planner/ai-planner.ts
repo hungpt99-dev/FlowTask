@@ -11,14 +11,19 @@ import type { FlowTaskConfig } from "../schemas/config.schema.js";
 import { buildCommandArgs } from "../executor/build-command-args.js";
 import { writeTextFile, ensureDir } from "../utils/fs.js";
 import { extractJsonObject } from "../utils/json-extractor.js";
+import { UseCaseDetector } from "../usecase/usecase-detector.js";
+import type { UseCaseDetection } from "../usecase/usecase-types.js";
+import { getUseCaseName } from "../usecase/task-templates.js";
 
 const VALID_EXECUTORS = new Set(["shell", "manual"]);
 
 export class AiPlanner implements Planner {
   private config: FlowTaskConfig;
+  private useCaseDetector: UseCaseDetector;
 
   constructor(config: FlowTaskConfig) {
     this.config = config;
+    this.useCaseDetector = new UseCaseDetector(config.useCase);
   }
 
   async createPlan(input: PlannerInput): Promise<PlannerResult> {
@@ -115,7 +120,7 @@ export class AiPlanner implements Planner {
     runId: string | undefined,
     attemptNumber: number,
   ): Promise<{ rawOutput: string; stdout: string }> {
-    const contextBuilder = new PlannerContextBuilder();
+    const contextBuilder = new PlannerContextBuilder(this.config);
     const context = contextBuilder.build({
       prompt,
       rulesContext,
@@ -237,6 +242,8 @@ export class AiPlanner implements Planner {
     }
     console.log(picocolors.cyan("  Retrying AI planner with JSON repair prompt...\n"));
 
+    const useCase = input.useCase ?? this.useCaseDetector.detect(prompt);
+
     const repairContext = this.buildRepairContext(
       prompt,
       rulesContext,
@@ -244,6 +251,7 @@ export class AiPlanner implements Planner {
       availableExecutors,
       errorMessage,
       previousOutput,
+      useCase,
     );
 
     const inputMode = (executorConfig.inputMode as "stdin" | "argument" | "file") ?? "stdin";
@@ -337,6 +345,7 @@ export class AiPlanner implements Planner {
     availableExecutors: string[],
     errorMessage: string,
     previousOutput: string,
+    useCase?: UseCaseDetection,
   ): string {
     const parts: string[] = [];
 
@@ -359,12 +368,49 @@ export class AiPlanner implements Planner {
     parts.push("The last character must be `}`.\n\n");
     parts.push("## Original Prompt\n");
     parts.push(`${prompt}\n\n`);
+
+    if (useCase && useCase.type !== "general") {
+      const useCaseName = getUseCaseName(useCase.type);
+      parts.push("## Detected Use Case\n");
+      parts.push(`${useCaseName} (confidence: ${Math.round(useCase.confidence * 100)}%)\n`);
+      parts.push(this.getRepairUseCaseHint(useCase.type));
+      parts.push("\n");
+    }
+
     parts.push("## Rules Context (abbreviated)\n");
     parts.push(`${rulesContext.slice(0, 1000)}\n\n`);
     parts.push("## Available Executors\n");
     parts.push(`${availableExecutors.join(", ")}\n`);
 
     return parts.join("\n");
+  }
+
+  private getRepairUseCaseHint(useCase: string): string {
+    const hints: Record<string, string> = {
+      coding:
+        "Focus on generating implementation-focused tasks. Each task should reflect a step in software development.",
+      documentation:
+        "Focus on documentation structure. Create tasks for outlining, writing, and reviewing documentation. Avoid coding tasks unless explicitly requested.",
+      debugging:
+        "Focus on investigation-first plans. Create tasks for understanding the error before implementing a fix.",
+      research:
+        "Focus on investigation tasks. Create tasks for gathering information, analyzing sources, and documenting findings. Do not invent facts.",
+      planning:
+        "Focus on analysis and structure. Create tasks for requirements analysis, plan creation, and review.",
+      "project-setup": "Focus on scaffolding. Create tasks for each configuration step.",
+      testing:
+        "Focus on test coverage. Create tasks for test design, implementation, and execution.",
+      devops:
+        "Focus on infrastructure and automation. Create tasks for configuration, deployment, and validation.",
+      "data-analysis":
+        "Focus on the analytical workflow. Create tasks for data gathering, processing, analysis, visualization, and reporting.",
+      "ui-design":
+        "Focus on design and implementation. Create tasks for reviewing existing UI, designing, implementing, and verifying quality.",
+      writing:
+        "Focus on content creation. Create tasks for outlining, writing, editing, and finalizing content. Avoid coding tasks.",
+      general: "",
+    };
+    return hints[useCase] ?? "";
   }
 
   private async savePlannerError(

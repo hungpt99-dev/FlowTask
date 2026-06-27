@@ -15,6 +15,9 @@ import { extractJsonObject } from "../utils/json-extractor.js";
 import { ProviderRegistry } from "../ai/provider-registry.js";
 import type { AiProviderStreamChunk } from "../ai/ai-provider.js";
 import { getEventBus } from "../ui/event-bus.js";
+import { UseCaseDetector } from "../usecase/usecase-detector.js";
+import type { UseCaseDetection } from "../usecase/usecase-types.js";
+import { getUseCaseName } from "../usecase/task-templates.js";
 
 const VALID_EXECUTORS = new Set(["shell", "manual"]);
 
@@ -35,10 +38,12 @@ export interface PlannerProviderMetadata {
 export class InternalAiPlanner implements Planner {
   private config: FlowTaskConfig;
   private providerRegistry: ProviderRegistry;
+  private useCaseDetector: UseCaseDetector;
 
   constructor(config: FlowTaskConfig) {
     this.config = config;
     this.providerRegistry = new ProviderRegistry(config);
+    this.useCaseDetector = new UseCaseDetector(config.useCase);
   }
 
   async createPlan(input: PlannerInput): Promise<PlannerResult> {
@@ -46,6 +51,23 @@ export class InternalAiPlanner implements Planner {
     const provider = this.providerRegistry.getProvider(plannerConfig.provider);
     const runId = input.runId;
     const enableStream = plannerConfig.stream ?? false;
+
+    const useCase = input.useCase ?? this.useCaseDetector.detect(input.prompt);
+    const useCaseInfo = {
+      type: useCase.type,
+      name: getUseCaseName(useCase.type),
+      confidence: useCase.confidence,
+    };
+
+    if (useCase.type !== "general") {
+      console.log(
+        picocolors.dim(
+          `  Detected use case: ${useCaseInfo.name} (${Math.round(useCaseInfo.confidence * 100)}% confidence)`,
+        ),
+      );
+    }
+
+    const inputWithUseCase: PlannerInput = { ...input, useCase };
 
     console.log(
       picocolors.cyan(
@@ -59,7 +81,13 @@ export class InternalAiPlanner implements Planner {
 
     const streamEnabled = enableStream && (provider.supportsStreaming ?? false);
 
-    const attempt1 = await this.executePlanner(provider.name, input, runId, 1, streamEnabled);
+    const attempt1 = await this.executePlanner(
+      provider.name,
+      inputWithUseCase,
+      runId,
+      1,
+      streamEnabled,
+    );
 
     try {
       return await this.processPlannerOutput(attempt1.output, input, runId);
@@ -129,7 +157,7 @@ export class InternalAiPlanner implements Planner {
     attemptNumber: number,
     enableStream: boolean = false,
   ): Promise<{ output: string; metadata: PlannerProviderMetadata }> {
-    const systemPrompt = this.buildSystemPrompt();
+    const systemPrompt = this.buildSystemPrompt(input.useCase);
     const userPrompt = this.buildUserPrompt(input);
     const plannerConfig = this.config.planner!;
     const provider = this.providerRegistry.getProvider(plannerConfig.provider);
@@ -285,7 +313,7 @@ export class InternalAiPlanner implements Planner {
     return output;
   }
 
-  private buildSystemPrompt(): string {
+  private buildSystemPrompt(useCase?: UseCaseDetection): string {
     const parts: string[] = [];
 
     parts.push("You are the FlowTask internal AI planner.");
@@ -345,13 +373,26 @@ export class InternalAiPlanner implements Planner {
       '- Use executor "ai" or the configured default executor for analysis, writing, editing, coding, and refactoring.',
     );
     parts.push(
-      "- requiredArtifacts must be relative file paths with a file extension like .md, .json, .txt, .log.",
+      "- requiredArtifacts must be relative file paths with a file extension like .md, .json, .txt, .log, .csv, .html, .svg.",
     );
     parts.push("- dependsOn may use previous task titles. FlowTask will normalize them.");
     parts.push("- Do not create tasks that install dependencies unless explicitly required.");
     parts.push("- Do not create unsafe commands.");
     parts.push("- Do not mark the final validation task as an AI task.");
     parts.push("");
+
+    if (useCase && useCase.type !== "general") {
+      const hint = this.getUseCaseHint(useCase.type);
+      const plannerGuide = this.getUseCasePlannerGuide(useCase.type);
+      parts.push("## Detected Use Case");
+      parts.push(`This task is detected as **${getUseCaseName(useCase.type)}**.`);
+      parts.push(hint);
+      parts.push("");
+      parts.push("## Use Case Planning Guide");
+      parts.push(plannerGuide);
+      parts.push("");
+    }
+
     parts.push("## Important Role Separation");
     parts.push("- Planner creates a JSON task plan only.");
     parts.push("- Planner does not implement the user request.");
@@ -361,6 +402,35 @@ export class InternalAiPlanner implements Planner {
     parts.push("- Planner only returns tasks that FlowTask will execute later.");
 
     return parts.join("\n");
+  }
+
+  private getUseCasePlannerGuide(useCase: string): string {
+    const guides: Record<string, string> = {
+      coding:
+        "For coding tasks: break implementation into logical steps. Include tasks for reading project rules, understanding requirements, designing the solution, implementing code, adding tests, and running validation.",
+      documentation:
+        "For documentation tasks: focus on structure and clarity. Include tasks for reviewing existing docs, outlining content, writing, reviewing, and finalizing. Do NOT create coding tasks unless the prompt explicitly asks for code.",
+      debugging:
+        "For debugging tasks: focus on investigation before fixing. Include tasks for understanding the error, inspecting relevant code, identifying root cause, implementing a targeted fix, and verifying the fix works.",
+      research:
+        "For research tasks: focus on thorough investigation. Include tasks for defining research questions, gathering information from sources, analyzing findings, and documenting conclusions with supporting evidence. Do not invent facts.",
+      planning:
+        "For planning tasks: focus on analysis and structure. Include tasks for understanding goals, analyzing requirements, creating a detailed plan, and reviewing the plan for completeness.",
+      "project-setup":
+        "For setup tasks: focus on scaffolding and configuration. Include tasks for understanding requirements, creating project structure, configuring tools, and verifying the setup works correctly.",
+      testing:
+        "For testing tasks: focus on coverage and verification. Include tasks for understanding the code under test, designing test cases, implementing tests, running them, and fixing any discovered issues.",
+      devops:
+        "For DevOps tasks: focus on infrastructure and automation. Include tasks for understanding infrastructure needs, creating or updating configuration, applying changes, and validating with dry-runs.",
+      "data-analysis":
+        "For data analysis tasks: focus on the analytical process. Include tasks for understanding data requirements, gathering/loading data, processing and analyzing, creating visualizations, and documenting findings with methodology.",
+      "ui-design":
+        "For UI/UX tasks: focus on design and implementation. Include tasks for reviewing existing UI, designing components, implementing changes, and verifying quality/accessibility.",
+      writing:
+        "For writing/content tasks: focus on prose and structure. Include tasks for understanding the writing requirements, outlining content, researching if needed, writing drafts, and reviewing/editing for quality. Avoid coding tasks.",
+      general: "",
+    };
+    return guides[useCase] ?? "";
   }
 
   private buildRepairSystemPrompt(errorMessage: string, previousOutput: string): string {
@@ -433,6 +503,14 @@ export class InternalAiPlanner implements Planner {
     parts.push(`This project is in **${projectMode}** mode.`);
     parts.push(this.getModeHint(projectMode));
     parts.push("");
+
+    if (input.useCase && input.useCase.type !== "general") {
+      const useCaseName = getUseCaseName(input.useCase.type);
+      parts.push("## Detected AI Use Case");
+      parts.push(`**${useCaseName}** (confidence: ${Math.round(input.useCase.confidence * 100)}%)`);
+      parts.push(this.getUseCaseHint(input.useCase.type));
+      parts.push("");
+    }
 
     const availableExecutors = input.availableExecutors ?? Object.keys(this.config.executors ?? {});
     parts.push("## Available Executors");
@@ -640,6 +718,30 @@ export class InternalAiPlanner implements Planner {
       default:
         return "";
     }
+  }
+
+  private getUseCaseHint(useCase: string): string {
+    const hints: Record<string, string> = {
+      coding:
+        "Focus on code quality, type safety, and following project conventions. Generate implementation tasks.",
+      documentation:
+        "Focus on clarity, completeness, and structure. Do not write code unless explicitly required.",
+      debugging:
+        "Focus on understanding the error, finding root cause, and applying targeted fixes.",
+      research: "Do not invent facts. Separate facts from assumptions. Plan investigation tasks.",
+      planning: "Focus on analysis and structure. Create tasks for documenting the plan.",
+      "project-setup":
+        "Focus on scaffolding, configuration, and tooling. Create tasks for each setup step.",
+      testing:
+        "Focus on test coverage, edge cases, and verification. Do not modify production code.",
+      devops: "Focus on infrastructure, automation, and deployment configuration.",
+      "data-analysis": "Focus on data processing, statistics, and clear visualizations.",
+      "ui-design": "Focus on design systems, accessibility, responsiveness, and user experience.",
+      writing: "Focus on clear prose, structure, and readability. Avoid code tasks.",
+      general: "",
+    };
+    const hint = hints[useCase];
+    return hint ? `Task focus hint: ${hint}` : "";
   }
 
   private async savePlannerError(

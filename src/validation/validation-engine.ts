@@ -5,6 +5,8 @@ import type { FlowTaskConfig } from "../schemas/config.schema.js";
 import { ProcessValidator } from "./process-validator.js";
 import { FileValidator } from "./file-validator.js";
 import { CommandValidator } from "./command-validator.js";
+import { AcceptanceCriteriaValidator } from "./acceptance-criteria-validator.js";
+import { ContentValidator } from "./content-validator.js";
 import { now } from "../utils/time.js";
 
 export interface ValidateTaskInput {
@@ -17,11 +19,15 @@ export class ValidationEngine {
   private processValidator: ProcessValidator;
   private fileValidator: FileValidator;
   private commandValidator: CommandValidator;
+  private acceptanceCriteriaValidator: AcceptanceCriteriaValidator;
+  private contentValidator: ContentValidator;
 
   constructor(config?: FlowTaskConfig) {
     this.processValidator = new ProcessValidator();
     this.fileValidator = new FileValidator();
     this.commandValidator = new CommandValidator(config);
+    this.acceptanceCriteriaValidator = new AcceptanceCriteriaValidator();
+    this.contentValidator = new ContentValidator();
   }
 
   async validateTask(input: ValidateTaskInput): Promise<ValidationResult> {
@@ -38,12 +44,32 @@ export class ValidationEngine {
       checks.push(...fileChecks);
     }
 
+    if (
+      input.task.validation?.requiredContent &&
+      input.task.validation.requiredContent.length > 0
+    ) {
+      const contentChecks = await this.contentValidator.validateContent(
+        input.projectRoot,
+        input.task.validation.requiredContent,
+      );
+      checks.push(...contentChecks);
+    }
+
     if (input.task.validation?.commands && input.task.validation.commands.length > 0) {
       const commandChecks = await this.commandValidator.validateCommands(
         input.task.validation.commands,
         input.projectRoot,
       );
       checks.push(...commandChecks);
+    }
+
+    if (input.task.acceptanceCriteria && input.task.acceptanceCriteria.length > 0) {
+      const criteriaChecks = await this.acceptanceCriteriaValidator.validate(
+        input.task.acceptanceCriteria,
+        input.executorResult,
+        input.projectRoot,
+      );
+      checks.push(...criteriaChecks);
     }
 
     const allPassed = checks.every((c) => c.status === "passed");
