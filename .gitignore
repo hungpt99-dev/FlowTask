@@ -9,3 +9,5 @@ coverage/
 .flowtask/runs/
 .flowtask/
 .flowtask/rules/
+test-results/
+temp/

@@ -81,7 +81,7 @@ export class PlannerContextBuilder {
       "acceptanceCriteria": ["Criterion 1", "Criterion 2"],
       "validation": {
         "commands": ["pnpm test"],
-        "requiredFiles": ["src/file.ts"],
+        "requiredFiles": ["src/generated/output.ts"],
         "requiredArtifacts": [],
         "requireGitDiff": false
       }

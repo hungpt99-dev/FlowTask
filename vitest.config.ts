@@ -6,6 +6,10 @@ export default defineConfig({
     environment: "node",
     include: ["tests/**/*.test.ts"],
     setupFiles: ["tests/setup.ts"],
+    reporters: ["default", "junit"],
+    outputFile: {
+      junit: "test-results/report.xml",
+    },
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov"],

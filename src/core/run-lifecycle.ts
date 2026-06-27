@@ -615,6 +615,24 @@ export class RunLifecycle {
         continue;
       }
 
+      const allFileNotFound =
+        failedChecks.length > 0 &&
+        failedChecks.every((c) => c.message?.startsWith("File not found:"));
+      if (allFileNotFound && executorResult.exitCode === 0) {
+        console.log(
+          picocolors.yellow(
+            "  Executor succeeded but expected output files were not found. Skipping futile retries.",
+          ),
+        );
+        await this.logManager.writeTaskLog(
+          run.runId,
+          task.id,
+          "Validation failed: expected output files not found. Skipping retries.",
+        );
+        retryCount = maxRetries + 1;
+        continue;
+      }
+
       retryCount++;
       if (retryCount <= maxRetries) {
         console.log(picocolors.yellow(`  Retrying (${retryCount}/${maxRetries})...`));
