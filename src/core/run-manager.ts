@@ -236,6 +236,23 @@ export class RunManager {
     return updated;
   }
 
+  async updateTask(
+    runId: string,
+    taskId: string,
+    updates: Partial<
+      Pick<Task, "title" | "description" | "executor" | "acceptanceCriteria" | "validation">
+    >,
+  ): Promise<Task> {
+    const tasks = await this.loadTasks(runId);
+    const idx = tasks.findIndex((t) => t.id === taskId);
+    if (idx < 0) throw new Error(`Task not found: ${taskId}`);
+    const existing = tasks[idx]!;
+    const updated = { ...existing, ...updates, updatedAt: now() };
+    tasks[idx] = updated;
+    await this.saveTasks(runId, tasks);
+    return updated;
+  }
+
   async loadTaskOutput(runId: string, taskId: string): Promise<string> {
     const logDir = getLogsDir(this.rootPath, runId);
     const logPath = path.join(logDir, `${taskId}.log`);

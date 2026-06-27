@@ -62,6 +62,49 @@ describe("RunManager", () => {
     expect(loaded[0]!.title).toBe("First task");
   });
 
+  it("should update a task with partial fields", async () => {
+    const run = await manager.createRun("test-project", "Update task test", "auto");
+    const tasks = [
+      {
+        id: "task_001",
+        runId: run.runId,
+        title: "Original title",
+        status: "pending" as const,
+        executor: "shell",
+        dependsOn: [],
+        acceptanceCriteria: [],
+        retryCount: 0,
+        maxRetries: 2,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    ];
+    await manager.saveTasks(run.runId, tasks);
+
+    const updated = await manager.updateTask(run.runId, "task_001", {
+      title: "Updated title",
+      description: "New description",
+      executor: "opencode",
+      acceptanceCriteria: ["AC1", "AC2"],
+    });
+
+    expect(updated.title).toBe("Updated title");
+    expect(updated.description).toBe("New description");
+    expect(updated.executor).toBe("opencode");
+    expect(updated.acceptanceCriteria).toEqual(["AC1", "AC2"]);
+
+    const loaded = await manager.loadTasks(run.runId);
+    expect(loaded[0]!.title).toBe("Updated title");
+    expect(loaded[0]!.description).toBe("New description");
+  });
+
+  it("should throw when updating a non-existent task", async () => {
+    const run = await manager.createRun("test-project", "Update non-existent", "auto");
+    await expect(manager.updateTask(run.runId, "nonexistent", { title: "New" })).rejects.toThrow(
+      "Task not found",
+    );
+  });
+
   it("should get next pending task", async () => {
     const run = await manager.createRun("test-project", "Next task test", "auto");
     const tasks = [

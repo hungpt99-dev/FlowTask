@@ -17,6 +17,7 @@ import { ValidationEngine } from "../validation/validation-engine.js";
 import { ExecutorRegistry } from "../executor/executor-registry.js";
 import { GitService } from "../git/git-service.js";
 import { SafetyChecker } from "../safety/safety-checker.js";
+import { ApprovalManager } from "../safety/approval-manager.js";
 import { ProcessManager } from "./process-manager.js";
 import { QualityGate } from "../quality/quality-gate.js";
 import type { QualityGateResult } from "../schemas/quality.schema.js";
@@ -44,6 +45,7 @@ export class RunLifecycle {
   private executorRegistry: ExecutorRegistry;
   private gitService: GitService;
   private safetyChecker: SafetyChecker;
+  private approvalManager: ApprovalManager;
   private processManager: ProcessManager;
 
   constructor(rootPath: string, projectId: string, config: FlowTaskConfig, planner?: Planner) {
@@ -62,6 +64,7 @@ export class RunLifecycle {
     this.executorRegistry.setLogManager(this.logManager);
     this.gitService = new GitService();
     this.safetyChecker = new SafetyChecker();
+    this.approvalManager = new ApprovalManager();
     this.processManager = new ProcessManager();
   }
 
@@ -320,13 +323,35 @@ export class RunLifecycle {
     await this.gitService.takeBeforeSnapshot(this.rootPath, run.runId);
 
     try {
-      const runSuccess = await this.executeTasks(
+      const { success: runSuccess, paused } = await this.executeTasks(
         run,
         prompt,
         rulesContext,
         updatedRun,
         tasksWithRunId,
       );
+
+      await this.gitService.takeAfterSnapshot(this.rootPath, run.runId);
+
+      if (paused) {
+        const pausedRun = await this.runManager.updateRunStatus(run.runId, "paused");
+        await this.eventStore.appendToRun(run.runId, {
+          type: "run_paused",
+          runId: run.runId,
+          message: "Run paused for task approval",
+        });
+        await this.stateManager.saveProjectState({
+          projectId: this.projectId,
+          status: "has_running_run",
+          activeRunId: run.runId,
+          lastRunId: run.runId,
+          updatedAt: now(),
+        });
+        await this.logManager.writeRuntime(run.runId, "Run paused for task approval");
+        console.log(picocolors.yellow("\nRun paused. Approve or deny tasks to continue."));
+        console.log(picocolors.dim("To resume: flowtask resume"));
+        return { run: pausedRun, success: true };
+      }
 
       await this.gitService.takeAfterSnapshot(this.rootPath, run.runId);
 
@@ -378,29 +403,43 @@ export class RunLifecycle {
     }
   }
 
-  async continueRun(runId: string, _quality?: boolean): Promise<{ success: boolean }> {
+  async continueRun(
+    runId: string,
+    _quality?: boolean,
+  ): Promise<{ success: boolean; paused: boolean }> {
     const tasks = await this.runManager.loadTasks(runId);
     const pending = tasks.filter((t) => t.status === "pending" || t.status === "interrupted");
 
     if (pending.length === 0) {
-      return { success: true };
+      return { success: true, paused: false };
     }
 
     const run = await this.runManager.loadRun(runId);
-    if (!run) return { success: false };
+    if (!run) return { success: false, paused: false };
 
     const prompt = await this.runManager.loadPrompt(runId);
     const rulesContext = await this.runManager.loadRulesContext(runId);
 
-    const runSuccess = await this.executeTasks(run, prompt, rulesContext, run, tasks);
+    const { success: runSuccess, paused } = await this.executeTasks(
+      run,
+      prompt,
+      rulesContext,
+      run,
+      tasks,
+    );
 
-    if (runSuccess) {
+    if (paused) {
+      console.log(picocolors.yellow("\nRun paused for task approval."));
+      console.log(
+        picocolors.dim("Use: flowtask tasks-approve <taskId> or flowtask tasks-deny <taskId>"),
+      );
+    } else if (runSuccess) {
       console.log(picocolors.green("\n✓ Run completed"));
     } else {
       console.log(picocolors.red("\n✗ Run failed"));
     }
 
-    return { success: runSuccess };
+    return { success: runSuccess, paused };
   }
 
   async executeSingleTask(runId: string, taskId: string): Promise<boolean> {
@@ -424,8 +463,10 @@ export class RunLifecycle {
     rulesContext: string,
     _updatedRun: Run,
     tasks: Task[],
-  ): Promise<boolean> {
+  ): Promise<{ success: boolean; paused: boolean }> {
     let runSuccess = true;
+    const isManual = run.mode === "manual";
+    const autoApprove = this.config.approval?.autoApprove ?? false;
 
     for (let i = 0; i < tasks.length; i++) {
       const task = tasks[i]!;
@@ -445,6 +486,17 @@ export class RunLifecycle {
         continue;
       }
 
+      if (isManual && !autoApprove) {
+        await this.runManager.updateTaskStatus(run.runId, task.id, "waiting_approval");
+        console.log(
+          picocolors.cyan(`\n  [${i + 1}/${tasks.length}] ${task.title} — awaiting approval`),
+        );
+        console.log(picocolors.dim(`    Use: flowtask tasks-approve ${task.id}`));
+        console.log(picocolors.dim(`    Use: flowtask tasks-deny ${task.id}`));
+        console.log(picocolors.dim(`    Or set mode to auto to bypass approval`));
+        return { success: true, paused: true };
+      }
+
       const success = await this.executeTask(run, prompt, rulesContext, task, tasks);
 
       task.status = success ? "done" : "failed";
@@ -455,7 +507,7 @@ export class RunLifecycle {
       }
     }
 
-    return runSuccess;
+    return { success: runSuccess, paused: false };
   }
 
   private async executeTask(

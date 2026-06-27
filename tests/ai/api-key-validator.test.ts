@@ -13,7 +13,7 @@ function createConfig(overrides?: Partial<FlowTaskConfig>): FlowTaskConfig {
     logLevel: "info",
     autoResume: true,
     rules: { enabled: true, paths: [], required: false, maxFileSizeKb: 256 },
-    approval: { enabled: true, requireFor: [] },
+    approval: { enabled: true, autoApprove: false, requireFor: [] },
     quality: { enabledByDefault: false, commands: [] },
     limits: { maxRunMinutes: 120, maxTaskMinutes: 30, maxRetries: 2, maxLogSizeMb: 20 },
     projectMode: "development",

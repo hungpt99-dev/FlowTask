@@ -23,6 +23,7 @@ export const RuleSourceConfigSchema = z.object({
 
 export const ApprovalConfigSchema = z.object({
   enabled: z.boolean().default(true),
+  autoApprove: z.boolean().default(false),
   requireFor: z
     .array(z.string())
     .default([

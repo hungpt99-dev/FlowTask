@@ -4,6 +4,8 @@ import { runCommand } from "./commands/run.command.js";
 import { statusCommand } from "./commands/status.command.js";
 import { runsCommand } from "./commands/runs.command.js";
 import { tasksCommand } from "./commands/tasks.command.js";
+import { tasksEditCommand } from "./commands/tasks-edit.command.js";
+import { tasksApproveCommand, tasksDenyCommand } from "./commands/tasks-approve.command.js";
 import { logsCommand } from "./commands/logs.command.js";
 import { resumeCommand } from "./commands/resume.command.js";
 import { retryCommand } from "./commands/retry.command.js";
@@ -25,6 +27,11 @@ import {
   configureProviderCommand,
 } from "./commands/providers.command.js";
 import { setupAiCommand } from "./commands/setup.command.js";
+import {
+  configSetCommand,
+  configGetCommand,
+  configListCommand,
+} from "./commands/config.command.js";
 
 const program = new Command();
 
@@ -108,6 +115,44 @@ program
   .option("--all", "Show all tasks across all runs")
   .option("--status <status>", "Filter by status")
   .action(tasksCommand);
+
+program
+  .command("tasks-edit")
+  .description(
+    "Edit a task's details (title, description, executor, acceptance criteria, validation)",
+  )
+  .argument("<taskId>", "Task ID to edit")
+  .option("--run <runId>", "Run ID containing the task")
+  .option("--title <title>", "New task title")
+  .option("--description <description>", "New task description")
+  .option("--executor <name>", "New task executor (shell, opencode, claude, etc.)")
+  .option(
+    "--acceptance-criteria <criteria>",
+    'Pipe-separated acceptance criteria (e.g., "AC1|AC2|AC3")',
+  )
+  .option(
+    "--validation-commands <commands>",
+    'Pipe-separated validation commands (e.g., "pnpm test|pnpm lint")',
+  )
+  .option(
+    "--required-files <files>",
+    'Pipe-separated required files (e.g., "src/file1.ts|src/file2.ts")',
+  )
+  .action(tasksEditCommand);
+
+program
+  .command("tasks-approve")
+  .description("Approve a task that is waiting for approval")
+  .argument("<taskId>", "Task ID to approve")
+  .option("--run <runId>", "Run ID containing the task")
+  .action(tasksApproveCommand);
+
+program
+  .command("tasks-deny")
+  .description("Deny a task that is waiting for approval")
+  .argument("<taskId>", "Task ID to deny")
+  .option("--run <runId>", "Run ID containing the task")
+  .action(tasksDenyCommand);
 
 program
   .command("logs")
@@ -214,6 +259,27 @@ program
   .argument("[action]", "Action: list | scan | add | validate", "list")
   .argument("[path]", "Path to rule file (for add action)")
   .action(rulesCommand);
+
+const configCommand = new Command("config")
+  .description("Manage FlowTask configuration")
+  .addCommand(
+    new Command("get")
+      .description("Show current configuration values")
+      .argument("[key]", "Config key to show")
+      .action(configGetCommand),
+  )
+  .addCommand(
+    new Command("set")
+      .description("Set a configuration value")
+      .argument("<key>", "Config key to set")
+      .argument("<value>", "Value to set")
+      .action(configSetCommand),
+  )
+  .addCommand(
+    new Command("list").description("List all configurable settings").action(configListCommand),
+  );
+
+program.addCommand(configCommand);
 
 let rawArgs = process.argv.slice(2);
 

@@ -72,6 +72,7 @@ export function generateDefaultConfig(): FlowTaskConfig {
     },
     approval: {
       enabled: true,
+      autoApprove: false,
       requireFor: [
         "delete_file",
         "install_dependency",
