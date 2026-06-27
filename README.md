@@ -1,10 +1,20 @@
-# FlowTask
+# FlowTask — Local-First AI Task Runtime
 
-**Local-first AI task runtime CLI.**
+<p align="center">
+  <strong>Prompt → Rules → Tasks → Execution → Validation → Report</strong>
+</p>
 
-FlowTask turns prompts into visible, validated, resumable AI task flows.
+<p align="center">
+  <a href="#"><img src="https://img.shields.io/github/actions/workflow/status/phamthanhhung/flowtask/ci.yml?branch=main&style=for-the-badge" alt="CI status"></a>
+  <a href="#"><img src="https://img.shields.io/github/v/release/phamthanhhung/flowtask?style=for-the-badge" alt="Release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge" alt="MIT License"></a>
+</p>
 
-Instead of giving an AI a large prompt and waiting blindly, FlowTask breaks the work into smaller tasks, shows progress, saves state, streams logs, validates results, and supports resume/retry.
+**FlowTask** is a local-first AI task runtime — it turns prompts into visible, trackable, resumable task flows and uses AI CLI tools to execute the work.
+
+Instead of giving an AI a large prompt and waiting blindly, FlowTask breaks the work into smaller tasks, shows progress, saves state, streams logs, validates results, and supports resume/retry. No cloud, no database, no web UI — just a CLI that orchestrates your AI tools.
+
+FlowTask draws inspiration from the local-first AI philosophy championed by [**OpenClaw**](https://openclaw.ai) — a personal AI assistant you run on your own devices with 381k+ GitHub stars. Where OpenClaw focuses on multi-channel conversation (WhatsApp, Telegram, Slack, Discord, Signal, iMessage, and 20+ more), voice wake/talk, and agent-driven Live Canvas, FlowTask focuses on structured task orchestration: planning, executing, validating, and resuming prompt-driven workflows through AI CLI tools.
 
 ## Status
 
@@ -28,66 +38,45 @@ FlowTask core runtime is implemented and operational.
 - 269+ tests across 41 test files cover all modules
 - All quality gates pass
 
-## Requirements
+## Highlights
 
-- Node.js 22+
-- pnpm 9+
+- **Prompt-to-flow pipeline** — Type a prompt, get a structured task plan with dependencies, execution order, and validation rules
+- **Planner modes** — `simple` (fixed template), `ai` (internal AI planner with 8 provider types), `auto` (AI with fallback)
+- **Multiple executors** — Run tasks via opencode, claude, codex, aider, shell, or manual approval
+- **Validation engine** — Process exits, file existence, custom commands — never trust "AI says done"
+- **Resume & retry** — Interrupted runs resume from the last completed task; failed tasks retry with configurable limits
+- **Safety first** — Command classification (safe/risky/blocked), secret redaction, approval workflows
+- **Project modes** — `development`, `writing`, `research`, `general` — each with tailored rules, validation, and defaults
 
-## Quick Start
+## Quick Start (TL;DR)
+
+Runtime: **Node.js 22+** — Package manager: **pnpm 9+**
 
 ```bash
-# Install
 pnpm install
-
-# Full setup (project + AI provider + rules)
-pnpm dev init
-
-# Initialize with a specific mode
 pnpm dev init --name "My Project" --mode development
-pnpm dev init --name "Writing Project" --mode writing
-pnpm dev init --name "Research Project" --mode research
-
-# Show available init modes
-pnpm dev init --show-modes
-
-# Configure AI provider (interactive)
-pnpm dev setup
-
-# Configure AI provider (non-interactive)
-pnpm dev setup --provider openai --api-key-env OPENAI_API_KEY
-pnpm dev setup --provider ollama --model llama3.1
-
-# Provider management
-pnpm dev providers list       # List all configured providers
-pnpm dev providers current    # Show current provider
-pnpm dev providers test       # Test provider connection
-pnpm dev providers configure  # Interactive provider configuration
-pnpm dev providers remove     # Remove a provider
-
-# List configured rules
-pnpm dev rules list
-
-# Run a task (plan-only mode)
-pnpm dev run "Generate a README" --plan-only
-
-# Full auto execution (uses shell executor)
 pnpm dev run "Generate a README"
+```
 
-# Check status
-pnpm dev status
+## From Source (Development)
 
-# List runs and tasks
-pnpm dev runs
-pnpm dev tasks
+Use `pnpm` for source checkouts. The repository is a pnpm workspace.
 
-# View logs
-pnpm dev logs --run <runId>
+```bash
+git clone https://github.com/phamthanhhung/flowtask.git
+cd flowtask
+pnpm install
+pnpm dev init     # Interactive project setup
+pnpm dev run      # Start your first run
+```
 
-# Inspect a run
-pnpm dev inspect <runId>
+For the development loop:
 
-# System health check
-pnpm dev doctor
+```bash
+pnpm dev <command>   # Run CLI with tsx (e.g. pnpm dev run)
+pnpm test            # Run tests (vitest)
+pnpm quality         # typecheck + lint + format:check + test
+pnpm build           # Build with tsup → dist/
 ```
 
 ## Commands
@@ -640,6 +629,10 @@ Suggested fixes:
 - **Windows testing** — Cross-platform utilities (`getShell()`, `path.join`) are in place but Windows has not been tested end-to-end.
 - **AI planner** — The internal AI planner requires an API key for the selected provider and will fall back to the simple planner if unavailable. Keys can be configured via `flowtask setup` (interactive), `flowtask init`, or by setting environment variables.
 - **External AI CLI integration** — AI CLI tools (opencode, claude, codex) are used as task executors, not as the planner. The command executor supports argument, stdin, and file input modes, but end-to-end integration with specific tools may require configuration tuning.
+
+## Related Projects
+
+- [**OpenClaw**](https://openclaw.ai) — Personal AI assistant you run on your own devices (381k+ ★). Multi-channel inbox (WhatsApp, Telegram, Slack, Discord, Google Chat, Signal, iMessage, IRC, Microsoft Teams, Matrix, Feishu, LINE, Mattermost, Nostr, Zalo, WeChat, QQ, and more), voice wake/talk on macOS/iOS/Android, Live Canvas with A2UI, multi-agent routing, companion apps (Windows Hub, macOS menu bar, iOS/Android nodes), cron/webhook automation, and a skills ecosystem via ClawHub. Built by **Peter Steinberger** (steipete) for **Molty**, a space lobster AI assistant 🦞. OpenClaw's local-first, privacy-respecting approach inspired FlowTask's design philosophy. [GitHub](https://github.com/openclaw/openclaw) · [Docs](https://docs.openclaw.ai) · [Discord](https://discord.gg/clawd)
 
 ## License
 
