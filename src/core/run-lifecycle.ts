@@ -73,6 +73,7 @@ export class RunLifecycle {
       debug?: boolean;
       plannerMode?: PlannerMode;
       quality?: boolean;
+      defaultExecutor?: string;
     },
   ): Promise<{ run: Run; success: boolean }> {
     const mode = options?.mode ?? "auto";
@@ -216,10 +217,14 @@ export class RunLifecycle {
     await this.runManager.savePlan(run.runId, planResult.planMarkdown);
     console.log(picocolors.green(`  Plan created: ${planResult.tasks.length} tasks`));
 
-    const defaultExecutor = this.config.defaultExecutor ?? "shell";
+    const executorOverride = options?.defaultExecutor;
+    const defaultExecutor = executorOverride ?? this.config.defaultExecutor ?? "shell";
     const tasksWithRunId = planResult.tasks.map((t) => {
-      const executor = this.executorRegistry.has(t.executor) ? t.executor : defaultExecutor;
-      if (executor !== t.executor) {
+      let executor = t.executor;
+      if (executorOverride) {
+        executor = executorOverride;
+      } else if (!this.executorRegistry.has(t.executor)) {
+        executor = defaultExecutor;
         console.log(
           picocolors.yellow(
             `  Task "${t.title}" uses unknown executor "${t.executor}", falling back to "${defaultExecutor}"`,
@@ -231,6 +236,10 @@ export class RunLifecycle {
 
     // Check command executors exist; fall back to default if not
     for (const task of tasksWithRunId) {
+      if (executorOverride) {
+        task.executor = executorOverride;
+        continue;
+      }
       const cfg = this.executorRegistry.getConfig(task.executor);
       if (cfg && cfg.type === "command" && cfg.command) {
         const exists = await commandExists(cfg.command);

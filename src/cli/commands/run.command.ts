@@ -120,6 +120,7 @@ export async function runCommand(
       template: options.template,
       debug: options.debug,
       plannerMode: plannerMode,
+      defaultExecutor: options.executor,
     });
 
     if (!result.success) {
