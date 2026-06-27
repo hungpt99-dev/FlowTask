@@ -5,7 +5,7 @@ import {
   type AiProviderStreamChunk,
   type AiProviderHealthResult,
 } from "../ai-provider.js";
-import { AiProviderError, redactErrorMessage } from "../ai-provider-error.js";
+import { AiProviderError, redactErrorMessage, checkResponseSize } from "../ai-provider-error.js";
 import { generateWithResponseFormatFallback } from "../response-format-fallback.js";
 import { parseSseStream } from "../../utils/stream-parser.js";
 import {
@@ -224,6 +224,7 @@ export class MistralProvider implements AiProvider {
   }
 
   private async parseResponse(response: Response): Promise<AiProviderResponse> {
+    checkResponseSize(response, this.name);
     const data = (await response.json()) as {
       choices?: Array<{ message?: { content?: string } }>;
       model?: string;

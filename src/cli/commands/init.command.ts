@@ -52,7 +52,8 @@ export async function initCommand(options: {
     }
     mode = lower as ProjectMode;
   } else if (process.stdin.isTTY) {
-    const Enquirer = await import("enquirer").then((m) => m.default ?? m);
+    const m = await import("enquirer");
+    const Enquirer = m.default ?? m;
     const enquirer = new (Enquirer as unknown as new () => {
       prompt: (opts: unknown) => Promise<Record<string, unknown>>;
     })();

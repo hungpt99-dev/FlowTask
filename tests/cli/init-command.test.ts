@@ -3,8 +3,6 @@ import { join } from "node:path";
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { testDir } from "../setup.js";
 import { initCommand } from "../../src/cli/commands/init.command.js";
-import { fileExists, readTextFile, writeTextFile, readJsonFile } from "../../src/utils/fs.js";
-import { configJsonPath } from "../../src/utils/paths.js";
 
 describe("initCommand", () => {
   let projectDir: string;

@@ -56,6 +56,19 @@ export function redactErrorMessage(message: string, secrets: Set<string>): strin
   return result;
 }
 
+const MAX_RESPONSE_BYTES = 10_000_000;
+
+export function checkResponseSize(response: Response, provider: string): void {
+  const contentLength = response.headers?.get?.("content-length");
+  if (contentLength && parseInt(contentLength, 10) > MAX_RESPONSE_BYTES) {
+    throw new AiProviderError({
+      provider,
+      kind: "invalid_response",
+      message: `Response too large: ${contentLength} bytes exceeds limit of ${MAX_RESPONSE_BYTES} bytes`,
+    });
+  }
+}
+
 export function getSuggestionForError(kind: AiProviderErrorKind, provider: string): string {
   switch (kind) {
     case "missing_api_key":

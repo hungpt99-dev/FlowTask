@@ -1,35 +1,42 @@
 export class RingBuffer {
-  private buffer: string[] = [];
+  private buffer: string[];
   private maxLines: number;
   private maxLineLength: number;
+  private head = 0;
+  private count = 0;
 
   constructor(maxLines = 500, maxLineLength = 4000) {
     this.maxLines = maxLines;
     this.maxLineLength = maxLineLength;
+    this.buffer = new Array(maxLines);
   }
 
   push(line: string): void {
     const truncated =
       line.length > this.maxLineLength ? line.slice(0, this.maxLineLength) + "..." : line;
-    this.buffer.push(truncated);
-    if (this.buffer.length > this.maxLines) {
-      this.buffer.shift();
-    }
+    this.buffer[this.head] = truncated;
+    this.head = (this.head + 1) % this.maxLines;
+    if (this.count < this.maxLines) this.count++;
   }
 
   getLines(): string[] {
-    return [...this.buffer];
+    const result: string[] = [];
+    for (let i = 0; i < this.count; i++) {
+      result.push(this.buffer[(this.head - this.count + i + this.maxLines) % this.maxLines]!);
+    }
+    return result;
   }
 
   getText(separator = "\n"): string {
-    return this.buffer.join(separator);
+    return this.getLines().join(separator);
   }
 
   clear(): void {
-    this.buffer = [];
+    this.head = 0;
+    this.count = 0;
   }
 
   get length(): number {
-    return this.buffer.length;
+    return this.count;
   }
 }

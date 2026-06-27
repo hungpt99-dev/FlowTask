@@ -1,5 +1,5 @@
 import { type FlowTaskConfig, FlowTaskConfigSchema } from "../schemas/config.schema.js";
-import { fileExists, readJsonFile } from "../utils/fs.js";
+import { fileExists, readJsonFile, atomicWriteJsonFile } from "../utils/fs.js";
 import { configJsonPath } from "../utils/paths.js";
 import { generateDefaultConfig } from "./default-config.js";
 import { loadEnvFile } from "../utils/env-loader.js";
@@ -55,7 +55,6 @@ export class ConfigLoader {
   }
 
   async save(rootPath: string, config: FlowTaskConfig): Promise<void> {
-    const { atomicWriteJsonFile } = await import("../utils/fs.js");
-    await atomicWriteJsonFile(configJsonPath(rootPath), config);
+    await atomicWriteJsonFile(configJsonPath(rootPath), config, true);
   }
 }

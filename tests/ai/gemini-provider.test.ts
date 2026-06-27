@@ -46,7 +46,10 @@ describe("GeminiProvider", () => {
 
     const callUrl = mockFetch.mock.calls[0]?.[0] as string;
     expect(callUrl).toContain("generateContent");
-    expect(callUrl).toContain("key=test-key");
+    expect(callUrl).not.toContain("key=");
+
+    const callHeaders = mockFetch.mock.calls[0]?.[1]?.headers as Record<string, string>;
+    expect(callHeaders["x-goog-api-key"]).toBe("test-key");
 
     const callBody = JSON.parse(mockFetch.mock.calls[0]?.[1]?.body ?? "{}");
     expect(callBody.systemInstruction?.parts[0].text).toBe("You are Gemini");

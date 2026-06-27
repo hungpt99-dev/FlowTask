@@ -3,6 +3,9 @@ import { getLogsDir, taskLogPath, runtimeLogPath, validationLogPath } from "../u
 import { now } from "../utils/time.js";
 import { SecretRedactor } from "../safety/secret-redactor.js";
 
+const LOG_DIR_MODE = 0o700;
+const LOG_FILE_MODE = 0o600;
+
 export class LogManager {
   private rootPath: string;
   private redactor: SecretRedactor;
@@ -15,7 +18,7 @@ export class LogManager {
   }
 
   private async ensureLogDir(runId: string): Promise<void> {
-    await ensureDir(getLogsDir(this.rootPath, runId));
+    await ensureDir(getLogsDir(this.rootPath, runId), LOG_DIR_MODE);
   }
 
   async writeRuntime(runId: string, message: string): Promise<void> {
@@ -24,7 +27,11 @@ export class LogManager {
     const safeMessage = this.redactor.redact(message);
     this.pendingWrites++;
     try {
-      await appendToFile(runtimeLogPath(this.rootPath, runId), `[${timestamp}] ${safeMessage}\n`);
+      await appendToFile(
+        runtimeLogPath(this.rootPath, runId),
+        `[${timestamp}] ${safeMessage}\n`,
+        LOG_FILE_MODE,
+      );
     } finally {
       this.pendingWrites--;
       this.checkQueue();
@@ -40,6 +47,7 @@ export class LogManager {
       await appendToFile(
         taskLogPath(this.rootPath, runId, taskId),
         `[${timestamp}] ${safeMessage}\n`,
+        LOG_FILE_MODE,
       );
     } finally {
       this.pendingWrites--;
@@ -56,6 +64,7 @@ export class LogManager {
       await appendToFile(
         validationLogPath(this.rootPath, runId),
         `[${timestamp}] ${safeMessage}\n`,
+        LOG_FILE_MODE,
       );
     } finally {
       this.pendingWrites--;

@@ -1,8 +1,12 @@
 import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import path from "node:path";
+import { homedir } from "node:os";
 import { credentialRef } from "./secret-store.js";
+
 import type { AiProviderConfig } from "../ai/ai.schema.js";
+import { z } from "zod";
+
+const SecretsFileSchema = z.record(z.string());
 
 function secretsFilePath(): string {
   const envOverride = process.env.FLOWTASK_SECRETS_PATH;
@@ -15,12 +19,16 @@ export interface ResolvedCredential {
   source: "env" | "secret_store" | "no_key";
 }
 
+const credentialCache = new Map<string, ResolvedCredential>();
+
 function readSecretSync(key: string): string | undefined {
   try {
     const filePath = secretsFilePath();
     const raw = readFileSync(filePath, "utf-8");
-    const data = JSON.parse(raw) as Record<string, string>;
-    return data[key];
+    const data = JSON.parse(raw) as Record<string, unknown>;
+    const parsed = SecretsFileSchema.safeParse(data);
+    if (!parsed.success) return undefined;
+    return parsed.data[key];
   } catch {
     return undefined;
   }
@@ -30,11 +38,18 @@ export function resolveCredentialSync(
   providerName: string,
   config: AiProviderConfig,
 ): ResolvedCredential {
+  const cacheKey = `${providerName}:${config.apiKeyEnv ?? ""}:${config.apiKeyRef ?? ""}`;
+  const cached = credentialCache.get(cacheKey);
+  if (cached && cached.source !== "no_key") return cached;
+  if (cached && cached.source === "no_key" && !config.apiKeyEnv && !config.apiKeyRef) return cached;
+
   // 1. Explicit environment variable from config
   if (config.apiKeyEnv) {
     const envVal = process.env[config.apiKeyEnv];
     if (envVal) {
-      return { apiKey: envVal, source: "env" };
+      const result: ResolvedCredential = { apiKey: envVal, source: "env" };
+      credentialCache.set(cacheKey, result);
+      return result;
     }
   }
 
@@ -42,7 +57,9 @@ export function resolveCredentialSync(
   if (config.apiKeyRef) {
     const stored = readSecretSync(config.apiKeyRef);
     if (stored) {
-      return { apiKey: stored, source: "secret_store" };
+      const result: ResolvedCredential = { apiKey: stored, source: "secret_store" };
+      credentialCache.set(cacheKey, result);
+      return result;
     }
   }
 
@@ -50,7 +67,9 @@ export function resolveCredentialSync(
   const defaultRef = credentialRef(providerName);
   const stored = readSecretSync(defaultRef);
   if (stored) {
-    return { apiKey: stored, source: "secret_store" };
+    const result: ResolvedCredential = { apiKey: stored, source: "secret_store" };
+    credentialCache.set(cacheKey, result);
+    return result;
   }
 
   // 4. Provider-specific default env var
@@ -58,7 +77,9 @@ export function resolveCredentialSync(
   if (defaultEnvVar) {
     const envVal = process.env[defaultEnvVar];
     if (envVal) {
-      return { apiKey: envVal, source: "env" };
+      const result: ResolvedCredential = { apiKey: envVal, source: "env" };
+      credentialCache.set(cacheKey, result);
+      return result;
     }
   }
 
@@ -70,6 +91,10 @@ export async function resolveCredential(
   config: AiProviderConfig,
 ): Promise<ResolvedCredential> {
   return resolveCredentialSync(providerName, config);
+}
+
+export function clearCredentialCache(): void {
+  credentialCache.clear();
 }
 
 export function getDefaultEnvVar(providerName: string, type: string): string | undefined {

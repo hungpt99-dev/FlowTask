@@ -5,39 +5,61 @@ export interface SafetyResult {
   reason?: string;
 }
 
+function normalizeCommand(cmd: string): string {
+  return cmd
+    .toLowerCase()
+    .replace(/\$HOME/g, "")
+    .replace(/\.\//g, "")
+    .replace(/['"]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const BLOCKED_PATTERNS: Array<{ regex: RegExp; reason: string }> = [
+  { regex: /\brm\s+-rf\s+\//, reason: "Blocked: destructive command (rm -rf /)" },
+  {
+    regex: /\brm\s+-rf\s+--no-preserve-root\s+\//,
+    reason: "Blocked: destructive command (rm -rf /)",
+  },
+  { regex: /\brm\s+-rf\s+\$?HOME/i, reason: "Blocked: destructive command (rm -rf)" },
+  { regex: /\brm\s+-rf\s+\.git\b/, reason: "Blocked: would delete .git directory" },
+  { regex: /\bprintenv\b/, reason: "Blocked: would expose environment variables" },
+  { regex: /\b(?:env|set|declare)\b/, reason: "Blocked: would expose environment variables" },
+  { regex: /(?:^|\|)\s*env\s*$/, reason: "Blocked: would expose environment variables" },
+  { regex: /\bcat\s+\.env\b/, reason: "Blocked: would read .env secrets" },
+  {
+    regex: /\b(?:nl|head|tail|less|more|base64|strings)\s+\.env\b/,
+    reason: "Blocked: would read .env secrets via alternative tool",
+  },
+  { regex: /\bcat\s+id_rsa\b/, reason: "Blocked: would read SSH private key" },
+  { regex: /\bupload\b/, reason: "Blocked: potential data exfiltration" },
+  { regex: /\bdisable\s+test\b/, reason: "Blocked: cannot disable tests" },
+  { regex: /echo\s+\$[A-Z_]+/, reason: "Blocked: would expose environment variables via echo" },
+];
+
+const RISKY_PATTERNS: Array<{ regex: RegExp; reason: string }> = [
+  { regex: /\bpnpm\s+add\b/, reason: "Adding dependency" },
+  { regex: /\bpnpm\s+install\b/, reason: "Installing dependencies" },
+  { regex: /\bnpm\s+install\b/, reason: "Installing dependencies" },
+  { regex: /\bnpm\s+add\b/, reason: "Adding dependency" },
+  { regex: /\brm\s+/, reason: "Deleting files" },
+  { regex: /\bgit\s+push\b/, reason: "Pushing to remote" },
+  { regex: /\bgit\s+reset\b/, reason: "Resetting git history" },
+  { regex: /\bdeploy\b/, reason: "Deploying application" },
+];
+
 export class SafetyChecker {
   check(command: string): SafetyResult {
-    const lower = command.toLowerCase().trim();
+    const normalized = normalizeCommand(command);
 
-    const blockedPatterns = [
-      { pattern: "rm -rf /", reason: "Blocked: destructive command (rm -rf /)" },
-      { pattern: "rm -rf .git", reason: "Blocked: would delete .git directory" },
-      { pattern: "printenv", reason: "Blocked: would expose environment variables" },
-      { pattern: "cat .env", reason: "Blocked: would read .env secrets" },
-      { pattern: "cat id_rsa", reason: "Blocked: would read SSH private key" },
-      { pattern: "upload", reason: "Blocked: potential data exfiltration" },
-      { pattern: "disable test", reason: "Blocked: cannot disable tests" },
-    ];
-
-    for (const { pattern, reason } of blockedPatterns) {
-      if (lower.includes(pattern)) {
+    for (const { regex, reason } of BLOCKED_PATTERNS) {
+      if (regex.test(normalized)) {
         return { riskLevel: "blocked", reason };
       }
     }
 
-    const riskyPatterns = [
-      { pattern: "pnpm add", reason: "Adding dependency" },
-      { pattern: "pnpm install", reason: "Installing dependencies" },
-      { pattern: "npm install", reason: "Installing dependencies" },
-      { pattern: "npm add", reason: "Adding dependency" },
-      { pattern: "rm ", reason: "Deleting files" },
-      { pattern: "git push", reason: "Pushing to remote" },
-      { pattern: "git reset", reason: "Resetting git history" },
-      { pattern: "deploy", reason: "Deploying application" },
-    ];
-
-    for (const { pattern, reason } of riskyPatterns) {
-      if (lower.startsWith(pattern) || lower.includes(pattern)) {
+    for (const { regex, reason } of RISKY_PATTERNS) {
+      if (regex.test(normalized)) {
         return { riskLevel: "risky", reason: `Risky: ${reason}` };
       }
     }

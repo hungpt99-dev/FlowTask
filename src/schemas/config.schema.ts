@@ -46,9 +46,16 @@ export const LimitsConfigSchema = z.object({
   maxLogSizeMb: z.number().int().positive().default(20),
 });
 
+const COMMAND_INJECTION_RE = /\$\(|`/;
+
 export const ExecutorEntrySchema = z.object({
   type: z.enum(["shell", "command", "manual"]),
-  command: z.string().optional(),
+  command: z
+    .string()
+    .refine((cmd) => !COMMAND_INJECTION_RE.test(cmd), {
+      message: "Executor command must not contain shell injection patterns",
+    })
+    .optional(),
   args: z.array(z.string()).optional().default([]),
   inputMode: z.enum(["argument", "stdin", "file"]).optional().default("argument"),
   fileArg: z.string().optional(),

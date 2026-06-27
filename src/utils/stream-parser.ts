@@ -13,6 +13,18 @@ export interface StreamParseResult {
   };
 }
 
+function scanLines(buffer: string): { lines: string[]; remaining: string } {
+  const lines: string[] = [];
+  let start = 0;
+  for (let i = 0; i < buffer.length; i++) {
+    if (buffer[i] === "\n") {
+      lines.push(buffer.slice(start, i));
+      start = i + 1;
+    }
+  }
+  return { lines, remaining: buffer.slice(start) };
+}
+
 export async function parseSseStream(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   onData: (
@@ -38,12 +50,12 @@ export async function parseSseStream(
 ): Promise<StreamParseResult> {
   const decoder = new TextDecoder();
   let buffer = "";
-  const fullTextParts: string[] = [];
+  let fullText = "";
   let finalUsage: { inputTokens?: number; outputTokens?: number; totalTokens?: number } | undefined;
 
   const emit = (chunk: Omit<AiProviderStreamChunk, "provider" | "model">): void => {
     if (chunk.textDelta) {
-      fullTextParts.push(chunk.textDelta);
+      fullText += chunk.textDelta;
     }
     if (chunk.usage) {
       finalUsage = chunk.usage;
@@ -56,8 +68,9 @@ export async function parseSseStream(
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
+
+      const { lines, remaining } = scanLines(buffer);
+      buffer = remaining;
 
       for (const line of lines) {
         const trimmed = line.trim();
@@ -77,7 +90,7 @@ export async function parseSseStream(
         const result = await onData(parsed, emit);
         if (result?.done) {
           return {
-            text: fullTextParts.join(""),
+            text: fullText,
             usage: result.usage ?? finalUsage,
           };
         }
@@ -87,7 +100,7 @@ export async function parseSseStream(
     reader.releaseLock();
   }
 
-  return { text: fullTextParts.join(""), usage: finalUsage };
+  return { text: fullText, usage: finalUsage };
 }
 
 export async function parseNdjsonStream(
@@ -117,13 +130,13 @@ export async function parseNdjsonStream(
 ): Promise<StreamParseResult & { model?: string }> {
   const decoder = new TextDecoder();
   let buffer = "";
-  const fullTextParts: string[] = [];
+  let fullText = "";
   let finalModel = model;
   let finalUsage: { inputTokens?: number; outputTokens?: number; totalTokens?: number } | undefined;
 
   const emit = (chunk: Omit<AiProviderStreamChunk, "provider" | "model">): void => {
     if (chunk.textDelta) {
-      fullTextParts.push(chunk.textDelta);
+      fullText += chunk.textDelta;
     }
     if (chunk.usage) {
       finalUsage = chunk.usage;
@@ -136,8 +149,9 @@ export async function parseNdjsonStream(
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
+
+      const { lines, remaining } = scanLines(buffer);
+      buffer = remaining;
 
       for (const line of lines) {
         const trimmed = line.trim();
@@ -156,7 +170,7 @@ export async function parseNdjsonStream(
         }
         if (result?.done) {
           return {
-            text: fullTextParts.join(""),
+            text: fullText,
             model: finalModel,
             usage: result.usage ?? finalUsage,
           };
@@ -167,5 +181,5 @@ export async function parseNdjsonStream(
     reader.releaseLock();
   }
 
-  return { text: fullTextParts.join(""), model: finalModel, usage: finalUsage };
+  return { text: fullText, model: finalModel, usage: finalUsage };
 }

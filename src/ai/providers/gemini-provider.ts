@@ -5,7 +5,7 @@ import {
   type AiProviderStreamChunk,
   type AiProviderHealthResult,
 } from "../ai-provider.js";
-import { AiProviderError, redactErrorMessage } from "../ai-provider-error.js";
+import { AiProviderError, redactErrorMessage, checkResponseSize } from "../ai-provider-error.js";
 import { generateWithResponseFormatFallback } from "../response-format-fallback.js";
 import { parseSseStream } from "../../utils/stream-parser.js";
 import { extractGeminiDelta, extractGeminiUsage } from "../../utils/provider-stream.js";
@@ -85,10 +85,10 @@ export class GeminiProvider implements AiProvider {
     const start = Date.now();
     try {
       const model = options?.model ?? this.model;
-      const url = `${this.baseUrl}/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
+      const url = `${this.baseUrl}/v1beta/models/${model}:generateContent`;
       const response = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-goog-api-key": this.apiKey },
         body: JSON.stringify({
           contents: [{ parts: [{ text: "test" }] }],
           generationConfig: { maxOutputTokens: 1 },
@@ -146,14 +146,22 @@ export class GeminiProvider implements AiProvider {
     }
   }
 
+  private buildHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (this.apiKey) {
+      headers["x-goog-api-key"] = this.apiKey;
+    }
+    return headers;
+  }
+
   private async streamInternal(
     request: AiProviderRequest,
     onChunk: (chunk: AiProviderStreamChunk) => void | Promise<void>,
   ): Promise<AiProviderResponse> {
     const { url, body } = this.buildRequestBody(request, true);
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
+    const headers = this.buildHeaders();
 
     let response: Response;
     try {
@@ -186,9 +194,7 @@ export class GeminiProvider implements AiProvider {
 
   private async generateOnce(request: AiProviderRequest): Promise<AiProviderResponse> {
     const { url, body } = this.buildRequestBody(request, false);
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
+    const headers = this.buildHeaders();
 
     let response: Response;
     try {
@@ -216,7 +222,7 @@ export class GeminiProvider implements AiProvider {
   ): { url: string; body: Record<string, unknown> } {
     const model = request.model ?? this.model;
     const useStream = stream ? "streamGenerateContent" : "generateContent";
-    const url = `${this.baseUrl}/v1beta/models/${model}:${useStream}?key=${this.apiKey}`;
+    const url = `${this.baseUrl}/v1beta/models/${model}:${useStream}`;
 
     const contents: GeminiContent[] = [
       {
@@ -249,6 +255,7 @@ export class GeminiProvider implements AiProvider {
   }
 
   private async parseResponse(response: Response): Promise<AiProviderResponse> {
+    checkResponseSize(response, this.name);
     const data = (await response.json()) as GeminiResponse;
 
     const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
@@ -310,6 +317,10 @@ export class GeminiProvider implements AiProvider {
 
   private normalizeFetchError(err: unknown, timeoutMs?: number): AiProviderError {
     if (err instanceof AiProviderError) return err;
+    const secrets = new Set<string>();
+    if (this.apiKey) secrets.add(this.apiKey);
+    const rawMessage = err instanceof Error ? err.message : String(err);
+    const redacted = redactErrorMessage(rawMessage, secrets);
     if (err instanceof Error && err.name === "TimeoutError") {
       return new AiProviderError({
         provider: this.name,
@@ -321,7 +332,7 @@ export class GeminiProvider implements AiProvider {
     return new AiProviderError({
       provider: this.name,
       kind: "network_error",
-      message: `Network error: ${err instanceof Error ? err.message : String(err)}`,
+      message: `Network error: ${redacted}`,
       retryable: true,
     });
   }

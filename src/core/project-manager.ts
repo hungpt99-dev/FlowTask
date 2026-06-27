@@ -1,6 +1,6 @@
 import path from "node:path";
 import { type Project, ProjectSchema } from "../schemas/project.schema.js";
-import { type FlowTaskConfig, ProjectModeSchema } from "../schemas/config.schema.js";
+import { type FlowTaskConfig } from "../schemas/config.schema.js";
 import { type ProjectState, ProjectStateSchema } from "../schemas/state.schema.js";
 import { fileExists, atomicWriteJsonFile, readJsonFile, ensureDir } from "../utils/fs.js";
 import {
@@ -17,7 +17,7 @@ import { now } from "../utils/time.js";
 import { generateProjectId } from "../utils/ids.js";
 import { generateDefaultConfig } from "../config/default-config.js";
 import { ConfigLoader } from "../config/config-loader.js";
-import { type ProjectMode, VALID_PROJECT_MODES } from "../config/project-modes.js";
+import { type ProjectMode } from "../config/project-modes.js";
 import { generateModeRules } from "../config/mode-rules.js";
 import { generateModeSteps } from "../config/mode-steps.js";
 

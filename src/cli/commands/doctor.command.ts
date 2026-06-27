@@ -1,5 +1,4 @@
 import picocolors from "picocolors";
-import ora from "ora";
 import { ProjectManager } from "../../core/project-manager.js";
 import { ConfigLoader } from "../../config/config-loader.js";
 import { spawnWithPromise } from "../../utils/process.js";
@@ -72,12 +71,12 @@ export async function doctorCommand(options?: { providers?: boolean }): Promise<
     ];
 
     for (const check of systemChecks) {
-      const spinner = ora({ text: check.name, color: "blue" }).start();
+      process.stdout.write(`  ${picocolors.blue("⋯")} ${check.name}... `);
       const result = await check.run();
       if (result.ok) {
-        spinner.succeed(`${check.name}: ${picocolors.dim(result.message)}`);
+        process.stdout.write(`${picocolors.green("✓")} ${picocolors.dim(result.message)}\n`);
       } else {
-        spinner.fail(`${check.name}: ${picocolors.red(result.message)}`);
+        process.stdout.write(`${picocolors.red("✗")} ${picocolors.red(result.message)}\n`);
       }
     }
 
@@ -151,30 +150,24 @@ export async function doctorCommand(options?: { providers?: boolean }): Promise<
   console.log(picocolors.dim("─".repeat(60)));
 
   for (const p of allProviders) {
-    const spinner = ora({
-      text: `${p.name} (${p.type})`,
-      color: "blue",
-    }).start();
-
     try {
       const provider = providerRegistry.getProvider(p.name);
 
       if (provider.healthCheck) {
+        process.stdout.write(`  ${picocolors.blue("⋯")} ${p.name} (${p.type})... `);
         const healthResult = await provider.healthCheck({
           model: config.planner?.model,
           timeoutMs: 5000,
         });
 
         if (healthResult.ok) {
-          spinner.succeed(
-            `${picocolors.green("✓")} ${picocolors.bold(p.name.padEnd(16))} ${picocolors.dim(healthResult.message)}`,
+          process.stdout.write(
+            `${picocolors.green("✓")} ${picocolors.dim(healthResult.message)}\n`,
           );
         } else {
           const icon =
             healthResult.kind === "missing_api_key" ? picocolors.yellow("!") : picocolors.red("✗");
-          spinner.fail(
-            `${icon} ${picocolors.bold(p.name.padEnd(16))} ${picocolors.yellow(healthResult.message)}`,
-          );
+          process.stdout.write(`${icon} ${picocolors.yellow(healthResult.message)}\n`);
           if (healthResult.suggestion) {
             console.log(`  ${"".padEnd(18)}${picocolors.dim(healthResult.suggestion)}`);
           }
@@ -184,12 +177,12 @@ export async function doctorCommand(options?: { providers?: boolean }): Promise<
         const keyStatus = p.apiKeyAvailable
           ? picocolors.dim("key found")
           : picocolors.yellow(`${p.apiKeyEnv ?? "no key"} missing`);
-        spinner.succeed(
-          `${status} ${picocolors.bold(p.name.padEnd(16))} ${p.type.padEnd(18)} ${keyStatus}`,
+        console.log(
+          `  ${status} ${picocolors.bold(p.name.padEnd(16))} ${p.type.padEnd(18)} ${keyStatus}`,
         );
       }
     } catch (err) {
-      spinner.fail(
+      console.log(
         `${picocolors.red("✗")} ${picocolors.bold(p.name.padEnd(16))} ${err instanceof Error ? err.message : String(err)}`,
       );
     }

@@ -5,7 +5,7 @@ import {
   type AiProviderStreamChunk,
   type AiProviderHealthResult,
 } from "../ai-provider.js";
-import { AiProviderError, redactErrorMessage } from "../ai-provider-error.js";
+import { AiProviderError, redactErrorMessage, checkResponseSize } from "../ai-provider-error.js";
 import { generateWithResponseFormatFallback } from "../response-format-fallback.js";
 import { parseNdjsonStream } from "../../utils/stream-parser.js";
 import { extractOllamaDelta, extractOllamaDone } from "../../utils/provider-stream.js";
@@ -222,6 +222,7 @@ export class OllamaProvider implements AiProvider {
   }
 
   private async parseResponse(response: Response): Promise<AiProviderResponse> {
+    checkResponseSize(response, this.name);
     const data = (await response.json()) as OllamaResponse;
     const text = data.message?.content ?? "";
 

@@ -1,4 +1,5 @@
-import type { Executor, ExecutorInput, ExecutorResult } from "./executor.js";
+import type { Executor } from "./executor.js";
+import { ShellExecutor } from "./shell-executor.js";
 import { CommandExecutor } from "./command-executor.js";
 import { ManualExecutor } from "./manual-executor.js";
 import type { ExecutorEntry } from "../schemas/config.schema.js";
@@ -15,13 +16,7 @@ export class ExecutorRegistry {
   constructor(config?: { executors?: Record<string, ExecutorEntry> }) {
     this.mergedExecutors = mergeExecutorConfigs(config?.executors);
 
-    this.register("shell", {
-      name: "shell",
-      execute: async (_input: ExecutorInput): Promise<ExecutorResult> => {
-        const { ShellExecutor } = await import("./shell-executor.js");
-        return new ShellExecutor().execute(_input);
-      },
-    });
+    this.register("shell", new ShellExecutor());
     this.register("manual", new ManualExecutor());
 
     for (const [name, entry] of Object.entries(this.mergedExecutors)) {

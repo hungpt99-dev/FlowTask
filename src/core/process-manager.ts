@@ -44,7 +44,7 @@ export class ProcessManager {
   async save(rootPath: string, metadata: ProcessMetadata): Promise<void> {
     const processPath = this.getProcessPath(rootPath, metadata.runId);
     await ensureDir(path.dirname(processPath));
-    await fs.writeFile(processPath, JSON.stringify(metadata, null, 2), "utf-8");
+    await fs.writeFile(processPath, JSON.stringify(metadata), "utf-8");
   }
 
   async read(rootPath: string, runId: string): Promise<ProcessMetadata | null> {

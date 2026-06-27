@@ -6,6 +6,7 @@ import { getEventBus } from "../ui/event-bus.js";
 import { LineBuffer } from "../utils/stream-lines.js";
 import { SecretRedactor } from "../safety/secret-redactor.js";
 import type { LogManager } from "../core/log-manager.js";
+import { sanitizeCommand, buildChildEnv } from "../utils/command-sanitizer.js";
 
 export class ShellExecutor implements Executor {
   name = "shell";
@@ -44,7 +45,22 @@ export class ShellExecutor implements Executor {
       }
     };
 
-    const command = commands.join(" && ");
+    let command = commands.join(" && ");
+
+    if (!input.allowShellMetachars) {
+      const sanResult = sanitizeCommand(command);
+      if (!sanResult.valid) {
+        return {
+          status: "failed",
+          exitCode: 1,
+          output: "",
+          error: `Shell command rejected: ${sanResult.reason}`,
+          startedAt,
+          finishedAt: now(),
+        };
+      }
+      command = sanResult.sanitized;
+    }
 
     eventBus.emit({
       type: "executor_started",
@@ -59,12 +75,7 @@ export class ShellExecutor implements Executor {
       return await new Promise<ExecutorResult>((resolve) => {
         const child = spawn(getShell(), [getShellCommandFlag(), command], {
           cwd: input.projectRoot,
-          env: {
-            ...process.env,
-            ...input.env,
-            FLOWTASK_TASK_ID: taskId,
-            FLOWTASK_RUN_ID: runId,
-          },
+          env: buildChildEnv({ ...input.env, FLOWTASK_TASK_ID: taskId, FLOWTASK_RUN_ID: runId }),
           stdio: ["pipe", "pipe", "pipe"],
           signal: input.signal,
           shell: false,

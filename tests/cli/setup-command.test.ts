@@ -6,7 +6,7 @@ import { setupAiCommand } from "../../src/cli/commands/setup.command.js";
 import { readJsonFile } from "../../src/utils/fs.js";
 import { configJsonPath } from "../../src/utils/paths.js";
 import { ProjectManager } from "../../src/core/project-manager.js";
-import { getSecretStore, credentialRef, resetSecretStore } from "../../src/config/secret-store.js";
+import { resetSecretStore } from "../../src/config/secret-store.js";
 
 describe("setupAiCommand", () => {
   let projectDir: string;

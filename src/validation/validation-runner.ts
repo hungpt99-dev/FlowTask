@@ -1,4 +1,4 @@
-import { spawn, type SpawnOptions } from "node:child_process";
+import { spawn } from "node:child_process";
 import path from "node:path";
 import type { FlowTaskConfig } from "../schemas/config.schema.js";
 import { getShell, getShellCommandFlag } from "../utils/shell.js";
@@ -10,6 +10,7 @@ import { setDetachedSpawnOptions, killProcessTree, isAlive } from "../utils/proc
 import { getEventBus } from "../ui/event-bus.js";
 import { ResourceGuard } from "./resource-guard.js";
 import { SecretRedactor } from "../safety/secret-redactor.js";
+import { buildChildEnv } from "../utils/command-sanitizer.js";
 
 export interface ValidationCommandResult {
   command: string;
@@ -261,11 +262,7 @@ export class ValidationRunner {
       const shell = getShell();
       const shellFlag = getShellCommandFlag();
       const { detached } = setDetachedSpawnOptions();
-      const env: Record<string, string | undefined> = {
-        ...(process.env as Record<string, string | undefined>),
-        ...params.env,
-        FLOWTASK_RUN_ID: params.runId,
-      };
+      const env = buildChildEnv({ ...params.env, FLOWTASK_RUN_ID: params.runId });
 
       const child = spawn(shell, [shellFlag, params.command], {
         cwd: params.cwd,
@@ -475,7 +472,13 @@ export class ValidationRunner {
 }
 
 function safeFrameCommand(command: string): string {
-  return command;
+  if (!command || command.trim().length === 0) {
+    throw new Error("Validation command is empty");
+  }
+  if (command.length > 32_768) {
+    throw new Error("Validation command exceeds maximum length of 32,768 characters");
+  }
+  return command.trim();
 }
 
 async function awaitAppendLog(logsDir: string, text: string): Promise<void> {

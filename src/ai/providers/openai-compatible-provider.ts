@@ -5,7 +5,7 @@ import {
   type AiProviderStreamChunk,
   type AiProviderHealthResult,
 } from "../ai-provider.js";
-import { AiProviderError, redactErrorMessage } from "../ai-provider-error.js";
+import { AiProviderError, redactErrorMessage, checkResponseSize } from "../ai-provider-error.js";
 import { generateWithResponseFormatFallback } from "../response-format-fallback.js";
 import { parseSseStream } from "../../utils/stream-parser.js";
 import {
@@ -245,6 +245,7 @@ export class OpenAiCompatibleProvider implements AiProvider {
   }
 
   private async parseResponse(response: Response): Promise<AiProviderResponse> {
+    checkResponseSize(response, this.name);
     const data = (await response.json()) as {
       choices?: Array<{ message?: { content?: string } }>;
       model?: string;
@@ -324,6 +325,10 @@ export class OpenAiCompatibleProvider implements AiProvider {
 
   private normalizeFetchError(err: unknown, timeoutMs?: number): AiProviderError {
     if (err instanceof AiProviderError) return err;
+    const secrets = new Set<string>();
+    if (this.apiKey) secrets.add(this.apiKey);
+    const rawMessage = err instanceof Error ? err.message : String(err);
+    const redacted = redactErrorMessage(rawMessage, secrets);
     if (err instanceof Error && err.name === "TimeoutError") {
       return new AiProviderError({
         provider: this.name,
@@ -336,7 +341,7 @@ export class OpenAiCompatibleProvider implements AiProvider {
     return new AiProviderError({
       provider: this.name,
       kind: "network_error",
-      message: `Network error connecting to ${this.baseUrl}: ${err instanceof Error ? err.message : String(err)}`,
+      message: `Network error connecting to ${this.baseUrl}: ${redacted}`,
       retryable: true,
       suggestion: "Check your network connection and provider endpoint.",
     });

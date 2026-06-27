@@ -73,7 +73,7 @@ describe("CommandExecutor", () => {
         "path.join",
         "path.isAbsolute",
         'startsWith("/")',
-        "/tmp",
+        "tmp/test",
       ].join("\n");
 
       const result = await executor.execute({
@@ -164,7 +164,7 @@ describe("CommandExecutor", () => {
         "path.join",
         "path.isAbsolute",
         'startsWith("/")',
-        "/tmp",
+        "tmp/test",
         "",
         "```bash",
         "pnpm test",

@@ -2,10 +2,8 @@ import picocolors from "picocolors";
 import { ConfigLoader } from "../../config/config-loader.js";
 import { ProviderRegistry } from "../../ai/provider-registry.js";
 import { getSecretStore } from "../../config/secret-store.js";
-import { setupAiCommand, testProvider, listSetupProviders } from "./setup.command.js";
-import { fileExists } from "../../utils/fs.js";
-import { FLOWTASK_DIR } from "../../utils/paths.js";
-import path from "node:path";
+import { setupAiCommand } from "./setup.command.js";
+import { testProvider } from "../../ai/provider-service.js";
 
 export async function listProvidersCommand(): Promise<void> {
   const rootPath = process.cwd();

@@ -5,7 +5,7 @@ import {
   type AiProviderStreamChunk,
   type AiProviderHealthResult,
 } from "../ai-provider.js";
-import { AiProviderError, redactErrorMessage } from "../ai-provider-error.js";
+import { AiProviderError, redactErrorMessage, checkResponseSize } from "../ai-provider-error.js";
 import { parseSseStream } from "../../utils/stream-parser.js";
 import { extractAnthropicDelta, extractAnthropicDone } from "../../utils/provider-stream.js";
 
@@ -221,6 +221,7 @@ export class AnthropicProvider implements AiProvider {
   }
 
   private async parseResponse(response: Response): Promise<AiProviderResponse> {
+    checkResponseSize(response, this.name);
     const data = (await response.json()) as AnthropicResponse;
 
     const textBlocks =
@@ -291,6 +292,10 @@ export class AnthropicProvider implements AiProvider {
 
   private normalizeFetchError(err: unknown, timeoutMs?: number): AiProviderError {
     if (err instanceof AiProviderError) return err;
+    const secrets = new Set<string>();
+    if (this.apiKey) secrets.add(this.apiKey);
+    const rawMessage = err instanceof Error ? err.message : String(err);
+    const redacted = redactErrorMessage(rawMessage, secrets);
     if (err instanceof Error && err.name === "TimeoutError") {
       return new AiProviderError({
         provider: this.name,
@@ -302,7 +307,7 @@ export class AnthropicProvider implements AiProvider {
     return new AiProviderError({
       provider: this.name,
       kind: "network_error",
-      message: `Network error: ${err instanceof Error ? err.message : String(err)}`,
+      message: `Network error: ${redacted}`,
       retryable: true,
     });
   }

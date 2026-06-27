@@ -4,6 +4,7 @@ import { type Task, type TaskIndex, TaskSchema, TaskIndexSchema } from "../schem
 import {
   fileExists,
   readJsonFile,
+  readTextFile,
   atomicWriteJsonFile,
   ensureDir,
   writeTextFile,
@@ -36,7 +37,8 @@ export class RunManager {
 
   async createRun(projectId: string, title: string, mode: Run["mode"] = "auto"): Promise<Run> {
     const timestamp = now();
-    const truncatedTitle = title.slice(0, 200);
+    const sanitized = title.replace(/[/\\\0:]/g, "_").replace(/\.\./g, "");
+    const truncatedTitle = sanitized.slice(0, 200);
     const runId = generateRunId(truncatedTitle);
     const run: Run = {
       runId,
@@ -238,7 +240,6 @@ export class RunManager {
     const logDir = getLogsDir(this.rootPath, runId);
     const logPath = path.join(logDir, `${taskId}.log`);
     try {
-      const { readTextFile } = await import("../utils/fs.js");
       return await readTextFile(logPath);
     } catch {
       return "";
@@ -247,7 +248,6 @@ export class RunManager {
 
   async loadPrompt(runId: string): Promise<string> {
     try {
-      const { readTextFile } = await import("../utils/fs.js");
       return await readTextFile(promptMdPath(this.rootPath, runId));
     } catch {
       return runId;
@@ -256,7 +256,6 @@ export class RunManager {
 
   async loadRulesContext(runId: string): Promise<string> {
     try {
-      const { readTextFile } = await import("../utils/fs.js");
       return await readTextFile(rulesContextPath(this.rootPath, runId));
     } catch {
       return "";

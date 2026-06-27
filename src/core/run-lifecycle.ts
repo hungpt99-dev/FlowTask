@@ -20,8 +20,8 @@ import { SafetyChecker } from "../safety/safety-checker.js";
 import { ProcessManager } from "./process-manager.js";
 import { QualityGate } from "../quality/quality-gate.js";
 import type { QualityGateResult } from "../schemas/quality.schema.js";
-import { writeTextFile, ensureDir } from "../utils/fs.js";
-import { getContextDir } from "../utils/paths.js";
+import { writeTextFile, ensureDir, atomicWriteJsonFile } from "../utils/fs.js";
+import { getContextDir, getOutputsDir } from "../utils/paths.js";
 import { now } from "../utils/time.js";
 import { commandExists } from "../utils/command-exists.js";
 import path from "node:path";
@@ -438,13 +438,12 @@ export class RunLifecycle {
 
       const success = await this.executeTask(run, prompt, rulesContext, task, tasks);
 
+      task.status = success ? "done" : "failed";
+
       if (!success) {
         runSuccess = false;
         break;
       }
-
-      tasks.length = 0;
-      tasks.push(...(await this.runManager.loadTasks(run.runId)));
     }
 
     return runSuccess;
@@ -669,11 +668,8 @@ export class RunLifecycle {
         startedAt: now_ts,
         finishedAt: now_ts,
       };
-      const { atomicWriteJsonFile: atomicWrite } = await import("../utils/fs.js");
-      const { getOutputsDir } = await import("../utils/paths.js");
-      const p = await import("node:path");
-      await atomicWrite(
-        p.join(getOutputsDir(this.rootPath, runId), "quality-results.json"),
+      await atomicWriteJsonFile(
+        path.join(getOutputsDir(this.rootPath, runId), "quality-results.json"),
         result,
       );
       return result;

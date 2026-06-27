@@ -8,6 +8,7 @@ import { buildCommandArgs } from "./build-command-args.js";
 import { getEventBus } from "../ui/event-bus.js";
 import { LineBuffer } from "../utils/stream-lines.js";
 import { SecretRedactor } from "../safety/secret-redactor.js";
+import { buildChildEnv } from "../utils/command-sanitizer.js";
 
 export class CommandExecutor implements Executor {
   name = "command";
@@ -89,13 +90,12 @@ export class CommandExecutor implements Executor {
 
         const child = spawn(cmd, finalArgs, {
           cwd: input.projectRoot,
-          env: {
-            ...process.env,
+          env: buildChildEnv({
             ...input.env,
             FLOWTASK_CONTEXT_PACK: input.contextPackContent,
             FLOWTASK_TASK_ID: taskId,
             FLOWTASK_RUN_ID: runId,
-          },
+          }),
           stdio: ["pipe", "pipe", "pipe"],
           signal: input.signal,
           timeout: timeoutMs,
@@ -114,7 +114,16 @@ export class CommandExecutor implements Executor {
               startedAt,
               status: "running",
             })
-            .catch(() => {});
+            .catch((err) => {
+              // non-critical: process state persistence
+              if (this.logManager) {
+                this.logManager.writeTaskLog(
+                  runId,
+                  taskId,
+                  `[warn] failed to save process state: ${err instanceof Error ? err.message : String(err)}`,
+                );
+              }
+            });
         }
 
         if (stdin !== undefined) {
@@ -161,7 +170,15 @@ export class CommandExecutor implements Executor {
 
         child.on("close", (exitCode, _signal) => {
           if (this.processManager) {
-            this.processManager.clear(input.projectRoot, runId).catch(() => {});
+            this.processManager.clear(input.projectRoot, runId).catch((err) => {
+              if (this.logManager) {
+                this.logManager.writeTaskLog(
+                  runId,
+                  taskId,
+                  `[warn] failed to clear process state: ${err instanceof Error ? err.message : String(err)}`,
+                );
+              }
+            });
           }
 
           eventBus.emit({
@@ -185,7 +202,15 @@ export class CommandExecutor implements Executor {
         child.on("error", (err) => {
           spawnError = err.message;
           if (this.processManager) {
-            this.processManager.clear(input.projectRoot, runId).catch(() => {});
+            this.processManager.clear(input.projectRoot, runId).catch((e) => {
+              if (this.logManager) {
+                this.logManager.writeTaskLog(
+                  runId,
+                  taskId,
+                  `[warn] failed to clear process state on error: ${e instanceof Error ? e.message : String(e)}`,
+                );
+              }
+            });
           }
 
           eventBus.emit({

@@ -44,3 +44,5 @@ export {
   OllamaProvider,
   OpenAiCompatibleProvider,
 } from "./providers/index.js";
+export { type ProviderDefinition, SETUP_PROVIDERS, SKIP_OPTION } from "./provider-definitions.js";
+export { saveProviderConfig, testProvider } from "./provider-service.js";

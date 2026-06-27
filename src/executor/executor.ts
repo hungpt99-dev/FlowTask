@@ -8,6 +8,7 @@ export interface ExecutorInput {
   contextPackContent: string;
   env?: Record<string, string>;
   signal?: AbortSignal;
+  allowShellMetachars?: boolean;
 }
 
 export interface ExecutorResult {
