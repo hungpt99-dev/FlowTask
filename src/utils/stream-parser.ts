@@ -1,9 +1,5 @@
 import { type AiProviderStreamChunk } from "../ai/ai-provider.js";
 
-export function stripAnsi(text: string): string {
-  return text.replace(/\u001b\[[\d;]*[a-zA-Z]/g, "");
-}
-
 export interface StreamParseResult {
   text: string;
   usage?: {

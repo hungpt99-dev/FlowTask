@@ -36,8 +36,12 @@ export async function loadEnvFile(rootPath: string): Promise<void> {
   const lines = content.split("\n");
 
   for (const rawLine of lines) {
-    const line = rawLine.trim();
+    let line = rawLine.trim();
     if (!line || line.startsWith("#")) continue;
+
+    if (line.startsWith("export ")) {
+      line = line.slice(7).trimStart();
+    }
 
     const eqIndex = line.indexOf("=");
     if (eqIndex === -1) continue;

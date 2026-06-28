@@ -6,13 +6,7 @@ export interface SafetyResult {
 }
 
 function normalizeCommand(cmd: string): string {
-  return cmd
-    .toLowerCase()
-    .replace(/\$HOME/g, "")
-    .replace(/\.\//g, "")
-    .replace(/['"]+/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  return cmd.toLowerCase().replace(/\.\//g, "").replace(/['"]+/g, "").replace(/\s+/g, " ").trim();
 }
 
 const BLOCKED_PATTERNS: Array<{ regex: RegExp; reason: string }> = [
@@ -34,7 +28,7 @@ const BLOCKED_PATTERNS: Array<{ regex: RegExp; reason: string }> = [
   { regex: /\bcat\s+id_rsa\b/, reason: "Blocked: would read SSH private key" },
   { regex: /\bupload\b/, reason: "Blocked: potential data exfiltration" },
   { regex: /\bdisable\s+test\b/, reason: "Blocked: cannot disable tests" },
-  { regex: /echo\s+\$[A-Z_]+/, reason: "Blocked: would expose environment variables via echo" },
+  { regex: /echo\s+\$[A-Z_]+/i, reason: "Blocked: would expose environment variables via echo" },
 ];
 
 const RISKY_PATTERNS: Array<{ regex: RegExp; reason: string }> = [

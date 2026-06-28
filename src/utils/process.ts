@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { getShell, getShellCommandFlag } from "./shell.js";
 
 export interface SpawnResult {
   exitCode: number | null;
@@ -12,12 +13,11 @@ export function spawnCommand(
   args: string[],
   options?: { cwd?: string; env?: Record<string, string>; timeout?: number },
 ): ChildProcess {
-  return spawn(command, args, {
+  return spawn(getShell(), [getShellCommandFlag(), command, ...args], {
     cwd: options?.cwd,
     env: { ...process.env, ...options?.env },
     stdio: ["pipe", "pipe", "pipe"],
     timeout: options?.timeout,
-    shell: process.platform === "win32",
   });
 }
 
@@ -32,12 +32,11 @@ export async function spawnWithPromise(
   },
 ): Promise<SpawnResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
+    const child = spawn(getShell(), [getShellCommandFlag(), command, ...args], {
       cwd: options?.cwd,
       env: { ...process.env, ...options?.env },
       stdio: ["pipe", "pipe", "pipe"],
       timeout: options?.timeout,
-      shell: process.platform === "win32",
       signal: options?.signal,
     });
 
@@ -80,12 +79,11 @@ export async function spawnWithStreaming(
   },
 ): Promise<SpawnResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
+    const child = spawn(getShell(), [getShellCommandFlag(), command, ...args], {
       cwd: options?.cwd,
       env: { ...process.env, ...options?.env },
       stdio: ["pipe", "pipe", "pipe"],
       timeout: options?.timeout,
-      shell: process.platform === "win32",
       signal: options?.signal,
     });
 
