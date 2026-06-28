@@ -37,6 +37,16 @@ function createConfig(overrides?: Partial<FlowTaskConfig>): FlowTaskConfig {
     },
     ai: { providers: {} },
     useCase: { enabled: true, customPatterns: [], confidenceThreshold: 0.3 },
+    hooks: {
+      beforeRun: [],
+      afterRun: [],
+      beforeTask: [],
+      afterTask: [],
+      beforeRetry: [],
+      afterRetry: [],
+      onFailure: [],
+      failOnError: false,
+    },
     executors: {},
     ...overrides,
   };

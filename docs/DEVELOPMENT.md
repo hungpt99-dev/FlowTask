@@ -55,9 +55,10 @@ pnpm validate:docs    # Validate documentation files
 
 src/
   cli/                 # CLI commands (Commander) — thin, no business logic
-  core/                # Domain managers + run lifecycle
+  core/                # Domain managers + run lifecycle + hooks + workflow
   rules/               # Rule loading and merging
   planner/             # Task plan generation
+  ai/                  # AI provider implementations (OpenAI, Anthropic, Gemini, etc.)
   context/             # Context pack for AI executors
   executor/            # Executor adapters (shell, command, manual)
   validation/          # Validation engine
@@ -65,6 +66,8 @@ src/
   git/                 # Git snapshots
   config/              # Configuration loader
   schemas/             # Zod schemas
+  ui/                  # Terminal UI formatting (rich, plain, JSON renderers)
+  api/                 # FlowTask API layer
   utils/               # Shared utilities (fs, paths, ids, time, process, errors, glob, shell)
 
 tests/                 # Vitest tests
@@ -73,20 +76,22 @@ tests/                 # Vitest tests
 ## Architecture
 
 ```
-Prompt → Load Config → Load Rules → Create Run → Generate Tasks
-  → Build Context Pack → Execute Task → Validate Result
-  → Retry / Continue / Stop → Final Report
+Prompt → Load Config → Load Rules → Create Run → (beforeRun hooks)
+  → Generate Tasks → (beforeTask hooks) → Build Context Pack
+  → Execute Task → Validate Result → (afterTask hooks)
+  → Retry / (beforeRetry/afterRetry hooks) / Interactive Retry Approval
+  → (afterRun hooks) → Final Report → (onFailure hooks if failed)
 ```
 
 FlowTask orchestrates; AI CLI tools execute the work.
 
 ## Planner Modes
 
-| Mode     | Description                                                               |
-| -------- | ------------------------------------------------------------------------- |
-| `simple` | Always uses fixed 7-task template. Never calls AI planner.                |
-| `ai`     | Uses internal AI API provider (OpenAI). Fails if output is invalid.       |
-| `auto`   | Tries internal AI API. Falls back to simple planner if invalid. (Default) |
+| Mode     | Description                                                                        |
+| -------- | ---------------------------------------------------------------------------------- |
+| `simple` | Always uses fixed 7-task template. Never calls AI planner.                         |
+| `ai`     | Uses internal AI API provider (OpenAI, Anthropic, Gemini, etc.). Fails if invalid. |
+| `auto`   | Tries internal AI planner. Falls back to simple if invalid. (Default)              |
 
 ## Architecture: Planner vs Executor
 
@@ -128,6 +133,41 @@ If the planner returns invalid output, FlowTask:
 4. Falls back to simple planner in `auto` mode, or fails in `ai` mode
 
 Raw output and error files are saved to `.flowtask/runs/<runId>/outputs/` for debugging.
+
+## Lifecycle Hooks
+
+FlowTask supports user-defined lifecycle hooks configured in `.flowtask/config.json`:
+
+```json
+{
+  "hooks": {
+    "beforeRun": ["echo 'Run started: $HOOK_RUN_ID'"],
+    "afterRun": ["echo 'Run finished'"],
+    "beforeTask": ["echo 'Starting task: $HOOK_TASK_TITLE'"],
+    "afterTask": ["echo 'Task completed'"],
+    "beforeRetry": ["echo 'Retrying task'"],
+    "afterRetry": ["echo 'Retry attempt completed'"],
+    "onFailure": ["echo 'Task failed'"],
+    "failOnError": false
+  }
+}
+```
+
+Hooks receive context via env variables (`HOOK_RUN_ID`, `HOOK_TASK_ID`, `HOOK_TASK_TITLE`, `HOOK_RETRY_COUNT`, `HOOK_MAX_RETRIES`, etc.).
+
+## Interactive Retry Approval
+
+When a task exhausts `maxRetries`, FlowTask prompts for user approval before additional retries:
+
+- **TTY mode**: Interactive prompt via `enquirer`
+- **Non-TTY / CI**: Auto-skips (approval not possible)
+- **Auto-approve mode**: Skips additional retries
+
+On approval, retry counter resets. On denial, task is marked failed.
+
+## Interactive Task Approval
+
+In `manual` mode with TTY, task approval prompts happen inline. Non-TTY falls back to external approval via `flowtask tasks-approve`.
 
 ## Cross-Platform Notes
 

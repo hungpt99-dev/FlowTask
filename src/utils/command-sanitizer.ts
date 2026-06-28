@@ -33,6 +33,28 @@ export function isSafeCommand(cmd: string): boolean {
   return !INJECTION_PATTERNS.test(cmd);
 }
 
+const API_CREDENTIAL_ENV_VARS = [
+  "OPENAI_API_KEY",
+  "ANTHROPIC_API_KEY",
+  "GOOGLE_API_KEY",
+  "GEMINI_API_KEY",
+  "MISTRAL_API_KEY",
+  "OPENROUTER_API_KEY",
+  "DEEPSEEK_API_KEY",
+  "GROQ_API_KEY",
+  "AZURE_OPENAI_API_KEY",
+  "AZURE_OPENAI_ENDPOINT",
+  "REPLICATE_API_TOKEN",
+  "TOGETHER_API_KEY",
+  "PERPLEXITY_API_KEY",
+  "COHERE_API_KEY",
+  "AI21_API_KEY",
+  "HUGGINGFACE_API_KEY",
+  "FIREWORKS_API_KEY",
+  "OPENCODE_SERVER_PASSWORD",
+  "OPENCODE_SERVER_USERNAME",
+];
+
 export function buildChildEnv(
   extra?: Record<string, string | undefined>,
   allowlist?: string[],
@@ -50,6 +72,7 @@ export function buildChildEnv(
     "TMP",
     "LANG",
     "LC_ALL",
+    ...API_CREDENTIAL_ENV_VARS,
   ];
 
   for (const key of allowedVars) {

@@ -32,6 +32,24 @@ import {
   configGetCommand,
   configListCommand,
 } from "./commands/config.command.js";
+import { stepsCommand } from "./commands/steps.command.js";
+import {
+  workflowShowCommand,
+  workflowDiffCommand,
+  workflowApplyCommand,
+  workflowAddCommand,
+  workflowRemoveCommand,
+  workflowReorderCommand,
+  workflowEditCommand,
+  workflowReplanCommand,
+  workflowListCommand,
+} from "./commands/workflow.command.js";
+import {
+  stepEditCommand,
+  stepApproveCommand,
+  stepDenyCommand,
+  stepApproveAllCommand,
+} from "./commands/step.command.js";
 
 const program = new Command();
 
@@ -97,6 +115,10 @@ program
   .option("--dry-run", "Show what would happen without executing")
   .option("--debug", "Show detailed debug information")
   .option("--template <name>", "Template to use: feature | bugfix | docs")
+  .option(
+    "--approval-mode <mode>",
+    "Approval mode: auto (auto-approve) | manual (prompt) | skip (skip all approvals)",
+  )
   .action(runCommand);
 
 program.command("status").description("Show current project and run status").action(statusCommand);
@@ -260,6 +282,143 @@ program
   .argument("[path]", "Path to rule file (for add action)")
   .action(rulesCommand);
 
+program
+  .command("steps")
+  .description("List steps for a task")
+  .argument("<taskId>", "Task ID to list steps for")
+  .option("--run <runId>", "Run ID containing the task")
+  .option("--status <status>", "Filter by step status")
+  .action(stepsCommand);
+
+const stepCommand = new Command("step")
+  .description("Manage steps (edit, approve, deny)")
+  .addCommand(
+    new Command("edit")
+      .description("Edit a step's details")
+      .argument("<stepId>", "Step ID to edit")
+      .option("--run <runId>", "Run ID containing the step")
+      .option("--title <title>", "New step title")
+      .option("--description <description>", "New step description")
+      .option("--command <command>", "New step command")
+      .option("--type <type>", "New step type (command, read, write, edit, shell, approval)")
+      .action(stepEditCommand),
+  )
+  .addCommand(
+    new Command("approve")
+      .description("Approve a step pending approval")
+      .argument("<stepId>", "Step ID to approve")
+      .option("--run <runId>", "Run ID containing the step")
+      .action(stepApproveCommand),
+  )
+  .addCommand(
+    new Command("deny")
+      .description("Deny a step pending approval")
+      .argument("<stepId>", "Step ID to deny")
+      .option("--run <runId>", "Run ID containing the step")
+      .action(stepDenyCommand),
+  )
+  .addCommand(
+    new Command("approve-all")
+      .description("Approve all steps pending approval in a run")
+      .option("--run <runId>", "Run ID containing the steps")
+      .action(stepApproveAllCommand),
+  );
+
+program.addCommand(stepCommand);
+
+const workflowCommand = new Command("workflow")
+  .description("View, edit, reorder, and manage task workflows")
+  .addCommand(
+    new Command("show")
+      .description("Export current workflow as YAML/JSON")
+      .argument("[runId]", "Run ID (default: active run)")
+      .option("--out <file>", "Save to file instead of stdout")
+      .option("--json", "Output as JSON instead of YAML")
+      .option("--skip-completed", "Exclude completed/skipped tasks")
+      .action(workflowShowCommand),
+  )
+  .addCommand(
+    new Command("list")
+      .description("View tasks in the workflow with status and progress")
+      .argument("[runId]", "Run ID (default: active run)")
+      .option("--status <status>", "Filter by task status (pending, running, done, failed, etc.)")
+      .option("--tree", "Show dependency tree view (experimental)")
+      .action(workflowListCommand),
+  )
+  .addCommand(
+    new Command("diff")
+      .description("Show diff between current workflow and a file")
+      .argument("[runId]", "Run ID (default: active run)")
+      .argument("[file]", "Workflow file to compare against")
+      .option("--summary-only", "Just show counts")
+      .action(workflowDiffCommand),
+  )
+  .addCommand(
+    new Command("apply")
+      .description("Apply changes from a workflow file")
+      .argument("[runId]", "Run ID (default: active run)")
+      .argument("[file]", "Workflow file to apply")
+      .option("--dry-run", "Show what would change without applying")
+      .option("--no-confirm", "Skip confirmation prompt")
+      .option("--force", "Allow modifying running/completed tasks")
+      .option("--strict", "Fail on any validation warning")
+      .action(workflowApplyCommand),
+  )
+  .addCommand(
+    new Command("add")
+      .description("Add a new task to the workflow")
+      .argument("[runId]", "Run ID (default: active run)")
+      .option("--title <title>", "Task title")
+      .option("--description <description>", "Task description")
+      .option("--executor <name>", "Task executor (shell, opencode, etc.)")
+      .option("--after <taskId>", "Place after this task")
+      .option("--criteria <criteria>", 'Pipe-separated acceptance criteria (e.g., "AC1|AC2")')
+      .option("--max-retries <number>", "Max retries")
+      .action(workflowAddCommand),
+  )
+  .addCommand(
+    new Command("remove")
+      .description("Remove a task from the workflow")
+      .argument("[runId]", "Run ID (default: active run)")
+      .argument("[taskId]", "Task ID to remove")
+      .option("--delete", "Actually delete instead of skipping")
+      .option("--force", "Remove even if other tasks depend on it")
+      .action(workflowRemoveCommand),
+  )
+  .addCommand(
+    new Command("reorder")
+      .description("Reorder tasks in a workflow")
+      .argument("[runId]", "Run ID (default: active run)")
+      .argument("[orderedIds...]", "Explicit task ID order")
+      .action(workflowReorderCommand),
+  )
+  .addCommand(
+    new Command("edit")
+      .description("Open the workflow in your default editor")
+      .argument("[runId]", "Run ID (default: active run)")
+      .option("--dry-run", "Show what would change without applying")
+      .option("--no-confirm", "Skip confirmation prompt")
+      .option("--interactive", "Use interactive TUI mode instead of editor")
+      .action(workflowEditCommand),
+  )
+  .addCommand(
+    new Command("replan")
+      .description("Replan workflow using AI planner")
+      .argument("[runId]", "Run ID (default: active run)")
+      .option(
+        "--strategy <strategy>",
+        "Merge strategy: keep-completed | keep-all | replace-all",
+        "keep-completed",
+      )
+      .option("--provider <name>", "AI provider to use")
+      .option("--model <name>", "AI model to use")
+      .option("--dry-run", "Show what would change without applying")
+      .option("--no-confirm", "Skip confirmation prompt")
+      .action(workflowReplanCommand),
+  );
+
+program.addCommand(workflowCommand);
+
 const configCommand = new Command("config")
   .description("Manage FlowTask configuration")
   .addCommand(
@@ -286,7 +445,7 @@ let rawArgs = process.argv.slice(2);
 if (rawArgs.length === 0 && process.stdin.isTTY) {
   program.help();
 } else {
-  if (rawArgs[0] === "run" && rawArgs.length > 1 && rawArgs[1]!.startsWith("-")) {
+  if (rawArgs[0] === "run" && rawArgs.length > 1 && rawArgs[1]?.startsWith("-")) {
     const stdin = await new Promise<string>((resolve) => {
       let data = "";
       process.stdin.setEncoding("utf-8");

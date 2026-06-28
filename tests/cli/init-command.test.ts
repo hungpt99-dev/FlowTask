@@ -99,4 +99,35 @@ describe("initCommand", () => {
       process.stdin.isTTY = false as unknown as boolean;
     }
   });
+
+  it("should show available modes when --showModes is passed", async () => {
+    let modeOutput = "";
+    const originalLog = console.log;
+    console.log = (...args: string[]) => {
+      modeOutput += args.join(" ") + "\n";
+    };
+
+    try {
+      await initCommand({ showModes: true });
+    } finally {
+      console.log = originalLog;
+    }
+
+    expect(modeOutput).toContain("Available init modes");
+    expect(modeOutput).toContain("development");
+    expect(modeOutput).toContain("writing");
+    expect(modeOutput).toContain("research");
+  });
+
+  it("should reject invalid mode value and exit with code 1", async () => {
+    process.stdin.isTTY = false as unknown as boolean;
+
+    try {
+      await initCommand({ mode: "bogus_mode" });
+      expect.unreachable("Should have thrown");
+    } catch (e) {
+      const err = e as Error;
+      expect(err.message).toContain("process.exit");
+    }
+  });
 });

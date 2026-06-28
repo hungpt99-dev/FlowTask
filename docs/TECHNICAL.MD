@@ -1274,6 +1274,113 @@ show missing required rules
 
 ---
 
+## 11.15 tasks-edit
+
+```bash
+flowtask tasks-edit task_005
+```
+
+Options:
+
+```bash
+flowtask tasks-edit task_005 --title "New title"
+flowtask tasks-edit task_005 --description "Updated description"
+flowtask tasks-edit task_005 --executor opencode
+flowtask tasks-edit task_005 --acceptance-criteria "AC1|AC2|AC3"
+flowtask tasks-edit task_005 --validation-commands "pnpm test|pnpm lint"
+flowtask tasks-edit task_005 --required-files "src/file.ts|src/types.ts"
+```
+
+---
+
+## 11.16 tasks-approve / tasks-deny
+
+```bash
+flowtask tasks-approve task_005
+flowtask tasks-deny task_005
+```
+
+Approve or deny a task in `waiting_approval` status. Used when a run is in `manual` mode and a task requires user confirmation.
+
+---
+
+## 11.17 providers
+
+```bash
+flowtask providers list              # List configured AI providers
+flowtask providers current           # Show current AI provider
+flowtask providers test              # Test provider connection
+flowtask providers configure         # Interactive configuration wizard
+flowtask providers remove <name>     # Remove a provider
+flowtask providers doctor            # Check provider health
+```
+
+---
+
+## 11.18 workflow
+
+Workflow commands for viewing, editing, and managing task plans:
+
+```bash
+flowtask workflow list                           # View tasks with status and progress
+flowtask workflow show [runId]                   # Export workflow as YAML/JSON
+flowtask workflow show [runId] --json            # Export as JSON
+flowtask workflow show [runId] --skip-completed  # Exclude completed tasks
+flowtask workflow diff [runId] [file]            # Show diff between current and file
+flowtask workflow apply [runId] <file>           # Apply changes from file
+flowtask workflow add [runId]                    # Add a new task
+flowtask workflow remove [runId] <taskId>         # Remove a task
+flowtask workflow reorder [runId] [ids...]       # Reorder tasks
+flowtask workflow edit [runId]                   # Open in $EDITOR
+flowtask workflow edit [runId] --interactive     # Interactive TUI mode
+flowtask workflow replan [runId]                 # Replan with AI
+```
+
+---
+
+## 11.19 step / steps
+
+Step-level management for granular control within tasks:
+
+```bash
+flowtask steps <taskId>                          # List all steps for a task
+flowtask steps <taskId> --status pending_approval
+flowtask step edit <stepId> --title "New title"  # Edit step properties
+flowtask step edit <stepId> --command "pnpm add dep"
+flowtask step approve <stepId>                   # Approve a step
+flowtask step deny <stepId>                      # Deny a step
+flowtask step approve-all                        # Approve all pending steps
+```
+
+Steps support types: `command`, `read`, `write`, `edit`, `shell`, `approval`.
+Stored in `.flowtask/runs/<runId>/steps.json`.
+
+---
+
+## 11.20 config
+
+```bash
+flowtask config list              # List all configurable settings
+flowtask config get               # Show current configuration values
+flowtask config get <key>         # Show a specific value (e.g., "approval.enabled")
+flowtask config set <key> <value> # Set a configuration value
+```
+
+---
+
+## 11.21 setup
+
+```bash
+flowtask setup                    # Interactive AI provider setup
+flowtask setup --provider openai  # Configure a specific provider
+flowtask setup --model gpt-4.1-mini
+flowtask setup --base-url https://api.openai.com/v1
+```
+
+Sets up AI provider configuration and stores API keys in `~/.flowtask/secrets.json`.
+
+---
+
 # 12. Run Modes
 
 ## 12.1 Auto Mode
@@ -1425,6 +1532,69 @@ show validation details
 9. Save state
 10. Continue execution
 ```
+
+---
+
+## 13.4 Lifecycle Hooks
+
+User-defined shell commands that execute at specific lifecycle points. Configured in `.flowtask/config.json` under `hooks`.
+
+### Hook Points
+
+| Hook          | Trigger              | Context Variables                                                                     |
+| ------------- | -------------------- | ------------------------------------------------------------------------------------- |
+| `beforeRun`   | After run creation   | `HOOK_RUN_ID`, `HOOK_ROOT_PATH`                                                       |
+| `afterRun`    | After run completion | `HOOK_RUN_ID`, `HOOK_SUCCESS`                                                         |
+| `beforeTask`  | Before each task     | `HOOK_RUN_ID`, `HOOK_TASK_ID`, `HOOK_TASK_TITLE`                                      |
+| `afterTask`   | After each task      | `HOOK_RUN_ID`, `HOOK_TASK_ID`, `HOOK_TASK_TITLE`, `HOOK_SUCCESS`                      |
+| `beforeRetry` | Before each retry    | `HOOK_RUN_ID`, `HOOK_TASK_ID`, `HOOK_RETRY_COUNT`, `HOOK_MAX_RETRIES`                 |
+| `afterRetry`  | After each retry     | `HOOK_RUN_ID`, `HOOK_TASK_ID`, `HOOK_RETRY_COUNT`, `HOOK_MAX_RETRIES`, `HOOK_SUCCESS` |
+| `onFailure`   | Run or task failure  | `HOOK_RUN_ID`, `HOOK_TASK_ID`, `HOOK_TASK_TITLE`, `HOOK_ERROR`                        |
+
+### Implementation
+
+The `HookManager` class (`src/core/hook-manager.ts`) executes configured commands using `child_process.spawn` with the shell from `getShell()`. Each command receives context via environment variables. Hook execution results (exit code, stdout, stderr) are logged but do not halt execution unless `failOnError: true` is set.
+
+### Configuration
+
+```json
+{
+  "hooks": {
+    "beforeRun": ["echo 'Run started'"],
+    "afterRun": ["notify-send 'Run completed'"],
+    "failOnError": false
+  }
+}
+```
+
+### Integration
+
+Hooks are integrated into `RunLifecycle` at the following points:
+
+1. `executeRun` — calls `hookManager.runBeforeRun()` after run creation, `hookManager.runAfterRun()` at completion, `hookManager.runOnFailure()` on failure
+2. `executeTasks` — calls `hookManager.runBeforeTask()` before each task, `hookManager.runAfterTask()` and `hookManager.runOnFailure()` after each task
+3. `executeTask` — calls `hookManager.runBeforeRetry()` before each retry, `hookManager.runAfterRetry()` after each retry attempt
+
+---
+
+## 13.5 Interactive Retry Approval
+
+When a task exhausts its configured `maxRetries`, FlowTask can prompt the user for approval before additional retries:
+
+- **TTY mode** (default): Shows a confirm prompt via `enquirer` asking the user to approve further retries
+- **Non-TTY / CI**: Automatically skips the retry (approval is not possible without a terminal)
+- **Auto-approve mode**: Automatically skips additional retries
+- **Skip mode**: Automatically approves additional retries (treated as final failure)
+
+If the user approves, the retry counter is reset and the task is re-executed from scratch. If denied, the task is marked as failed.
+
+---
+
+## 13.6 Interactive Task Approval
+
+In `manual` mode, when the terminal is interactive (`process.stdin.isTTY`), FlowTask prompts the user inline via `enquirer` confirm prompts instead of pausing the run and exiting. The user can approve or skip each task without leaving the process.
+
+When the terminal is not interactive (e.g., CI pipelines, pipes), the original behavior applies — the run pauses and waits for external approval via `flowtask tasks-approve <taskId>`.
 
 ---
 

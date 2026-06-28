@@ -137,6 +137,16 @@ export function generateDefaultConfig(): FlowTaskConfig {
       maxInMemoryLines: 500,
       maxLineLength: 4000,
     },
+    hooks: {
+      beforeRun: [],
+      afterRun: [],
+      beforeTask: [],
+      afterTask: [],
+      beforeRetry: [],
+      afterRetry: [],
+      onFailure: [],
+      failOnError: false,
+    },
     executors: {
       shell: { type: "shell" as const, args: [], inputMode: "argument", timeoutMs: 1800000 },
       opencode: {

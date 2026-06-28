@@ -6,7 +6,6 @@ import { now } from "../../src/utils/time.js";
 import { UseCaseDetector } from "../../src/usecase/usecase-detector.js";
 import { getTaskTemplate, getUseCaseName } from "../../src/usecase/task-templates.js";
 import type { UseCaseType } from "../../src/usecase/usecase-types.js";
-import type { Task } from "../../src/schemas/task.schema.js";
 
 describe("Multi-use-case planner → validation flow", () => {
   const planner = new SimplePlanner();

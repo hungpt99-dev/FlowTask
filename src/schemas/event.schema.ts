@@ -80,6 +80,15 @@ export const EventTypeSchema = z.enum([
   "ai_provider_stream_delta",
   "ai_provider_stream_completed",
   "ai_provider_stream_failed",
+  "workflow_exported",
+  "workflow_edited",
+  "workflow_applied",
+  "workflow_diff_shown",
+  "workflow_added_task",
+  "workflow_removed_task",
+  "workflow_reordered",
+  "workflow_replanned",
+  "workflow_snapshot_saved",
 ]);
 
 export const FlowTaskEventSchema = z.object({

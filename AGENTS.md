@@ -14,6 +14,36 @@ Core principle: Prompt → Rules → Tasks → Execution → Validation → Repo
 4. Read `docs/CODE_QUALITY.md` — code quality expectations.
 5. Read `README.md` — current project status and commands.
 
+## Lifecycle Hooks
+
+FlowTask supports user-defined lifecycle hooks — shell commands that execute at specific lifecycle points. Configured in `.flowtask/config.json`:
+
+```json
+{
+  "hooks": {
+    "beforeRun": [],
+    "afterRun": [],
+    "beforeTask": [],
+    "afterTask": [],
+    "beforeRetry": [],
+    "afterRetry": [],
+    "onFailure": [],
+    "failOnError": false
+  }
+}
+```
+
+Hook points: `beforeRun`, `afterRun`, `beforeTask`, `afterTask`, `beforeRetry`, `afterRetry`, `onFailure`.
+Context is passed via environment variables (`HOOK_RUN_ID`, `HOOK_TASK_ID`, etc.).
+
+## Interactive Retry Approval
+
+When a task fails after exhausting `maxRetries`, FlowTask prompts the user interactively (TTY only) before additional retries. If approved, the retry counter resets. In non-TTY/auto modes, retries skip automatically.
+
+## Interactive Task Approval
+
+In `manual` mode with TTY available, task approval prompts happen inline instead of pausing the run. Non-TTY environments fall back to the original pause-and-wait behavior.
+
 ## Development Rules
 
 - TypeScript strict mode required. No `any`.

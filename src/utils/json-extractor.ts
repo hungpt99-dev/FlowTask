@@ -20,7 +20,8 @@ export function extractJsonObject(output: string): JsonExtractionResult {
 
   const fenceMatch = trimmed.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
   if (fenceMatch) {
-    const fenced = fenceMatch[1]!.trim();
+    const fencedMatch = fenceMatch[1];
+    const fenced = fencedMatch ? fencedMatch.trim() : "";
     if (fenced.startsWith("{") && fenced.endsWith("}")) {
       tryParse(fenced);
       return { jsonText: fenced, source: "fenced_json" };
@@ -48,7 +49,7 @@ function extractBalancedBrace(text: string, startIndex: number): string | null {
   let start = startIndex;
 
   for (let i = start; i < text.length; i++) {
-    const char = text[i]!;
+    const char = text[i] ?? "";
 
     if (escape) {
       escape = false;

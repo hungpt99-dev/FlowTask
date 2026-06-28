@@ -1,10 +1,27 @@
 import { ensureDir, appendToFile, readTextFile, readDir } from "../utils/fs.js";
-import { getLogsDir, taskLogPath, runtimeLogPath, validationLogPath } from "../utils/paths.js";
+import {
+  getLogsDir,
+  taskLogPath,
+  runtimeLogPath,
+  validationLogPath,
+  runtimeJsonlPath,
+  taskLogJsonlPath,
+  validationJsonlPath,
+} from "../utils/paths.js";
 import { now } from "../utils/time.js";
 import { SecretRedactor } from "../safety/secret-redactor.js";
 
 const LOG_DIR_MODE = 0o700;
 const LOG_FILE_MODE = 0o600;
+
+export interface LogEntry {
+  t: string;
+  s: "stdout" | "stderr" | "system";
+  m: string;
+  l: "info" | "warn" | "error" | "debug";
+  taskId?: string;
+  runId?: string;
+}
 
 export class LogManager {
   private rootPath: string;
@@ -38,6 +55,23 @@ export class LogManager {
     }
   }
 
+  async writeRuntimeJsonl(runId: string, entry: Omit<LogEntry, "t">): Promise<void> {
+    await this.ensureLogDir(runId);
+    const safeMessage = this.redactor.redact(entry.m);
+    const logEntry: LogEntry = { ...entry, m: safeMessage, t: now() };
+    this.pendingWrites++;
+    try {
+      await appendToFile(
+        runtimeJsonlPath(this.rootPath, runId),
+        `${JSON.stringify(logEntry)}\n`,
+        LOG_FILE_MODE,
+      );
+    } finally {
+      this.pendingWrites--;
+      this.checkQueue();
+    }
+  }
+
   async writeTaskLog(runId: string, taskId: string, message: string): Promise<void> {
     await this.ensureLogDir(runId);
     const timestamp = now();
@@ -55,6 +89,27 @@ export class LogManager {
     }
   }
 
+  async writeTaskLogJsonl(
+    runId: string,
+    taskId: string,
+    entry: Omit<LogEntry, "t">,
+  ): Promise<void> {
+    await this.ensureLogDir(runId);
+    const safeMessage = this.redactor.redact(entry.m);
+    const logEntry: LogEntry = { ...entry, m: safeMessage, t: now(), taskId };
+    this.pendingWrites++;
+    try {
+      await appendToFile(
+        taskLogJsonlPath(this.rootPath, runId, taskId),
+        `${JSON.stringify(logEntry)}\n`,
+        LOG_FILE_MODE,
+      );
+    } finally {
+      this.pendingWrites--;
+      this.checkQueue();
+    }
+  }
+
   async writeValidation(runId: string, message: string): Promise<void> {
     await this.ensureLogDir(runId);
     const timestamp = now();
@@ -64,6 +119,23 @@ export class LogManager {
       await appendToFile(
         validationLogPath(this.rootPath, runId),
         `[${timestamp}] ${safeMessage}\n`,
+        LOG_FILE_MODE,
+      );
+    } finally {
+      this.pendingWrites--;
+      this.checkQueue();
+    }
+  }
+
+  async writeValidationJsonl(runId: string, entry: Omit<LogEntry, "t">): Promise<void> {
+    await this.ensureLogDir(runId);
+    const safeMessage = this.redactor.redact(entry.m);
+    const logEntry: LogEntry = { ...entry, m: safeMessage, t: now() };
+    this.pendingWrites++;
+    try {
+      await appendToFile(
+        validationJsonlPath(this.rootPath, runId),
+        `${JSON.stringify(logEntry)}\n`,
         LOG_FILE_MODE,
       );
     } finally {

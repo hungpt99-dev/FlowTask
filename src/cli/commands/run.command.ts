@@ -31,6 +31,7 @@ export async function runCommand(
     dryRun?: boolean;
     debug?: boolean;
     template?: string;
+    approvalMode?: string;
   },
 ): Promise<void> {
   const out = createOutputOptions(options);
@@ -46,19 +47,24 @@ export async function runCommand(
     process.exit(1);
   }
 
-  const project = (await manager.load(rootPath))!;
+  const loadedProject = await manager.load(rootPath);
+  if (!loadedProject) {
+    console.log(picocolors.red("Failed to load project."));
+    process.exit(1);
+  }
+  const project = loadedProject;
   const config = await manager.loadConfig(rootPath);
 
   if (options.plannerProvider) {
-    config.planner = { ...config.planner!, provider: options.plannerProvider };
+    config.planner = { ...config.planner, provider: options.plannerProvider };
   }
   if (options.plannerModel) {
-    config.planner = { ...config.planner!, model: options.plannerModel };
+    config.planner = { ...config.planner, model: options.plannerModel };
   }
   if (options.plannerBaseUrl) {
-    config.planner = { ...config.planner!, baseUrl: options.plannerBaseUrl };
+    config.planner = { ...config.planner, baseUrl: options.plannerBaseUrl };
     if (config.ai?.providers) {
-      const providerName = config.planner!.provider ?? "openai";
+      const providerName = config.planner?.provider ?? "openai";
       const existingProvider = config.ai.providers[providerName];
       config.ai.providers[providerName] = {
         type: existingProvider?.type ?? "openai",
@@ -70,11 +76,11 @@ export async function runCommand(
   if (options.plannerTimeout) {
     const timeoutMs = parseInt(options.plannerTimeout, 10);
     if (!isNaN(timeoutMs)) {
-      config.planner = { ...config.planner!, timeoutMs };
+      config.planner = { ...config.planner, timeoutMs };
     }
   }
   if (options.plannerStream !== undefined) {
-    config.planner = { ...config.planner!, stream: options.plannerStream };
+    config.planner = { ...config.planner, stream: options.plannerStream };
   }
 
   const eventStore = new EventStore(rootPath);
@@ -87,7 +93,6 @@ export async function runCommand(
   let resolvedMode: Run["mode"] = (options.mode as Run["mode"]) ?? "auto";
   if (options.planOnly) resolvedMode = "plan-only";
   if (options.dryRun) resolvedMode = "dry-run";
-  if (options.debug) resolvedMode = "debug";
 
   const { plannerMode, plannerRegistry, plannerType } = selectPlanner(config, options.planner);
   const { planner } = plannerRegistry.getPlanner(plannerMode);
@@ -121,6 +126,7 @@ export async function runCommand(
       debug: options.debug,
       plannerMode: plannerMode,
       defaultExecutor: options.executor,
+      approvalMode: options.approvalMode,
     });
 
     if (!result.success) {

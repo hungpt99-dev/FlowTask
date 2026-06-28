@@ -69,12 +69,24 @@ export function runtimeLogPath(rootPath: string, runId: string): string {
   return path.join(getLogsDir(rootPath, runId), "runtime.log");
 }
 
+export function runtimeJsonlPath(rootPath: string, runId: string): string {
+  return path.join(getLogsDir(rootPath, runId), "runtime.jsonl");
+}
+
 export function validationLogPath(rootPath: string, runId: string): string {
   return path.join(getLogsDir(rootPath, runId), "validation.log");
 }
 
+export function validationJsonlPath(rootPath: string, runId: string): string {
+  return path.join(getLogsDir(rootPath, runId), "validation.jsonl");
+}
+
 export function taskLogPath(rootPath: string, runId: string, taskId: string): string {
   return path.join(getLogsDir(rootPath, runId), `${taskId}.log`);
+}
+
+export function taskLogJsonlPath(rootPath: string, runId: string, taskId: string): string {
+  return path.join(getLogsDir(rootPath, runId), `${taskId}.jsonl`);
 }
 
 export function getArtifactsDir(rootPath: string, runId: string): string {
@@ -111,4 +123,20 @@ export function gitAfterPath(rootPath: string, runId: string): string {
 
 export function gitDiffStatPath(rootPath: string, runId: string): string {
   return path.join(getOutputsDir(rootPath, runId), "git-diff-stat.txt");
+}
+
+export function stepsJsonPath(rootPath: string, runId: string): string {
+  return path.join(getRunDir(rootPath, runId), "steps.json");
+}
+
+export function dbPath(rootPath: string): string {
+  return path.join(rootPath, FLOWTASK_DIR, "flowtask.db");
+}
+
+export function checkpointSnapshotPath(
+  rootPath: string,
+  runId: string,
+  checkpointId: string,
+): string {
+  return path.join(getSnapshotsDir(rootPath, runId), `${checkpointId}.json`);
 }

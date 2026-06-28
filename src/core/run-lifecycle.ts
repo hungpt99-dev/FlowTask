@@ -19,16 +19,20 @@ import { GitService } from "../git/git-service.js";
 import { SafetyChecker } from "../safety/safety-checker.js";
 import { ApprovalManager } from "../safety/approval-manager.js";
 import { ProcessManager } from "./process-manager.js";
+import { StepManager } from "./step-manager.js";
 import { QualityGate } from "../quality/quality-gate.js";
 import type { QualityGateResult } from "../schemas/quality.schema.js";
 import { writeTextFile, ensureDir, atomicWriteJsonFile } from "../utils/fs.js";
-import { getContextDir, getOutputsDir } from "../utils/paths.js";
+import { getContextDir, getOutputsDir, dbPath } from "../utils/paths.js";
 import { now } from "../utils/time.js";
 import { commandExists } from "../utils/command-exists.js";
 import path from "node:path";
 import picocolors from "picocolors";
 import { getEventBus } from "../ui/event-bus.js";
 import type { UiEvent } from "../ui/event-bus.js";
+import { DatabaseManager } from "./database-manager.js";
+import { HookManager } from "./hook-manager.js";
+import type { HookContext } from "./hook-manager.js";
 
 export class RunLifecycle {
   private rootPath: string;
@@ -47,6 +51,8 @@ export class RunLifecycle {
   private safetyChecker: SafetyChecker;
   private approvalManager: ApprovalManager;
   private processManager: ProcessManager;
+  private hookManager: HookManager;
+  private databaseManager: DatabaseManager | null = null;
 
   constructor(rootPath: string, projectId: string, config: FlowTaskConfig, planner?: Planner) {
     this.rootPath = rootPath;
@@ -64,8 +70,25 @@ export class RunLifecycle {
     this.executorRegistry.setLogManager(this.logManager);
     this.gitService = new GitService();
     this.safetyChecker = new SafetyChecker();
-    this.approvalManager = new ApprovalManager();
+    this.approvalManager = new ApprovalManager({
+      enabled: config.approval?.enabled,
+      autoApprove: config.approval?.autoApprove,
+    });
     this.processManager = new ProcessManager();
+    this.hookManager = new HookManager(rootPath, config.hooks);
+  }
+
+  async initDatabase(): Promise<DatabaseManager> {
+    const db = await DatabaseManager.create(dbPath(this.rootPath));
+    this.databaseManager = db;
+    this.runManager.setDatabase(db);
+    this.stateManager.setDatabase(db);
+    this.eventStore.setDatabase(db);
+    return db;
+  }
+
+  getDatabase(): DatabaseManager | null {
+    return this.databaseManager;
   }
 
   async executeRun(
@@ -77,6 +100,7 @@ export class RunLifecycle {
       plannerMode?: PlannerMode;
       quality?: boolean;
       defaultExecutor?: string;
+      approvalMode?: string;
     },
   ): Promise<{ run: Run; success: boolean }> {
     const mode = options?.mode ?? "auto";
@@ -119,6 +143,19 @@ export class RunLifecycle {
 
     const usePlanner = this.planner;
     let planResult;
+
+    const beforeRunCtx: HookContext = { runId: run.runId };
+    const beforeRunHooks = await this.hookManager.runBeforeRun(beforeRunCtx);
+    for (const hook of beforeRunHooks) {
+      if (hook.success) {
+        await this.logManager.writeRuntime(run.runId, `Hook succeeded: ${hook.command}`);
+      } else {
+        await this.logManager.writeRuntime(
+          run.runId,
+          `Hook failed: ${hook.command}\n${hook.stderr}`,
+        );
+      }
+    }
 
     console.log(picocolors.cyan("\n  Planning..."));
     if (usePlanner && (options?.plannerMode === "ai" || options?.plannerMode === "auto")) {
@@ -219,6 +256,18 @@ export class RunLifecycle {
 
     await this.runManager.savePlan(run.runId, planResult.planMarkdown);
     console.log(picocolors.green(`  Plan created: ${planResult.tasks.length} tasks`));
+
+    if (options?.approvalMode) {
+      const mode = options.approvalMode;
+      if (mode === "auto") {
+        this.config = { ...this.config, approval: { ...this.config.approval!, autoApprove: true } };
+        this.approvalManager.setConfig({ autoApprove: true });
+      } else if (mode === "skip") {
+        this.config = { ...this.config, approval: { ...this.config.approval!, enabled: false } };
+        this.approvalManager.setConfig({ enabled: false });
+      }
+      // "manual" is the default — no config change needed
+    }
 
     const executorOverride = options?.defaultExecutor;
     const defaultExecutor = executorOverride ?? this.config.defaultExecutor ?? "shell";
@@ -365,6 +414,28 @@ export class RunLifecycle {
       }
 
       const finalSuccess = runSuccess && qualityPassed;
+
+      const afterRunCtx: HookContext = { runId: run.runId, success: finalSuccess };
+      const afterRunHooks = await this.hookManager.runAfterRun(afterRunCtx);
+      for (const hook of afterRunHooks) {
+        if (hook.success) {
+          await this.logManager.writeRuntime(run.runId, `Hook succeeded: ${hook.command}`);
+        } else {
+          await this.logManager.writeRuntime(
+            run.runId,
+            `Hook failed: ${hook.command}\n${hook.stderr}`,
+          );
+        }
+      }
+
+      if (!finalSuccess) {
+        const failCtx: HookContext = {
+          runId: run.runId,
+          error: "Run failed or quality check failed",
+        };
+        await this.hookManager.runOnFailure(failCtx);
+      }
+
       const finalRun = finalSuccess
         ? await this.runManager.updateRunStatus(run.runId, "completed")
         : await this.runManager.updateRunStatus(run.runId, "failed");
@@ -407,6 +478,9 @@ export class RunLifecycle {
     runId: string,
     _quality?: boolean,
   ): Promise<{ success: boolean; paused: boolean }> {
+    // Kill any orphaned processes for this run before continuing
+    await this.processManager.stop(this.rootPath, runId);
+
     const tasks = await this.runManager.loadTasks(runId);
     const pending = tasks.filter((t) => t.status === "pending" || t.status === "interrupted");
 
@@ -420,29 +494,66 @@ export class RunLifecycle {
     const prompt = await this.runManager.loadPrompt(runId);
     const rulesContext = await this.runManager.loadRulesContext(runId);
 
-    const { success: runSuccess, paused } = await this.executeTasks(
-      run,
-      prompt,
-      rulesContext,
-      run,
-      tasks,
-    );
+    const eventBus = getEventBus();
+    const eventBusUnsubscribe = eventBus.subscribe(async (event: UiEvent) => {
+      if ("runId" in event && event.runId !== runId) return;
+      if (
+        event.type === "executor_started" ||
+        event.type === "executor_output" ||
+        event.type === "executor_exited" ||
+        event.type === "executor_failed"
+      ) {
+        try {
+          const storeEvent = {
+            type: event.type,
+            runId: event.runId ?? runId,
+            taskId: "taskId" in event ? event.taskId : undefined,
+            details: { ...event },
+          } as never;
+          await this.eventStore.appendToRun(runId, storeEvent);
+        } catch {
+          // persistence is non-critical
+        }
 
-    if (paused) {
-      console.log(picocolors.yellow("\nRun paused for task approval."));
-      console.log(
-        picocolors.dim("Use: flowtask tasks-approve <taskId> or flowtask tasks-deny <taskId>"),
+        if (event.type === "executor_output" && "text" in event && event.text) {
+          const text = event.text as string;
+          for (const line of text.split("\n").filter(Boolean)) {
+            console.log(`    ${picocolors.dim(line)}`);
+          }
+        }
+      }
+    });
+
+    try {
+      const { success: runSuccess, paused } = await this.executeTasks(
+        run,
+        prompt,
+        rulesContext,
+        run,
+        tasks,
       );
-    } else if (runSuccess) {
-      console.log(picocolors.green("\n✓ Run completed"));
-    } else {
-      console.log(picocolors.red("\n✗ Run failed"));
-    }
 
-    return { success: runSuccess, paused };
+      if (paused) {
+        console.log(picocolors.yellow("\nRun paused for task approval."));
+        console.log(
+          picocolors.dim("Use: flowtask tasks-approve <taskId> or flowtask tasks-deny <taskId>"),
+        );
+      } else if (runSuccess) {
+        console.log(picocolors.green("\n✓ Run completed"));
+      } else {
+        console.log(picocolors.red("\n✗ Run failed"));
+      }
+
+      return { success: runSuccess, paused };
+    } finally {
+      eventBusUnsubscribe();
+    }
   }
 
   async executeSingleTask(runId: string, taskId: string): Promise<boolean> {
+    // Kill any orphaned processes for this run before executing
+    await this.processManager.stop(this.rootPath, runId);
+
     const tasks = await this.runManager.loadTasks(runId);
     const task = tasks.find((t) => t.id === taskId);
     if (!task) return false;
@@ -453,8 +564,42 @@ export class RunLifecycle {
     const prompt = await this.runManager.loadPrompt(runId);
     const rulesContext = await this.runManager.loadRulesContext(runId);
 
-    const result = await this.executeTask(run, prompt, rulesContext, task, tasks);
-    return result;
+    const eventBus = getEventBus();
+    const eventBusUnsubscribe = eventBus.subscribe(async (event: UiEvent) => {
+      if ("runId" in event && event.runId !== runId) return;
+      if (
+        event.type === "executor_started" ||
+        event.type === "executor_output" ||
+        event.type === "executor_exited" ||
+        event.type === "executor_failed"
+      ) {
+        try {
+          const storeEvent = {
+            type: event.type,
+            runId: event.runId ?? runId,
+            taskId: "taskId" in event ? event.taskId : undefined,
+            details: { ...event },
+          } as never;
+          await this.eventStore.appendToRun(runId, storeEvent);
+        } catch {
+          // persistence is non-critical
+        }
+
+        if (event.type === "executor_output" && "text" in event && event.text) {
+          const text = event.text as string;
+          for (const line of text.split("\n").filter(Boolean)) {
+            console.log(`    ${picocolors.dim(line)}`);
+          }
+        }
+      }
+    });
+
+    try {
+      const result = await this.executeTask(run, prompt, rulesContext, task, tasks);
+      return result;
+    } finally {
+      eventBusUnsubscribe();
+    }
   }
 
   private async executeTasks(
@@ -487,19 +632,80 @@ export class RunLifecycle {
       }
 
       if (isManual && !autoApprove) {
-        await this.runManager.updateTaskStatus(run.runId, task.id, "waiting_approval");
-        console.log(
-          picocolors.cyan(`\n  [${i + 1}/${tasks.length}] ${task.title} — awaiting approval`),
-        );
-        console.log(picocolors.dim(`    Use: flowtask tasks-approve ${task.id}`));
-        console.log(picocolors.dim(`    Use: flowtask tasks-deny ${task.id}`));
-        console.log(picocolors.dim(`    Or set mode to auto to bypass approval`));
-        return { success: true, paused: true };
+        // In interactive TTY mode, prompt the user inline
+        if (process.stdin.isTTY) {
+          const approved = await this.approvalManager.requestApproval({
+            taskId: task.id,
+            command: "",
+            reason: `Task: ${task.title}`,
+            stepTitle: task.title,
+          });
+
+          if (!approved) {
+            await this.runManager.updateTaskStatus(run.runId, task.id, "skipped");
+            await this.logManager.writeTaskLog(run.runId, task.id, "Task skipped by user");
+            console.log(picocolors.yellow(`  Task skipped: ${task.title}`));
+            continue;
+          }
+        } else {
+          // Non-TTY: pause and wait for external approval
+          await this.runManager.updateTaskStatus(run.runId, task.id, "waiting_approval");
+          console.log(
+            picocolors.cyan(`\n  [${i + 1}/${tasks.length}] ${task.title} — awaiting approval`),
+          );
+          console.log(picocolors.dim(`    Use: flowtask tasks-approve ${task.id}`));
+          console.log(picocolors.dim(`    Use: flowtask tasks-deny ${task.id}`));
+          console.log(picocolors.dim(`    Or set mode to auto to bypass approval`));
+          return { success: true, paused: true };
+        }
+      }
+
+      const beforeTaskCtx: HookContext = {
+        runId: run.runId,
+        taskId: task.id,
+        taskTitle: task.title,
+      };
+      const beforeTaskHooks = await this.hookManager.runBeforeTask(beforeTaskCtx);
+      for (const hook of beforeTaskHooks) {
+        if (!hook.success) {
+          await this.logManager.writeTaskLog(
+            run.runId,
+            task.id,
+            `Hook failed: ${hook.command}\n${hook.stderr}`,
+          );
+        }
       }
 
       const success = await this.executeTask(run, prompt, rulesContext, task, tasks);
 
       task.status = success ? "done" : "failed";
+
+      const afterTaskCtx: HookContext = {
+        runId: run.runId,
+        taskId: task.id,
+        taskTitle: task.title,
+        success,
+      };
+      const afterTaskHooks = await this.hookManager.runAfterTask(afterTaskCtx);
+      for (const hook of afterTaskHooks) {
+        if (!hook.success) {
+          await this.logManager.writeTaskLog(
+            run.runId,
+            task.id,
+            `Hook failed: ${hook.command}\n${hook.stderr}`,
+          );
+        }
+      }
+
+      if (!success) {
+        const failCtx: HookContext = {
+          runId: run.runId,
+          taskId: task.id,
+          taskTitle: task.title,
+          error: "Task failed",
+        };
+        await this.hookManager.runOnFailure(failCtx);
+      }
 
       if (!success) {
         runSuccess = false;
@@ -508,6 +714,65 @@ export class RunLifecycle {
     }
 
     return { success: runSuccess, paused: false };
+  }
+
+  private async resolveStepApprovals(run: Run, task: Task): Promise<boolean> {
+    const stepManager = new StepManager(this.rootPath);
+    const steps = await stepManager.loadSteps(run.runId, task.id);
+    if (steps.length === 0) return true;
+
+    const pendingApproval = steps.filter(
+      (s) => s.status === "pending_approval" && s.requiresApproval,
+    );
+    if (pendingApproval.length === 0) return true;
+
+    const autoApprove = this.config.approval?.autoApprove ?? false;
+    const approvalEnabled = this.config.approval?.enabled ?? true;
+
+    if (!approvalEnabled || autoApprove) {
+      for (const step of pendingApproval) {
+        await stepManager.approveStep(run.runId, task.id, step.id);
+        await this.logManager.writeTaskLog(run.runId, task.id, `Step ${step.id} auto-approved`);
+      }
+      return true;
+    }
+
+    if (!process.stdin.isTTY) {
+      for (const step of pendingApproval) {
+        await stepManager.updateStepStatus(run.runId, task.id, step.id, "approved");
+        await this.logManager.writeTaskLog(
+          run.runId,
+          task.id,
+          `Step ${step.id} auto-approved (non-TTY)`,
+        );
+      }
+      return true;
+    }
+
+    for (const step of pendingApproval) {
+      const approved = await this.approvalManager.requestApproval({
+        taskId: task.id,
+        stepId: step.id,
+        stepTitle: step.title,
+        command: step.command ?? "",
+        reason: step.approvalReason ?? "This step requires approval",
+      });
+
+      if (approved) {
+        await stepManager.approveStep(run.runId, task.id, step.id);
+        await this.logManager.writeTaskLog(run.runId, task.id, `Step ${step.id} approved`);
+      } else {
+        await stepManager.denyStep(run.runId, task.id, step.id);
+        await this.logManager.writeTaskLog(run.runId, task.id, `Step ${step.id} denied`);
+      }
+    }
+
+    const allDenied = pendingApproval.every((s) => {
+      const current = steps.find((st) => st.id === s.id);
+      return current?.status === "denied";
+    });
+
+    return !allDenied;
   }
 
   private async executeTask(
@@ -557,151 +822,272 @@ export class RunLifecycle {
       taskId: task.id,
     });
 
+    const stepApproved = await this.resolveStepApprovals(run, task);
+    if (!stepApproved) {
+      await this.runManager.updateTaskStatus(run.runId, task.id, "skipped");
+      await this.eventStore.appendToRun(run.runId, {
+        type: "run_cancelled" as never,
+        runId: run.runId,
+        taskId: task.id,
+        message: `Task skipped: all steps denied approval`,
+      });
+      await this.logManager.writeTaskLog(run.runId, task.id, "Task skipped: all steps denied");
+      console.log(picocolors.yellow(`  Task skipped: all steps denied approval`));
+      return false;
+    }
+
     let executorResult: ExecutorResult;
     let validationResult: ValidationResult | null = null;
     let retryCount = 0;
     const maxRetries = task.maxRetries;
 
-    do {
-      const executor = this.executorRegistry.get(task.executor);
+    try {
+      do {
+        const executor = this.executorRegistry.get(task.executor);
 
-      if (!executor) {
-        console.log(
-          picocolors.red(`\n  Unknown executor: "${task.executor}". Task cannot be executed.`),
+        if (!executor) {
+          console.log(
+            picocolors.red(`\n  Unknown executor: "${task.executor}". Task cannot be executed.`),
+          );
+          console.log(
+            picocolors.yellow(`  Configure "${task.executor}" in .flowtask/config.json executors.`),
+          );
+          await this.runManager.updateTaskStatus(run.runId, task.id, "failed");
+          return false;
+        } else {
+          await this.eventStore.appendToRun(run.runId, {
+            type: "executor_started",
+            runId: run.runId,
+            taskId: task.id,
+            message: `Executor: ${executor.name}`,
+          });
+
+          console.log(picocolors.dim(`    Running (${executor.name})...`));
+
+          executorResult = await executor.execute({
+            projectRoot: this.rootPath,
+            runId: run.runId,
+            task,
+            contextPackPath,
+            contextPackContent: contextPack.markdown,
+            signal: abortController.signal,
+          });
+
+          await this.eventStore.appendToRun(run.runId, {
+            type: executorResult.status === "done" ? "executor_completed" : "executor_failed",
+            runId: run.runId,
+            taskId: task.id,
+            details: { exitCode: executorResult.exitCode },
+          });
+        }
+
+        await this.logManager.writeTaskLog(
+          run.runId,
+          task.id,
+          `Executor finished with status: ${executorResult.status}, exit code: ${executorResult.exitCode}`,
         );
-        console.log(
-          picocolors.yellow(`  Configure "${task.executor}" in .flowtask/config.json executors.`),
-        );
-        await this.runManager.updateTaskStatus(run.runId, task.id, "failed");
-        return false;
-      } else {
+
+        if (executorResult.output) {
+          await this.logManager.writeTaskLog(
+            run.runId,
+            task.id,
+            `Output:\n${executorResult.output.slice(0, 2000)}`,
+          );
+        }
+        if (executorResult.error) {
+          await this.logManager.writeTaskLog(run.runId, task.id, `Error:\n${executorResult.error}`);
+        }
+
         await this.eventStore.appendToRun(run.runId, {
-          type: "executor_started",
+          type: "validation_started",
           runId: run.runId,
           taskId: task.id,
-          message: `Executor: ${executor.name}`,
         });
 
-        executorResult = await executor.execute({
+        validationResult = await this.validationEngine.validateTask({
           projectRoot: this.rootPath,
-          runId: run.runId,
           task,
-          contextPackPath,
-          contextPackContent: contextPack.markdown,
-          signal: abortController.signal,
+          executorResult,
         });
 
         await this.eventStore.appendToRun(run.runId, {
-          type: executorResult.status === "done" ? "executor_completed" : "executor_failed",
+          type: validationResult.status === "passed" ? "validation_passed" : "validation_failed",
           runId: run.runId,
           taskId: task.id,
-          details: { exitCode: executorResult.exitCode },
+          details: { checkCount: validationResult.checks.length },
         });
-      }
 
-      await this.logManager.writeTaskLog(
-        run.runId,
-        task.id,
-        `Executor finished with status: ${executorResult.status}, exit code: ${executorResult.exitCode}`,
-      );
+        const failedChecks = validationResult.checks.filter((c) => c.status === "failed");
+        for (const check of failedChecks) {
+          console.log(picocolors.red(`  Validation failed: ${check.message}`));
+          await this.logManager.writeTaskLog(
+            run.runId,
+            task.id,
+            `Validation failed: ${check.message}`,
+          );
+        }
 
-      if (executorResult.output) {
-        await this.logManager.writeTaskLog(
-          run.runId,
-          task.id,
-          `Output:\n${executorResult.output.slice(0, 2000)}`,
-        );
-      }
-      if (executorResult.error) {
-        await this.logManager.writeTaskLog(run.runId, task.id, `Error:\n${executorResult.error}`);
-      }
+        if (validationResult.status === "passed") {
+          console.log(picocolors.green(`  Status: done (all validations passed)`));
+          break;
+        }
 
-      await this.eventStore.appendToRun(run.runId, {
-        type: "validation_started",
-        runId: run.runId,
-        taskId: task.id,
-      });
+        if (validationResult.status === "warning" && failedChecks.length === 0) {
+          console.log(
+            picocolors.yellow(
+              "  Status: done (validations passed with warnings — acceptance criteria unverifiable)",
+            ),
+          );
+          break;
+        }
 
-      validationResult = await this.validationEngine.validateTask({
-        projectRoot: this.rootPath,
-        task,
-        executorResult,
-      });
+        const isSpawnError = executorResult.exitCode === undefined;
+        const errMsg = executorResult.error ?? "";
+        const isBinaryMissing =
+          isSpawnError &&
+          (errMsg.includes("ENOENT") ||
+            errMsg.includes("not found") ||
+            errMsg.includes("No such file"));
+        if (isBinaryMissing) {
+          const defaultExecutor = this.config.defaultExecutor ?? "shell";
+          if (defaultExecutor === task.executor) {
+            console.log(
+              picocolors.red(
+                `  Executor "${task.executor}" not found and default executor is the same. Giving up.`,
+              ),
+            );
+            await this.runManager.updateTaskStatus(run.runId, task.id, "failed");
+            await this.eventStore.appendToRun(run.runId, {
+              type: "task_failed",
+              runId: run.runId,
+              taskId: task.id,
+              message: `Task failed: ${task.title}`,
+            });
+            return false;
+          }
+          console.log(
+            picocolors.yellow(
+              `  Executor "${task.executor}" not found, falling back to "${defaultExecutor}"`,
+            ),
+          );
+          task.executor = defaultExecutor;
+          retryCount = 0;
+          continue;
+        }
 
-      await this.eventStore.appendToRun(run.runId, {
-        type: validationResult.status === "passed" ? "validation_passed" : "validation_failed",
-        runId: run.runId,
-        taskId: task.id,
-        details: { checkCount: validationResult.checks.length },
-      });
+        const allFileNotFound =
+          failedChecks.length > 0 &&
+          failedChecks.every((c) => c.message?.startsWith("File not found:"));
+        if (allFileNotFound && executorResult.exitCode === 0) {
+          console.log(
+            picocolors.yellow(
+              "  Executor succeeded but expected output files were not found. Task still accepted.",
+            ),
+          );
+          await this.logManager.writeTaskLog(
+            run.runId,
+            task.id,
+            "Validation: expected output files not found, but executor succeeded. Accepting task result.",
+          );
+          await this.runManager.updateTaskStatus(run.runId, task.id, "done");
+          await this.eventStore.appendToRun(run.runId, {
+            type: "task_completed",
+            runId: run.runId,
+            taskId: task.id,
+            message: `Task completed: ${task.title}`,
+          });
+          await this.logManager.writeTaskLog(
+            run.runId,
+            task.id,
+            "Task accepted despite missing output files",
+          );
+          return true;
+        }
 
-      const failedChecks = validationResult.checks.filter((c) => c.status === "failed");
-      for (const check of failedChecks) {
-        console.log(picocolors.red(`  Validation failed: ${check.message}`));
-        await this.logManager.writeTaskLog(
-          run.runId,
-          task.id,
-          `Validation failed: ${check.message}`,
-        );
-      }
+        retryCount++;
 
-      if (validationResult.status === "passed") {
-        console.log(picocolors.green(`  Status: done (all validations passed)`));
-        break;
-      }
+        if (retryCount > 1) {
+          const retryCtx: HookContext = {
+            runId: run.runId,
+            taskId: task.id,
+            taskTitle: task.title,
+            retryCount: retryCount - 1,
+            maxRetries,
+          };
+          const afterRetryHooks = await this.hookManager.runAfterRetry(retryCtx);
+          for (const hook of afterRetryHooks) {
+            await this.logManager.writeTaskLog(
+              run.runId,
+              task.id,
+              `Hook (afterRetry): ${hook.command} -> ${hook.success ? "ok" : "fail"}`,
+            );
+          }
+        }
 
-      if (validationResult.status === "warning" && failedChecks.length === 0) {
-        console.log(
-          picocolors.yellow(
-            "  Status: done (validations passed with warnings — acceptance criteria unverifiable)",
-          ),
-        );
-        break;
-      }
+        if (retryCount <= maxRetries) {
+          console.log(picocolors.yellow(`  Retrying (${retryCount}/${maxRetries})...`));
+          await this.logManager.writeTaskLog(
+            run.runId,
+            task.id,
+            `Retry ${retryCount}/${maxRetries}`,
+          );
 
-      const errMsg = executorResult.error ?? "";
-      const fatalError =
-        errMsg.includes("ENOENT") ||
-        errMsg.includes("not found") ||
-        errMsg.includes("No such file");
-      if (fatalError) {
-        const defaultExecutor = this.config.defaultExecutor ?? "shell";
-        console.log(
-          picocolors.yellow(
-            `  Executor "${task.executor}" not available, falling back to "${defaultExecutor}"`,
-          ),
-        );
-        task.executor = defaultExecutor;
-        retryCount = 0;
-        continue;
-      }
+          const beforeRetryCtx: HookContext = {
+            runId: run.runId,
+            taskId: task.id,
+            taskTitle: task.title,
+            retryCount,
+            maxRetries,
+          };
+          const beforeRetryHooks = await this.hookManager.runBeforeRetry(beforeRetryCtx);
+          for (const hook of beforeRetryHooks) {
+            await this.logManager.writeTaskLog(
+              run.runId,
+              task.id,
+              `Hook (beforeRetry): ${hook.command} -> ${hook.success ? "ok" : "fail"}`,
+            );
+          }
+        } else {
+          // Retry limit reached — ask user if they want to continue
+          const retryApproved = await this.approvalManager.requestRetryApproval({
+            taskId: task.id,
+            taskTitle: task.title,
+            retryCount,
+            maxRetries,
+          });
 
-      const allFileNotFound =
-        failedChecks.length > 0 &&
-        failedChecks.every((c) => c.message?.startsWith("File not found:"));
-      if (allFileNotFound && executorResult.exitCode === 0) {
-        console.log(
-          picocolors.yellow(
-            "  Executor succeeded but expected output files were not found. Skipping futile retries.",
-          ),
-        );
-        await this.logManager.writeTaskLog(
-          run.runId,
-          task.id,
-          "Validation failed: expected output files not found. Skipping retries.",
-        );
-        retryCount = maxRetries + 1;
-        continue;
-      }
+          if (retryApproved) {
+            console.log(
+              picocolors.cyan(`  User approved additional retry (${retryCount}/${maxRetries})...`),
+            );
+            await this.logManager.writeTaskLog(
+              run.runId,
+              task.id,
+              `User approved retry beyond limit: ${retryCount}/${maxRetries}`,
+            );
+            retryCount = 0; // reset retry counter
 
-      retryCount++;
-      if (retryCount <= maxRetries) {
-        console.log(picocolors.yellow(`  Retrying (${retryCount}/${maxRetries})...`));
-        await this.logManager.writeTaskLog(run.runId, task.id, `Retry ${retryCount}/${maxRetries}`);
-      }
-    } while (retryCount <= maxRetries);
-
-    this.processManager.clear(this.rootPath, run.runId);
+            const beforeRetryCtx: HookContext = {
+              runId: run.runId,
+              taskId: task.id,
+              taskTitle: task.title,
+              retryCount,
+              maxRetries,
+            };
+            const beforeRetryHooks = await this.hookManager.runBeforeRetry(beforeRetryCtx);
+            for (const hook of beforeRetryHooks) {
+              await this.logManager.writeTaskLog(
+                run.runId,
+                task.id,
+                `Hook (beforeRetry): ${hook.command} -> ${hook.success ? "ok" : "fail"}`,
+              );
+            }
+          }
+        }
+      } while (retryCount <= maxRetries);
+    } finally {
+      this.processManager.clear(this.rootPath, run.runId);
+    }
 
     if (
       validationResult &&

@@ -26,7 +26,12 @@ export async function tasksCommand(options: {
     } else {
       const runs = await runManager.listRuns();
       if (runs.length > 0) {
-        options.run = runs[0]!.runId;
+        const firstRun = runs[0];
+        if (!firstRun) {
+          console.log(picocolors.yellow('No runs found. Start one with: flowtask run "<prompt>"'));
+          process.exit(0);
+        }
+        options.run = firstRun.runId;
       } else {
         console.log(picocolors.yellow('No runs found. Start one with: flowtask run "<prompt>"'));
         process.exit(0);
@@ -34,16 +39,22 @@ export async function tasksCommand(options: {
     }
   }
 
-  const tasks = await runManager.loadTasks(options.run!);
+  const runId = options.run;
+  if (!runId) {
+    console.log(picocolors.yellow('No runs found. Start one with: flowtask run "<prompt>"'));
+    process.exit(0);
+  }
+
+  const tasks = await runManager.loadTasks(runId);
 
   if (tasks.length === 0) {
-    console.log(picocolors.yellow(`No tasks found for run: ${options.run}`));
+    console.log(picocolors.yellow(`No tasks found for run: ${runId}`));
     process.exit(0);
   }
 
   const filtered = options.status ? tasks.filter((t) => t.status === options.status) : tasks;
 
-  console.log(picocolors.cyan(`\nTasks for run: ${options.run}`));
+  console.log(picocolors.cyan(`\nTasks for run: ${runId}`));
   console.log("");
   console.log(
     `  ${picocolors.bold("ID".padEnd(14))} ${picocolors.bold("Status".padEnd(12))} ${picocolors.bold("Executor".padEnd(12))} ${picocolors.bold("Title")}`,

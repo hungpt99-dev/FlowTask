@@ -27,12 +27,22 @@ import {
 } from "../utils/paths.js";
 import { now } from "../utils/time.js";
 import { generateRunId } from "../utils/ids.js";
+import type { DatabaseManager } from "./database-manager.js";
 
 export class RunManager {
   private rootPath: string;
+  private db: DatabaseManager | null = null;
 
   constructor(rootPath: string) {
     this.rootPath = rootPath;
+  }
+
+  setDatabase(db: DatabaseManager): void {
+    this.db = db;
+  }
+
+  getDatabase(): DatabaseManager | null {
+    return this.db;
   }
 
   async createRun(projectId: string, title: string, mode: Run["mode"] = "auto"): Promise<Run> {
@@ -64,6 +74,14 @@ export class RunManager {
 
     await this.updateRunIndex(projectId, run);
 
+    if (this.db) {
+      try {
+        this.db.insertRun(run);
+      } catch {
+        // DB is secondary; file is source of truth
+      }
+    }
+
     return run;
   }
 
@@ -81,10 +99,16 @@ export class RunManager {
   }
 
   async saveRun(run: Run): Promise<void> {
-    await atomicWriteJsonFile(runJsonPath(this.rootPath, run.runId), {
-      ...run,
-      updatedAt: now(),
-    });
+    const updated = { ...run, updatedAt: now() };
+    await atomicWriteJsonFile(runJsonPath(this.rootPath, run.runId), updated);
+
+    if (this.db) {
+      try {
+        this.db.insertRun(updated);
+      } catch {
+        // DB is secondary
+      }
+    }
   }
 
   async savePrompt(runId: string, prompt: string): Promise<void> {
@@ -105,6 +129,16 @@ export class RunManager {
       tasks,
     });
     await this.updateTaskIndex(tasks);
+
+    if (this.db) {
+      try {
+        for (const task of tasks) {
+          this.db.insertTask(task);
+        }
+      } catch {
+        // DB is secondary
+      }
+    }
   }
 
   async loadTasks(runId: string): Promise<Task[]> {
@@ -130,7 +164,22 @@ export class RunManager {
     await writeTextFile(finalReportPath(this.rootPath, runId), reportContent);
   }
 
-  async listRuns(): Promise<RunIndex["runs"]> {
+  async listRuns(projectId?: string): Promise<RunIndex["runs"]> {
+    if (this.db && projectId) {
+      try {
+        const runs = this.db.listRuns(projectId);
+        return runs.map((r) => ({
+          runId: r.runId,
+          title: r.title,
+          status: r.status,
+          createdAt: r.createdAt,
+          updatedAt: r.updatedAt,
+        }));
+      } catch {
+        // fall through to file-based
+      }
+    }
+
     const idxPath = runIndexPath(this.rootPath);
     const exists = await fileExists(idxPath);
     if (!exists) return [];

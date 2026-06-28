@@ -3,6 +3,7 @@ import { ProjectManager } from "../../core/project-manager.js";
 import { RunManager } from "../../core/run-manager.js";
 import { RunLifecycle } from "../../core/run-lifecycle.js";
 import { EventStore } from "../../core/event-store.js";
+import { ProcessManager } from "../../core/process-manager.js";
 
 export async function resumeCommand(
   runId?: string,
@@ -96,14 +97,31 @@ export async function resumeCommand(
   const resumeTaskId = options?.from;
   const resumeTasks = pendingTasks.filter((t) => !resumeTaskId || t.id === resumeTaskId);
 
-  if (resumeTasks.length === 0 && !options?.skipInterrupted) {
-    for (const task of runningTasks) {
+  if (options?.skipInterrupted) {
+    // interrupted tasks already marked as skipped above
+  } else if (runningTasks.length > 0) {
+    const retryingTasks = runningTasks.filter((t) => !resumeTaskId || t.id === resumeTaskId);
+    for (const task of retryingTasks) {
       const updated = await runManager.updateTaskStatus(targetRunId, task.id, "pending");
       resumeTasks.push(updated);
     }
   }
 
   console.log(picocolors.cyan(`\nResuming run: ${run.title}\n`));
+
+  const processManager = new ProcessManager();
+  const existingProcess = await processManager.read(rootPath, targetRunId);
+  if (existingProcess) {
+    const alive = processManager.isAlive(existingProcess.pid);
+    if (alive) {
+      console.log(
+        picocolors.yellow(`  Stopping orphaned process (PID: ${existingProcess.pid})...`),
+      );
+      await processManager.stop(rootPath, targetRunId);
+    } else {
+      await processManager.clear(rootPath, targetRunId);
+    }
+  }
 
   await runManager.updateRunStatus(targetRunId, "running");
   await eventStore.appendToRun(targetRunId, {

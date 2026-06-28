@@ -4,6 +4,7 @@ import { RunLifecycle } from "../../src/core/run-lifecycle.js";
 import { RunManager } from "../../src/core/run-manager.js";
 import { testDir } from "../setup.js";
 import { join } from "node:path";
+import { generateDefaultConfig } from "../../src/config/default-config.js";
 
 describe("RunLifecycle", () => {
   let projectDir: string;
@@ -44,5 +45,57 @@ describe("RunLifecycle", () => {
     const { promptMdPath, planMdPath } = await import("../../src/utils/paths.js");
     expect(await fileExists(promptMdPath(projectDir, result.run.runId))).toBe(true);
     expect(await fileExists(planMdPath(projectDir, result.run.runId))).toBe(true);
+  });
+
+  describe("approval config propagation", () => {
+    it("should accept auto approval mode option", async () => {
+      const config = await new ProjectManager().loadConfig(projectDir);
+      const lifecycle = new RunLifecycle(projectDir, projectId, config);
+      const result = await lifecycle.executeRun("Auto approval test", {
+        mode: "plan-only",
+        approvalMode: "auto",
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("should accept skip approval mode option", async () => {
+      const config = await new ProjectManager().loadConfig(projectDir);
+      const lifecycle = new RunLifecycle(projectDir, projectId, config);
+      const result = await lifecycle.executeRun("Skip approval test", {
+        mode: "plan-only",
+        approvalMode: "skip",
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("should accept manual approval mode option", async () => {
+      const config = await new ProjectManager().loadConfig(projectDir);
+      const lifecycle = new RunLifecycle(projectDir, projectId, config);
+      const result = await lifecycle.executeRun("Manual approval test", {
+        mode: "plan-only",
+        approvalMode: "manual",
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("should work with autoApprove enabled in default config", async () => {
+      const config = generateDefaultConfig();
+      config.approval = { enabled: true, autoApprove: true, requireFor: [] };
+      const lifecycle = new RunLifecycle(projectDir, projectId, config);
+      const result = await lifecycle.executeRun("Auto approve config test", {
+        mode: "plan-only",
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("should work with approval disabled in default config", async () => {
+      const config = generateDefaultConfig();
+      config.approval = { enabled: false, autoApprove: false, requireFor: [] };
+      const lifecycle = new RunLifecycle(projectDir, projectId, config);
+      const result = await lifecycle.executeRun("Disabled approval config test", {
+        mode: "plan-only",
+      });
+      expect(result.success).toBe(true);
+    });
   });
 });

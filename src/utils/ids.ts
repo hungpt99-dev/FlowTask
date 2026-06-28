@@ -28,3 +28,22 @@ export function generateProjectId(name: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
 }
+
+export function generateStepId(): string {
+  const hex = randomUUID().replace(/-/g, "").slice(0, 12);
+  return `step_${hex}`;
+}
+
+export function generateCheckpointId(): string {
+  const timestamp = new Date()
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace(/\.\d{3}Z/, "");
+  const hex = randomUUID().replace(/-/g, "").slice(0, 8);
+  return `chk_${timestamp}_${hex}`;
+}
+
+export function generateResultId(): string {
+  const hex = randomUUID().replace(/-/g, "").slice(0, 12);
+  return `result_${hex}`;
+}

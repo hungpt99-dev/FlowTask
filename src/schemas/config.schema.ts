@@ -90,6 +90,17 @@ export const ValidationConfigSchema = z.object({
   vitest: VitestConfigSchema.default({}),
 });
 
+export const HooksConfigSchema = z.object({
+  beforeRun: z.array(z.string()).default([]),
+  afterRun: z.array(z.string()).default([]),
+  beforeTask: z.array(z.string()).default([]),
+  afterTask: z.array(z.string()).default([]),
+  beforeRetry: z.array(z.string()).default([]),
+  afterRetry: z.array(z.string()).default([]),
+  onFailure: z.array(z.string()).default([]),
+  failOnError: z.boolean().default(false),
+});
+
 export const LoggingConfigSchema = z.object({
   maxInMemoryLines: z.number().int().positive().default(500),
   maxLineLength: z.number().int().positive().default(4000),
@@ -123,6 +134,7 @@ export const FlowTaskConfigSchema = z.object({
   useCase: UseCaseConfigSchema.default({}),
   process: ProcessConfigSchema.default({}),
   executors: ExecutorConfigSchema.default({}),
+  hooks: HooksConfigSchema.default({}),
 });
 
 export type FlowTaskConfig = z.infer<typeof FlowTaskConfigSchema>;
