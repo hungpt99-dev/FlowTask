@@ -46,7 +46,7 @@ FlowTask gives you complete control over AI-driven workflows. Instead of treatin
 - **Safety first** — Command classification (safe/risky/blocked), secret redaction, approval workflows, interactive task approval in manual mode
 - **Project modes** — `development`, `writing`, `research`, `general` — each with tailored rules, validation, and defaults
 - **Git snapshots** — Before/after run snapshots for every workflow
-- **269+ tests** — 41 test files covering all modules, all quality gates pass
+- **1353 tests** — 112 test files covering all modules
 
 ## Quick Start (TL;DR)
 
@@ -111,7 +111,6 @@ flowtask runs                          # List all runs in the project
 flowtask tasks                         # List tasks
 flowtask tasks-edit <taskId>           # Edit a task's details
 flowtask tasks-approve <taskId>        # Approve a task waiting for approval
-flowtask tasks-deny <taskId>           # Deny a task waiting for approval
 flowtask logs                          # Show logs for runs and tasks
 flowtask resume                        # Resume an interrupted run
 flowtask retry <taskId>                # Retry a failed task
@@ -244,11 +243,10 @@ flowtask tasks-edit task_005 --validation-commands "pnpm test|pnpm lint"
 flowtask tasks-edit task_005 --required-files "src/file.ts|src/types.ts"
 ```
 
-Approve or deny tasks waiting for approval (used when a task has `waiting_approval` status):
+Approve a task waiting for approval (used when a task has `waiting_approval` status):
 
 ```bash
 flowtask tasks-approve task_005          # Approve a task
-flowtask tasks-deny task_005             # Deny a task
 ```
 
 ### Step-Level Management
@@ -448,18 +446,23 @@ pnpm doctor      # system health check
   runs/            # Run directories (not committed)
 
 src/
-  cli/             # CLI commands
-  core/            # Domain managers + run lifecycle
+  cli/             # CLI commands (Commander — thin, no business logic)
+  core/            # Domain managers + run lifecycle + hooks + database + workflow
+  ai/              # AI provider implementations (OpenAI, Anthropic, Gemini, etc.)
+  api/             # FlowTask API layer
   rules/           # Rule loading and merging
-  planner/         # Task plan generation
+  planner/         # Task plan generation (simple, AI, auto)
   context/         # Context pack for AI executors
   executor/        # Executor adapters (shell, command, manual)
-  validation/      # Validation engine
-  safety/          # Command safety and secret redaction
+  validation/      # Validation engine + validators
+  safety/          # Command safety, approval, secret redaction
+  quality/         # Quality gate runner
   git/             # Git snapshots
+  usecase/         # Use case detection and task templates
   config/          # Configuration loader
   schemas/         # Zod schemas
-  utils/           # Shared utilities
+  ui/              # Terminal UI formatting (rich, plain, JSON renderers)
+  utils/           # Shared utilities (fs, paths, ids, time, process, errors, glob, shell)
 ```
 
 ## AI CLI Executor Configuration

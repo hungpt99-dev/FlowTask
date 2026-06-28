@@ -54,7 +54,7 @@
 - Secrets are redacted from logs and console output via `SecretRedactor`.
 - All commands are classified as `safe`, `risky`, or `blocked` by `SafetyChecker`.
 - Blocked commands (`rm -rf /`, `printenv`, `cat .env`, etc.) are never executed.
-- Risky commands require approal.
+- Risky commands require approval.
 - Sensitive files (`.env`, `id_rsa`, `*.pem`, `*.key`) require approval.
 - Environment variable masking: keys containing `TOKEN`, `SECRET`, `PASSWORD`, `API_KEY`, `PRIVATE_KEY`, `DATABASE_URL` are masked.
 

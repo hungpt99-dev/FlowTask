@@ -31,6 +31,7 @@ pnpm quality:fix      # lint:fix + format
 pnpm doctor           # System health check (node scripts/doctor.mjs)
 pnpm codegraph        # Trigger codegraph index
 pnpm validate:docs    # Validate documentation files
+pnpm audit            # Run security audit
 ```
 
 ## Development Workflow
@@ -55,19 +56,21 @@ pnpm validate:docs    # Validate documentation files
 
 src/
   cli/                 # CLI commands (Commander) — thin, no business logic
-  core/                # Domain managers + run lifecycle + hooks + workflow
-  rules/               # Rule loading and merging
-  planner/             # Task plan generation
+  core/                # Domain managers + run lifecycle + hooks + database + workflow
   ai/                  # AI provider implementations (OpenAI, Anthropic, Gemini, etc.)
+  api/                 # FlowTask API layer
+  rules/               # Rule loading and merging
+  planner/             # Task plan generation (simple, AI, auto)
   context/             # Context pack for AI executors
   executor/            # Executor adapters (shell, command, manual)
-  validation/          # Validation engine
+  validation/          # Validation engine + validators
   safety/              # Command safety, approval, secret redaction
+  quality/             # Quality gate runner
   git/                 # Git snapshots
+  usecase/             # Use case detection and task templates
   config/              # Configuration loader
   schemas/             # Zod schemas
   ui/                  # Terminal UI formatting (rich, plain, JSON renderers)
-  api/                 # FlowTask API layer
   utils/               # Shared utilities (fs, paths, ids, time, process, errors, glob, shell)
 
 tests/                 # Vitest tests

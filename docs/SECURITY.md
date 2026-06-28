@@ -40,7 +40,7 @@ These commands are blocked by default:
 
 ### 4. Sensitive Files
 
-Access to files like `.env`, `.env.local`, `id_rsa`, `id_ed25519`, `*.pem`, `*.key` requires explicit user approval.
+Access to files like `.env`, `.env.local`, `id_rsa`, `id_ed25519`, `*.pem`, `*.key`, and credential files requires explicit user approval.
 
 ### 5. Atomic Writes
 

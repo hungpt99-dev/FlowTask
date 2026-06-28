@@ -39,4 +39,4 @@ The codegraph trigger script handles missing installations gracefully:
 
 ## Setup
 
-Codegraph must be installed separately. See [Codegraph documentation](https://opencode.ai) for installation instructions.
+Codegraph must be installed separately. See [Codegraph documentation](https://github.com/anomalyco/codegraph) for installation instructions.

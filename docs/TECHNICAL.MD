@@ -154,7 +154,7 @@ Default folder:
 .flowtask/
 ```
 
-No database is required for MVP.
+No database is required for MVP. However, the implementation uses SQLite via `better-sqlite3` for efficient event storage, run history, and artifact tracking alongside the file-based state. The database is optional and auto-created at `.flowtask/flowtask.db`.
 
 ---
 
@@ -319,16 +319,16 @@ validation result
 Use:
 
 ```text
-pino
+Custom LogManager with SecretRedactor integration
 ```
 
-But also write human-readable logs.
+Logs are written as human-readable text with timestamps. In-memory lines use a ring buffer — when the limit (`maxInMemoryLines`) is reached, the oldest lines are evicted.
 
 Two log types:
 
 ```text
-structured logs for runtime/debugging
-plain logs for human review
+runtime logs for execution tracking
+task logs for per-task output
 ```
 
 ---
@@ -359,12 +359,10 @@ Use:
 
 ```text
 picocolors
-ora
 enquirer
-cli-table3
 ```
 
-Keep terminal UI simple.
+With custom renderers for rich, plain, and JSON output modes. Terminal UI is kept simple and modular.
 
 ---
 
@@ -381,21 +379,35 @@ FlowTask Runtime
  |
  +-- Project Manager
  +-- Config Loader
+ +-- Database Manager (SQLite)
  +-- Rule Loader
  +-- Run Manager
+ +-- Run Lifecycle
  +-- Planner
- +-- Task Manager
+ +-- Planner Registry
  +-- Context Pack Builder
  +-- Executor Registry
- +-- Log Streamer
+ +-- Log Manager
  +-- Validation Engine
+ +-- Validation Runner
  +-- Retry Manager
  +-- State Manager
  +-- Event Store
  +-- Artifact Manager
+ +-- Step Manager
+ +-- Workflow Manager
+ +-- Workflow Replanner
  +-- Safety Checker
+ +-- Approval Manager
+ +-- Secret Redactor
  +-- Git Service
+ +-- Quality Gate
+ +-- Checkpoint Service
+ +-- Process Manager
  +-- Report Generator
+ +-- Use Case Detector
+ +-- AI Provider Service
+ +-- Provider Registry
 ```
 
 ---
@@ -542,7 +554,7 @@ Example:
 
 ## 7.7 Event
 
-An event is an append-only record of what happened.
+An event is an append-only record of what happened. Events are stored in JSONL files (primary durable store), with SQLite as a query-optimized secondary store via the DatabaseManager. The `queryEvents` method queries SQLite; all writes go to both stores but JSONL is the source of truth.
 
 Example:
 
@@ -558,9 +570,44 @@ Example:
 
 ---
 
+## 7.8 Checkpoint
+
+A checkpoint captures task execution state at specific points for precise resume:
+
+```json
+{
+  "checkpointId": "chk_001",
+  "runId": "run_20260626_103000_implement_ocr_module",
+  "taskId": "task_005",
+  "stepId": "step_003",
+  "status": "completed",
+  "context": { "completedSteps": ["step_001", "step_002"] },
+  "createdAt": "2026-06-26T10:40:00.000Z"
+}
+```
+
+---
+
+## 7.9 Task Result
+
+A task result record stores the output and artifacts of completed tasks:
+
+```json
+{
+  "id": "tr_001",
+  "taskId": "task_005",
+  "runId": "run_...",
+  "status": "done",
+  "exitCode": 0,
+  "outputPath": ".flowtask/runs/.../outputs/task_005/output.txt",
+  "validationStatus": "passed",
+  "createdAt": "2026-06-26T10:45:00.000Z"
+}
+```
+
 # 8. Local Directory Structure
 
-FlowTask should create a `.flowtask` folder inside the project.
+FlowTask creates a `.flowtask` folder inside the project. State is stored in both JSON files (for fast file reads) and SQLite (`flowtask.db`, for efficient querying). API keys are stored in `~/.flowtask/secrets.json`.
 
 ```text
 .flowtask/
@@ -569,6 +616,11 @@ FlowTask should create a `.flowtask` folder inside the project.
   state.json
   run-index.json
   task-index.json
+  events.jsonl         # Global event log
+  flowtask.db          # SQLite database (events, task results, artifacts, checkpoints)
+
+  steps/               # Per-run step definitions
+    steps.run_20260626_103000.json
 
   rules/
     project.md
@@ -647,11 +699,12 @@ Stores project metadata.
 
 ## 9.2 config.json
 
-Stores FlowTask configuration.
+Stores FlowTask configuration. The `logging.maxInMemoryLines` uses a ring buffer — when the in-memory line limit is reached, the oldest lines are evicted.
 
 ```json
 {
   "version": "1.0",
+  "projectMode": "development",
   "defaultExecutor": "opencode",
   "runsDir": ".flowtask/runs",
   "logLevel": "info",
@@ -675,6 +728,7 @@ Stores FlowTask configuration.
 
   "approval": {
     "enabled": true,
+    "autoApprove": false,
     "requireFor": [
       "delete_file",
       "install_dependency",
@@ -685,8 +739,30 @@ Stores FlowTask configuration.
     ]
   },
 
+  "useCase": {
+    "enabled": true,
+    "customPatterns": [],
+    "confidenceThreshold": 0.3
+  },
+
   "quality": {
+    "enabledByDefault": false,
     "commands": ["pnpm lint", "pnpm typecheck", "pnpm test"]
+  },
+
+  "validation": {
+    "profile": "safe",
+    "concurrency": 1,
+    "timeoutMs": 300000,
+    "killGraceMs": 5000,
+    "dedupeCommands": true,
+    "resourceGuard": true,
+    "commands": [],
+    "vitest": {
+      "enabled": true,
+      "maxWorkers": 1,
+      "runMode": true
+    }
   },
 
   "limits": {
@@ -696,29 +772,86 @@ Stores FlowTask configuration.
     "maxLogSizeMb": 20
   },
 
+  "hooks": {
+    "beforeRun": [],
+    "afterRun": [],
+    "beforeTask": [],
+    "afterTask": [],
+    "beforeRetry": [],
+    "afterRetry": [],
+    "onFailure": [],
+    "failOnError": false
+  },
+
+  "logging": {
+    "maxInMemoryLines": 500,
+    "maxLineLength": 4000
+  },
+
+  "process": {
+    "gracefulStopTimeoutMs": 5000,
+    "forceKillTimeoutMs": 10000
+  },
+
+  "planner": {
+    "default": "auto",
+    "type": "internal-ai",
+    "executor": "opencode",
+    "provider": "openai",
+    "model": "gpt-4.1-mini",
+    "maxRetries": 1,
+    "fallbackToSimple": true
+  },
+
+  "ai": {
+    "providers": {}
+  },
+
   "executors": {
     "shell": {
-      "type": "shell"
+      "type": "shell",
+      "args": [],
+      "inputMode": "argument",
+      "timeoutMs": 1800000
     },
     "opencode": {
       "type": "command",
-      "command": "opencode run"
+      "command": "opencode",
+      "args": ["run"],
+      "inputMode": "stdin",
+      "timeoutMs": 1800000
     },
     "claude": {
       "type": "command",
-      "command": "claude"
+      "command": "claude",
+      "inputMode": "stdin",
+      "timeoutMs": 1800000
     },
     "codex": {
       "type": "command",
-      "command": "codex"
+      "command": "codex",
+      "inputMode": "stdin",
+      "timeoutMs": 1800000
     },
     "gemini": {
       "type": "command",
-      "command": "gemini"
+      "command": "gemini",
+      "inputMode": "stdin",
+      "timeoutMs": 1800000
     },
     "aider": {
       "type": "command",
-      "command": "aider --message"
+      "command": "aider",
+      "args": ["--message"],
+      "inputMode": "argument",
+      "timeoutMs": 1800000
+    },
+    "mock-ai": {
+      "type": "command",
+      "command": "node",
+      "args": ["tests/fixtures/mock-ai-executor.mjs"],
+      "inputMode": "stdin",
+      "timeoutMs": 30000
     }
   }
 }
@@ -1004,6 +1137,10 @@ Options:
 
 ```bash
 flowtask init --name "Guest Scan"
+flowtask init --mode development
+flowtask init --mode writing
+flowtask init --mode research
+flowtask init --mode general
 flowtask init --force
 ```
 
@@ -1037,6 +1174,14 @@ flowtask run "Implement OCR module" --mode manual
 flowtask run "Implement OCR module" --plan-only
 flowtask run "Implement OCR module" --dry-run
 flowtask run "Implement OCR module" --debug
+flowtask run "Implement OCR module" --planner auto
+flowtask run "Implement OCR module" --planner ai
+flowtask run "Implement OCR module" --planner simple
+flowtask run "Implement OCR module" --planner-provider openai
+flowtask run "Implement OCR module" --planner-model gpt-4.1-mini
+flowtask run "Implement OCR module" --approval-mode auto
+flowtask run "Implement OCR module" --approval-mode manual
+flowtask run "Implement OCR module" --approval-mode skip
 flowtask run "Implement OCR module" --template feature
 ```
 
@@ -1134,8 +1279,10 @@ flowtask logs --validation
 ## 11.7 resume
 
 ```bash
-flowtask resume
-flowtask resume <runId>
+flowtask resume                    # Auto-continue from interruption
+flowtask resume <runId>            # Resume a specific run
+flowtask resume <runId> --from task_004  # Continue from a specific task
+flowtask resume <runId> --dry-run  # Show resume plan without executing
 ```
 
 Responsibilities:
@@ -1161,7 +1308,9 @@ Options:
 
 ```bash
 flowtask retry task_005 --run <runId>
-flowtask retry task_005 --force
+flowtask retry task_005 --continue  # Retry then continue remaining tasks
+flowtask retry task_005 --force     # Bypass maxRetries check
+flowtask retry task_005 --dry-run   # Show retry plan without executing
 ```
 
 ---
@@ -1783,8 +1932,8 @@ FlowTask uses an internal AI/API provider for planning, not an external AI CLI.
 This is a key architectural decision:
 
 ```text
-Planner = internal AI API (OpenAI-compatible)
-Executor = external AI CLI (opencode, claude, codex)
+Planner = internal AI API (8 provider types: OpenAI, Anthropic, Gemini, Mistral, Azure OpenAI, Ollama, OpenAI-Compatible, Custom)
+Executor = external AI CLI (opencode, claude, codex, aider, gemini CLI, shell)
 ```
 
 ### Why Internal AI for Planning?
@@ -1801,22 +1950,60 @@ partial JSON
 implementation text
 ```
 
-This makes JSON extraction unreliable. The internal AI API uses `response_format: { type: "json_object" }` to return clean structured JSON.
+This makes JSON extraction unreliable. The internal AI API uses `response_format: { type: "json_object" }` to return clean structured JSON. If a provider does not support JSON mode, the ResponseFormatFallback mechanism retries without it.
+
+### Supported Provider Types
+
+| Provider          | Type                 | Endpoint            |
+| ----------------- | -------------------- | ------------------- |
+| OpenAI            | `openai`             | `/chat/completions` |
+| OpenAI-Compatible | `openai-compatible`  | `/chat/completions` |
+| Anthropic         | `anthropic`          | `/v1/messages`      |
+| Gemini            | `gemini`             | `generateContent`   |
+| Mistral           | `mistral`            | `/chat/completions` |
+| Azure OpenAI      | `azure-openai`       | deployment-based    |
+| Ollama            | `ollama`             | `/api/chat`         |
+| Custom            | via registration API | configurable        |
+
+### Provider Features
+
+- `response_format` fallback (retries without JSON mode if unsupported)
+- SSE/NDJSON streaming support
+- Provider health checks (`providers doctor`)
+- Custom provider registration API
 
 ### Internal AI Planner Architecture
 
 ```text
 src/ai/
-  ai-provider.ts       # AiProvider interface
-  openai-provider.ts   # OpenAI-compatible provider using fetch
-  provider-registry.ts # Provider instance management
-  ai.schema.ts         # AI config schema
+  ai-provider.ts             # AiProvider interface
+  ai-provider-error.ts       # Typed error classes
+  ai.schema.ts               # AI config schema
+  api-key-validator.ts       # API key validation
+  index.ts                   # Barrel exports
+  openai-provider.ts         # OpenAI-compatible provider using fetch
+  provider-definitions.ts    # Provider type definitions
+  provider-presets.ts        # Built-in provider presets
+  provider-registry.ts       # Provider instance management
+  provider-service.ts        # Provider service layer
+  response-format-fallback.ts # JSON mode fallback
+  providers/
+    anthropic-provider.ts
+    azure-openai-provider.ts
+    gemini-provider.ts
+    index.ts
+    mistral-provider.ts
+    ollama-provider.ts
+    openai-compatible-provider.ts
 
 src/planner/
   internal-ai-planner.ts  # Internal AI planner implementation
   simple-planner.ts       # Fixed 7-task template
-  planner.ts               # Planner interface
+  planner.ts              # Planner interface
   planner-registry.ts     # Planner mode resolution
+  ai-planner.ts           # External AI planner (for AI CLI planning)
+  process-planner-output.ts # JSON extraction + validation
+  templates/              # Prompt templates (empty: generated at runtime)
 ```
 
 ### Config
@@ -2105,7 +2292,13 @@ logs/validation.log
 
 ---
 
-## 18.3 Log Format
+## 18.3 Ring Buffer
+
+In-memory log lines are stored in a ring buffer (`src/utils/ring-buffer.ts`). When the `maxInMemoryLines` limit is reached, the oldest lines are evicted to bound memory usage. The ring buffer supports iteration and snapshot operations for live display.
+
+---
+
+## 18.4 Log Format
 
 Human-readable task log:
 
@@ -2498,7 +2691,7 @@ flowtask repair
 
 # 23. Event Store Design
 
-Use append-only `events.jsonl`.
+Events are stored in JSONL files (primary durable store), with SQLite as a query-optimized secondary store. The EventStore (`src/core/event-store.ts`) writes to both on every append; `readRunEvents` reads from JSONL, `queryEvents` queries SQLite for efficient filtering.
 
 ## 23.1 Event Types
 
@@ -2511,18 +2704,25 @@ run_started
 run_completed
 run_failed
 run_interrupted
+run_cancel_requested
+run_cancelled
+run_paused
 task_created
 task_started
 task_completed
 task_failed
+task_skipped
 task_interrupted
 context_pack_created
 executor_started
 executor_completed
 executor_failed
+executor_output
+executor_exited
 command_started
 command_completed
 command_failed
+command_blocked
 artifact_created
 validation_started
 validation_passed
@@ -2531,8 +2731,63 @@ approval_requested
 approval_approved
 approval_rejected
 quality_started
+quality_command_started
+quality_command_completed
+quality_command_failed
 quality_completed
 quality_failed
+resume_started
+resume_point_detected
+resume_task_marked_interrupted
+resume_continued
+resume_completed
+resume_failed
+retry_started
+retry_context_created
+retry_executor_started
+retry_validation_started
+retry_completed
+retry_failed
+retry_limit_reached
+process_started
+process_exited
+process_signal_sent
+process_stopped
+process_force_killed
+process_stale
+planner_fallback
+ai_planner_started
+ai_planner_output_received
+ai_planner_json_extracted
+ai_planner_validation_passed
+ai_planner_validation_failed
+ai_planner_repair_started
+ai_planner_repair_succeeded
+ai_planner_repair_failed
+ai_planner_fallback_to_simple
+internal_ai_planner_started
+internal_ai_planner_provider_selected
+internal_ai_planner_output_received
+internal_ai_planner_json_extracted
+internal_ai_planner_validation_passed
+internal_ai_planner_validation_failed
+internal_ai_planner_repair_started
+internal_ai_planner_repair_succeeded
+internal_ai_planner_repair_failed
+internal_ai_planner_fallback_to_simple
+ai_provider_stream_started
+ai_provider_stream_delta
+ai_provider_stream_completed
+ai_provider_stream_failed
+workflow_exported
+workflow_edited
+workflow_applied
+workflow_diff_shown
+workflow_added_task
+workflow_removed_task
+workflow_reordered
+workflow_replanned
+workflow_snapshot_saved
 ```
 
 ---
@@ -2913,6 +3168,12 @@ Before writing logs, redact known secret patterns.
 
 ---
 
+## 31.5 Secret Store
+
+API keys and credentials are stored in `~/.flowtask/secrets.json` (encrypted at rest via file permissions `0o600`). The `SecretStore` class (`src/config/secret-store.ts`) provides get/set/remove/list operations. The `CredentialResolver` (`src/config/credential-resolver.ts`) maps provider names to stored credentials. The store can also be overridden via the `FLOWTASK_SECRETS_PATH` environment variable.
+
+---
+
 # 32. Source Code Structure
 
 ```text
@@ -2926,47 +3187,88 @@ flowtask/
     cli/
       index.ts
       commands/
-        init.command.ts
-        run.command.ts
-        status.command.ts
-        runs.command.ts
-        tasks.command.ts
-        logs.command.ts
-        resume.command.ts
-        retry.command.ts
-        inspect.command.ts
-        stop.command.ts
         cancel.command.ts
         clean.command.ts
+        config.command.ts
         doctor.command.ts
+        init.command.ts
+        inspect.command.ts
+        logs.command.ts
+        providers.command.ts
+        resume.command.ts
+        retry.command.ts
         rules.command.ts
+        run.command.ts
+        run-planner.ts
+        runs.command.ts
+        setup.command.ts
+        status.command.ts
+        step.command.ts
+        steps.command.ts
+        stop.command.ts
+        tasks.command.ts
+        tasks-approve.command.ts
+        tasks-edit.command.ts
+        workflow.command.ts
 
     core/
-      project-manager.ts
-      run-manager.ts
-      task-manager.ts
-      state-manager.ts
-      event-store.ts
       artifact-manager.ts
+      checkpoint-service.ts
+      database-manager.ts
+      event-store.ts
+      hook-manager.ts
       log-manager.ts
+      process-manager.ts
+      project-manager.ts
       report-generator.ts
+      run-lifecycle.ts
+      run-manager.ts
+      state-manager.ts
+      step-manager.ts
+      workflow-manager.ts
+      workflow-replanner.ts
+
+    ai/
+      ai-provider.ts
+      ai-provider-error.ts
+      ai.schema.ts
+      api-key-validator.ts
+      index.ts
+      openai-provider.ts
+      provider-definitions.ts
+      provider-presets.ts
+      provider-registry.ts
+      provider-service.ts
+      response-format-fallback.ts
+      providers/
+        anthropic-provider.ts
+        azure-openai-provider.ts
+        gemini-provider.ts
+        index.ts
+        mistral-provider.ts
+        ollama-provider.ts
+        openai-compatible-provider.ts
+
+    api/
+      flowtask-api.ts
+      index.ts
 
     rules/
       rule-loader.ts
-      rule-merger.ts
       rule-source-resolver.ts
 
     planner/
       planner.ts
       simple-planner.ts
       ai-planner.ts
+      internal-ai-planner.ts
+      planner-registry.ts
+      process-planner-output.ts
       templates/
-        feature.template.ts
-        bugfix.template.ts
-        docs.template.ts
 
     context/
       context-pack-builder.ts
+      planner-context-builder.ts
 
     executor/
       executor.ts
@@ -2974,70 +3276,102 @@ flowtask/
       command-executor.ts
       manual-executor.ts
       executor-registry.ts
+      executor-presets.ts
+      build-command-args.ts
 
     validation/
       validation-engine.ts
+      validation-runner.ts
       process-validator.ts
       file-validator.ts
-      artifact-validator.ts
       command-validator.ts
-      git-diff-validator.ts
+      acceptance-criteria-validator.ts
+      content-validator.ts
+      resource-guard.ts
 
     safety/
       safety-checker.ts
-      command-classifier.ts
       approval-manager.ts
       secret-redactor.ts
 
+    quality/
+      quality-gate.ts
+
     git/
       git-service.ts
-      diff-service.ts
+
+    usecase/
+      index.ts
+      task-templates.ts
+      usecase-detector.ts
+      usecase-types.ts
 
     config/
       config-loader.ts
+      credential-resolver.ts
       default-config.ts
+      mode-rules.ts
+      mode-steps.ts
+      project-modes.ts
+      secret-store.ts
 
     schemas/
-      project.schema.ts
-      run.schema.ts
-      task.schema.ts
-      state.schema.ts
+      artifact.schema.ts
+      checkpoint.schema.ts
       config.schema.ts
       event.schema.ts
-      validation.schema.ts
+      planner.schema.ts
+      project.schema.ts
+      quality.schema.ts
       rule.schema.ts
+      run.schema.ts
+      state.schema.ts
+      step.schema.ts
+      task-result.schema.ts
+      task.schema.ts
+      validation.schema.ts
+      workflow.schema.ts
+
+    ui/
+      event-bus.ts
+      output-mode.ts
+      formatters/
+        duration-format.ts
+        error-format.ts
+        status-format.ts
+        task-format.ts
+      renderers/
+        json-renderer.ts
+        plain-renderer.ts
+        rich-renderer.ts
+      ink/
+        components/
 
     utils/
-      fs.ts
-      paths.ts
-      ids.ts
-      time.ts
-      process.ts
+      command-exists.ts
+      command-sanitizer.ts
+      env-loader.ts
       errors.ts
+      event-factory.ts
+      fs.ts
       glob.ts
+      ids.ts
+      json-extractor.ts
+      paths.ts
+      process-tree-kill.ts
+      process.ts
+      provider-stream.ts
+      ring-buffer.ts
+      shell.ts
+      stream-lines.ts
+      stream-parser.ts
+      test-streams.ts
+      time.ts
+
+    stream.ts
 
   tests/
-    core/
-      project-manager.test.ts
-      run-manager.test.ts
-      state-manager.test.ts
-      event-store.test.ts
-
-    rules/
-      rule-loader.test.ts
-      rule-source-resolver.test.ts
-
-    executor/
-      shell-executor.test.ts
-      command-executor.test.ts
-
-    validation/
-      validation-engine.test.ts
-      file-validator.test.ts
-      command-validator.test.ts
-
-    planner/
-      simple-planner.test.ts
+    (112 test files, 1350+ tests covering all modules)
 ```
 
 ---
@@ -3050,37 +3384,59 @@ flowtask/
 {
   "name": "flowtask",
   "version": "0.1.0",
-  "description": "Local-first AI task runtime CLI",
+  "description": "Local-first AI task runtime CLI — turn prompts into visible, validated, resumable AI task flows",
   "type": "module",
   "bin": {
     "flowtask": "./dist/index.js"
   },
   "scripts": {
     "dev": "tsx src/cli/index.ts",
-    "build": "tsup src/cli/index.ts --format esm --dts --clean",
+    "build": "tsup",
     "test": "vitest run",
     "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "lint:fix": "eslint . --fix",
+    "format": "prettier . --write",
+    "format:check": "prettier . --check",
+    "quality": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test",
+    "quality:fix": "pnpm lint:fix && pnpm format",
+    "doctor": "node scripts/doctor.mjs",
+    "codegraph": "node scripts/codegraph-trigger.mjs",
+    "validate:docs": "node scripts/validate-docs.mjs",
+    "audit": "pnpm audit",
+    "prepare": "husky"
   },
   "dependencies": {
-    "commander": "latest",
-    "zod": "latest",
-    "pino": "latest",
-    "picocolors": "latest",
-    "ora": "latest",
-    "enquirer": "latest",
-    "cli-table3": "latest",
-    "fast-glob": "latest",
-    "fs-extra": "latest"
+    "better-sqlite3": "^12.11.1",
+    "commander": "^12.1.0",
+    "enquirer": "^2.4.1",
+    "fast-glob": "^3.3.2",
+    "js-yaml": "^5.2.0",
+    "picocolors": "^1.1.1",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@types/node": "latest",
-    "tsx": "latest",
-    "tsup": "latest",
-    "typescript": "latest",
-    "vitest": "latest"
-  }
+    "@commitlint/cli": "^19.5.0",
+    "@commitlint/config-conventional": "^19.5.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.9.0",
+    "eslint": "^9.14.0",
+    "eslint-config-prettier": "^9.1.0",
+    "husky": "^9.1.6",
+    "lint-staged": "^15.2.10",
+    "prettier": "^3.4.1",
+    "tsup": "^8.3.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "typescript-eslint": "^8.62.0",
+    "vitest": "^2.1.5"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "packageManager": "pnpm@9.14.0"
 }
 ```
 
@@ -3185,9 +3541,20 @@ flowtask inspect
 
 ---
 
-# 35. MVP Scope
+## 34.4 Current Test Suite
 
-## 35.1 MVP Commands
+```text
+Test Files:  111 passed | 1 failed (112 total)
+Tests:       1352 passed | 1 failed (1353 total)
+Framework:   vitest
+Coverage:    unit, integration, E2E, edge case, error handling
+```
+
+---
+
+# 35. Implementation Status
+
+## 35.1 Implemented Commands
 
 ```text
 flowtask init
@@ -3201,49 +3568,73 @@ flowtask retry
 flowtask inspect
 flowtask doctor
 flowtask rules
+flowtask cancel
+flowtask clean
+flowtask stop
+flowtask setup
+flowtask config
+flowtask providers
+flowtask workflow
+flowtask steps
+flowtask step
+flowtask tasks-edit
+flowtask tasks-approve / tasks-deny
 ```
 
 ---
 
-## 35.2 MVP Features
+## 35.2 Implemented Features
 
 ```text
 local project initialization
 file-based state
-config loader
+SQLite database (events, task results, artifacts, checkpoints)
+config loader with schema validation
 rule source config
 rule loader
 run creation
 simple planner
+AI planner (8 provider types: OpenAI, Anthropic, Gemini, Mistral, Azure, Ollama, OpenAI-compatible, Custom)
+AI planner with response_format fallback and streaming
 task generation
 context pack generation
+planner-context-builder
 sequential task execution
 shell executor
 command executor
 manual executor
-real-time logs
-events.jsonl
-validation engine
+real-time logs with ring buffer
+events.jsonl + SQLite dual store
+validation engine (process, file, artifact, command, git diff, acceptance criteria)
 resume
-retry
+retry with interactive approval
 final report
 basic git snapshot
 basic quality gates
 secret redaction
+secret store (~/.flowtask/secrets.json)
+credential resolver
+use case detection
+steps system (command, read, write, edit, shell, approval)
+workflow management (list, show, diff, apply, add, remove, reorder, edit, replan)
+checkpoint service
+process manager
+hook manager with lifecycle hooks
+approval manager with interactive prompting
+command classification (safe, risky, dangerous, blocked)
+provider health checks
+mode system (development, writing, research, general)
 ```
 
 ---
 
-## 35.3 Not MVP
-
-Do not build first:
+## 35.3 Beyond MVP / Future
 
 ```text
 web UI
 cloud sync
 team collaboration
 billing
-database
 parallel task execution
 plugin marketplace
 advanced DAG engine
@@ -3253,9 +3644,11 @@ mobile app
 
 ---
 
-# 36. Development Roadmap
+# 36. Development Status
 
-## Phase 1: Core Foundation
+Phases 1-6 are now implemented. Phase 7 (Future UI) remains.
+
+## Phase 1: Core Foundation ✅
 
 ```text
 project init
@@ -3265,37 +3658,44 @@ file storage
 state manager
 event store
 basic CLI
+SQLite database manager
 ```
 
 ---
 
-## Phase 2: Rules and Planning
+## Phase 2: Rules and Planning ✅
 
 ```text
 rule source config
 rule loader
 rules-context.md
 simple planner
+AI planner with 8 provider types (OpenAI, Anthropic, Gemini, Mistral, Azure, Ollama, OpenAI-compatible, Custom)
+internal AI planner with JSON mode and streaming
 tasks.json
 plan.md
 ```
 
 ---
 
-## Phase 3: Execution
+## Phase 3: Execution ✅
 
 ```text
 context pack builder
+planner-context-builder
 shell executor
 command executor
+manual executor
+executor registry and presets
 real-time log streaming
-task lifecycle
+task lifecycle with steps
 run lifecycle
+hook system
 ```
 
 ---
 
-## Phase 4: Validation and Retry
+## Phase 4: Validation and Retry ✅
 
 ```text
 validation engine
@@ -3303,35 +3703,43 @@ file validator
 artifact validator
 command validator
 process validator
+content validator
+acceptance criteria validator
+resource guard
 retry context pack
-retry command
+retry command with interactive approval
 ```
 
 ---
 
-## Phase 5: Resume and Safety
+## Phase 5: Resume and Safety ✅
 
 ```text
 resume command
 interrupted task detection
 command classifier
 approval manager
+interactive task approval (manual mode)
 secret redaction
+secret store (~/.flowtask/secrets.json)
+credential resolver
 timeout control
 ```
 
 ---
 
-## Phase 6: Better UX
+## Phase 6: Better UX ✅
 
 ```text
 status tables
 task tables
-log follow mode
+log follow mode (ring buffer)
 inspect view
 doctor command
 clean command
 final report
+provider health checks
+workflow management commands
 ```
 
 ---
@@ -3370,11 +3778,9 @@ artifact storage
 final report generator
 ```
 
-Do not start with cloud, database, or UI.
+The CLI runtime has been built. The SQLite database is now implemented and integrated. Cloud sync, web UI, and collaboration remain future concerns.
 
-Build the CLI runtime first.
-
-The MVP is successful when this works reliably:
+The core runtime is successful when this works reliably:
 
 ```bash
 flowtask init

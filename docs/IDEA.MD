@@ -2,7 +2,7 @@
 
 ## Full Product Idea Document
 
-Version: 1.0
+Version: 2.0
 Document Type: Product Idea Document
 Focus: Product concept, user value, positioning, core behavior, and future direction
 
@@ -73,9 +73,9 @@ FlowTask turns AI work from a hidden chat experience into a visible execution pr
 
 # 5. Mission
 
-FlowTask’s mission is to help users control AI work better.
+FlowTask helps users control AI work better.
 
-It should make AI execution:
+It makes AI execution:
 
 - Clear
 - Trackable
@@ -89,6 +89,10 @@ It should make AI execution:
 FlowTask is not trying to replace AI coding tools.
 
 FlowTask orchestrates them.
+
+### Current Status
+
+FlowTask is a fully built and operational CLI. It has 112 test files with over 1,350 tests, uses SQLite (better-sqlite3) for persistent state, and implements the full pipeline from prompt to validated result. All core features described in this document are implemented and working.
 
 ---
 
@@ -165,7 +169,7 @@ The user should be able to retry only task 4.
 
 ---
 
-## 7.4 AI Says “Done” Is Not Enough
+## 7.4 AI Says "Done" Is Not Enough
 
 AI may say the task is complete, but the result may still be wrong.
 
@@ -175,9 +179,9 @@ For documentation tasks, the required document may be missing.
 
 For test tasks, tests may still fail.
 
-FlowTask should not trust only AI’s final message.
+FlowTask does not trust only AI's final message.
 
-FlowTask should trust evidence.
+FlowTask trusts evidence.
 
 Evidence includes:
 
@@ -213,7 +217,7 @@ Runs:
 
 Without project-level history, users cannot easily review what AI did before.
 
-FlowTask should keep a clear history of all AI runs in a project.
+FlowTask keeps a clear history of all AI runs in a project.
 
 ---
 
@@ -368,9 +372,9 @@ Use TypeScript strict mode.
 
 ---
 
-# 11. FlowTask’s Role
+# 11. FlowTask's Role
 
-FlowTask does not directly code in the MVP.
+FlowTask does not directly code.
 
 FlowTask is the orchestrator.
 
@@ -490,7 +494,7 @@ FlowTask helps users answer:
 
 # 14. Rule System
 
-FlowTask should be rule-driven.
+FlowTask is rule-driven.
 
 Prompt creates the work.
 
@@ -500,7 +504,7 @@ Rules control how the work is planned, executed, validated, and reported.
 
 ## 14.1 Default Rule Folder
 
-FlowTask can have its own rule folder:
+FlowTask has its own rule folder:
 
 ```text
 .flowtask/rules/
@@ -522,7 +526,7 @@ output.md
 
 ## 14.2 Configurable Rule Sources
 
-FlowTask should not force users to store rules only in `.flowtask/rules`.
+FlowTask does not force users to store rules only in `.flowtask/rules`.
 
 Many projects already have rule files.
 
@@ -539,7 +543,7 @@ docs/CONTRIBUTING.md
 docs/DEVELOPMENT.md
 ```
 
-FlowTask should allow users to configure where to read rules from.
+FlowTask allows users to configure where to read rules from.
 
 Example:
 
@@ -557,7 +561,7 @@ FlowTask reads:
 
 ## 14.3 Rule Loading Flow
 
-Before generating tasks, FlowTask should:
+Before generating tasks, FlowTask:
 
 ```text
 1. Load FlowTask config
@@ -568,13 +572,13 @@ Before generating tasks, FlowTask should:
 6. Generate tasks
 ```
 
-Before executing each task, FlowTask should also pass relevant rules to the AI CLI tool.
+Before executing each task, FlowTask also passes relevant rules to the AI CLI tool.
 
 ---
 
 ## 14.4 Rule Priority
 
-Rule priority should be:
+Rule priority is:
 
 ```text
 1. Built-in FlowTask safety rules
@@ -598,7 +602,7 @@ Print environment secrets
 Disable all tests
 ```
 
-FlowTask should block it.
+FlowTask blocks it.
 
 ---
 
@@ -606,19 +610,19 @@ FlowTask should block it.
 
 Validation is one of the most important parts of FlowTask.
 
-FlowTask should never trust only this:
+FlowTask never trusts only this:
 
 ```text
 AI says done.
 ```
 
-FlowTask should trust evidence.
+FlowTask trusts evidence.
 
 ---
 
 ## 15.1 Task Stop Condition
 
-A task can be marked as done only when required validation checks pass.
+A task is marked as done only when required validation checks pass.
 
 A task is not completed just because the AI CLI exits successfully.
 
@@ -660,7 +664,7 @@ A run fails when:
 
 ## 15.3 Acceptance Criteria
 
-Each task should have acceptance criteria.
+Each task has acceptance criteria.
 
 Example:
 
@@ -679,11 +683,23 @@ This helps FlowTask know when a task is actually complete.
 
 ---
 
+## 15.4 Validation Engine
+
+FlowTask includes a built-in validation engine with the following validators:
+
+- Process validator (exit code checks)
+- File validator (file existence, content checks)
+- Command validator (custom validation command execution)
+- Acceptance criteria validator
+- Content validator (regex pattern matching in output)
+
+---
+
 # 16. Retry Feedback Loop
 
-When validation fails, FlowTask should not restart the whole run.
+When validation fails, FlowTask does not restart the whole run.
 
-It should retry the failed task.
+It retries the failed task.
 
 Example:
 
@@ -700,7 +716,7 @@ Retry:
 Send error back to AI CLI and ask it to fix only task 5.
 ```
 
-Retry prompt should include:
+Retry prompt includes:
 
 - Current task
 - Previous attempt summary
@@ -712,15 +728,19 @@ Retry prompt should include:
 
 If max retries are reached, FlowTask marks the task as failed and stops the run.
 
+### Interactive Retry Approval
+
+When maxRetries is exhausted, FlowTask prompts the user interactively (TTY only) before additional retries. If the user approves, the retry counter resets. In non-TTY or auto modes, retries skip automatically.
+
 ---
 
 # 17. Context Pack
 
-Before calling an AI CLI tool, FlowTask should prepare a context pack.
+Before calling an AI CLI tool, FlowTask prepares a context pack.
 
 The context pack gives the AI CLI enough information to do the task correctly.
 
-It should include:
+It includes:
 
 ```text
 Original prompt
@@ -740,7 +760,7 @@ This prevents the AI CLI from losing context.
 
 # 18. Task Prompt Generation
 
-FlowTask should not send only a short task title to the AI CLI.
+FlowTask does not send only a short task title to the AI CLI.
 
 Bad:
 
@@ -785,7 +805,7 @@ This improves task quality.
 
 # 19. Run Modes
 
-FlowTask should support different run modes.
+FlowTask supports different run modes.
 
 ## 19.1 Auto Mode
 
@@ -802,6 +822,8 @@ User approves each task before execution.
 ```text
 Good for careful control.
 ```
+
+In TTY environments, task approval prompts happen inline. Non-TTY environments fall back to pause-and-wait behavior.
 
 ## 19.3 Plan-Only Mode
 
@@ -831,7 +853,7 @@ Good for development and troubleshooting.
 
 # 20. Approval System
 
-Some actions are risky and should require approval.
+Some actions are risky and require approval.
 
 Examples:
 
@@ -845,7 +867,7 @@ Change git history
 Read sensitive files
 ```
 
-FlowTask should pause and ask:
+FlowTask pauses and asks:
 
 ```text
 Approval required
@@ -862,7 +884,7 @@ This gives the user control over risky actions.
 
 # 21. Safety Rules
 
-FlowTask should have built-in safety rules.
+FlowTask has built-in safety rules with command classification.
 
 Safe actions can run automatically:
 
@@ -897,15 +919,17 @@ Disable tests
 Remove security checks
 ```
 
+Command output also performs secret redaction to prevent credential leakage.
+
 ---
 
 # 22. Logs and Observability
 
 Logs are core to FlowTask.
 
-Users should be able to see real-time output from the AI CLI tool.
+Users can see real-time output from the AI CLI tool.
 
-FlowTask should show:
+FlowTask shows:
 
 ```text
 Current run
@@ -924,7 +948,7 @@ This makes AI work visible instead of hidden.
 
 # 23. Resume
 
-FlowTask should save state continuously.
+FlowTask saves state continuously.
 
 If the terminal closes, the process crashes, or the AI CLI stops, the user can resume.
 
@@ -934,17 +958,19 @@ Example:
 flowtask resume
 ```
 
-FlowTask should read saved state and continue from the last safe point.
+FlowTask reads saved state and continues from the last safe point.
 
-Resume should not depend on memory.
+Resume does not depend on memory.
 
-It should depend on saved files and events.
+It depends on saved files and events.
+
+FlowTask uses a checkpoint service for precise resume positioning and an event store (SQLite + JSONL) for durable state persistence.
 
 ---
 
 # 24. Project-Level History
 
-FlowTask should keep a history of all runs inside a project.
+FlowTask keeps a history of all runs inside a project.
 
 Example:
 
@@ -964,9 +990,9 @@ This gives the user a long-term record of AI-assisted work.
 
 # 25. Final Report
 
-At the end of every run, FlowTask should generate a final report.
+At the end of every run, FlowTask generates a final report.
 
-The final report should include:
+The final report includes:
 
 ```text
 Original prompt
@@ -1200,13 +1226,15 @@ User
 
 # 31. MVP Idea
 
-The MVP should prove one thing:
+The MVP set out to prove one thing:
 
 ```text
 Can FlowTask turn a prompt into tasks, execute them through an AI CLI, save state, show logs, validate results, and resume/retry when needed?
 ```
 
-MVP features:
+### Implemented Features
+
+All original MVP features are now built and operational:
 
 ```text
 Initialize project
@@ -1216,14 +1244,40 @@ Generate task list
 Call AI CLI executor
 Show progress
 Stream logs
-Save state
-Validate results
-Retry failed task
-Resume interrupted run
+Save state via SQLite (better-sqlite3)
+Validate results with validation engine
+Retry failed task with interactive approval
+Resume interrupted run via checkpoint service
 Generate final report
 ```
 
-The MVP should not include:
+### Additional Features Beyond MVP
+
+Beyond the original MVP scope, the following features have been implemented:
+
+```text
+Step-level editing and approval
+Workflow management (list, show, diff, apply, add, remove, reorder, edit, replan)
+Interactive retry approval (TTY prompt when maxRetries exhausted)
+Interactive task approval in manual mode (inline TTY prompts)
+8 AI provider types: OpenAI, Anthropic, Gemini, Mistral, Azure OpenAI, Ollama, OpenAI-Compatible, Custom
+AI provider response_format fallback, SSE/NDJSON streaming, health checks
+Custom provider registration API
+Lifecycle hooks (beforeRun, afterRun, beforeTask, afterTask, beforeRetry, afterRetry, onFailure)
+Checkpoint service for precise resume
+Event store (SQLite + JSONL)
+Quality gate runner
+Use case detection + task templates
+Secret store + credential resolver for API key management
+Git snapshots (before/after run)
+Project modes (development, writing, research, general)
+Planner modes (simple, ai, auto) with fallback chain
+Validation engine with process, file, command, acceptance criteria, content validators
+Executor adapters: shell, command, manual
+Command safety classification (safe, risky, blocked) with secret redaction
+```
+
+The original MVP exclusions remain unchanged:
 
 ```text
 Cloud sync
@@ -1257,11 +1311,9 @@ Validation status
 
 ---
 
-## 32.2 Templates
+## 32.2 Templates (Basic)
 
-Users can create reusable task flows.
-
-Examples:
+Basic task templates are implemented via use case detection. Future improvements can include user-created reusable templates:
 
 ```text
 New feature template
@@ -1290,11 +1342,9 @@ What still needs review
 
 ---
 
-## 32.4 Advanced Approval System
+## 32.4 Advanced Approval Policies
 
-FlowTask can support approval policies.
-
-Examples:
+FlowTask supports interactive approval. Future work can add configurable policies:
 
 ```text
 Always approve dependency installation
@@ -1344,7 +1394,7 @@ Private AI provider gateway
 
 ## 33.1 Free Core
 
-The basic FlowTask CLI can be free.
+The basic FlowTask CLI is free.
 
 Free features:
 
@@ -1488,7 +1538,7 @@ It does not try to replace AI coding tools.
 
 It orchestrates them.
 
-The first version should stay simple:
+The product is simple:
 
 ```text
 Prompt in.
