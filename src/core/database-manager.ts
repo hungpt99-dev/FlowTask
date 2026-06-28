@@ -11,7 +11,7 @@ import type { FlowTaskEvent } from "../schemas/event.schema.js";
 import { ensureDir } from "../utils/fs.js";
 import { now } from "../utils/time.js";
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 const SCHEMA_VERSION_TABLE = `CREATE TABLE IF NOT EXISTS schema_version (
   version INTEGER PRIMARY KEY,
@@ -137,6 +137,7 @@ const MIGRATIONS: string[] = [
   CREATE INDEX IF NOT EXISTS idx_events_time ON events(time);
   CREATE INDEX IF NOT EXISTS idx_events_type ON events(type);
   CREATE INDEX IF NOT EXISTS idx_events_run_id ON events(run_id);`,
+  `ALTER TABLE steps ADD COLUMN expected_result TEXT;`,
 ];
 
 export interface DbStatus {
@@ -366,9 +367,9 @@ export class DatabaseManager {
         `INSERT OR REPLACE INTO steps
          (step_id, task_id, run_id, title, description, type, command,
           depends_on, status, requires_approval, exit_code,
-          output_summary, "order", started_at, finished_at,
+          output_summary, expected_result, "order", started_at, finished_at,
           created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         step.id,
@@ -383,6 +384,7 @@ export class DatabaseManager {
         step.requiresApproval ? 1 : 0,
         step.exitCode ?? null,
         null,
+        step.expectedResult ?? null,
         step.order,
         step.startedAt ?? null,
         step.finishedAt ?? null,
@@ -733,6 +735,7 @@ function rowToStep(row: Record<string, unknown>): Step {
     type: (row.type as Step["type"]) ?? "command",
     command: (row.command as string) ?? undefined,
     status: (row.status as Step["status"]) ?? "pending",
+    expectedResult: (row.expected_result as string) ?? undefined,
     requiresApproval: (row.requires_approval as number) === 1,
     exitCode: (row.exit_code as number) ?? undefined,
     order: (row.order as number) ?? 0,

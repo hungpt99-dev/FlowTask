@@ -7,6 +7,7 @@ import { FileValidator } from "./file-validator.js";
 import { CommandValidator } from "./command-validator.js";
 import { AcceptanceCriteriaValidator } from "./acceptance-criteria-validator.js";
 import { ContentValidator } from "./content-validator.js";
+import { OutcomeComparisonValidator } from "./outcome-comparison-validator.js";
 import { now } from "../utils/time.js";
 
 export interface ValidateTaskInput {
@@ -21,6 +22,8 @@ export class ValidationEngine {
   private commandValidator: CommandValidator;
   private acceptanceCriteriaValidator: AcceptanceCriteriaValidator;
   private contentValidator: ContentValidator;
+  private outcomeComparisonValidator: OutcomeComparisonValidator;
+  private adaptiveValidation: boolean;
 
   constructor(config?: FlowTaskConfig) {
     this.processValidator = new ProcessValidator();
@@ -28,6 +31,8 @@ export class ValidationEngine {
     this.commandValidator = new CommandValidator(config);
     this.acceptanceCriteriaValidator = new AcceptanceCriteriaValidator();
     this.contentValidator = new ContentValidator();
+    this.outcomeComparisonValidator = new OutcomeComparisonValidator();
+    this.adaptiveValidation = config?.validation?.adaptiveValidation ?? true;
   }
 
   async validateTask(input: ValidateTaskInput): Promise<ValidationResult> {
@@ -72,6 +77,15 @@ export class ValidationEngine {
       checks.push(...criteriaChecks);
     }
 
+    if (input.task.expectedResult) {
+      const outcomeCheck = await this.outcomeComparisonValidator.validate(
+        input.task.expectedResult,
+        input.executorResult,
+        input.projectRoot,
+      );
+      checks.push(outcomeCheck);
+    }
+
     if (checks.length === 0) {
       return {
         taskId: input.task.id,
@@ -79,6 +93,10 @@ export class ValidationEngine {
         checks: [],
         createdAt: now(),
       };
+    }
+
+    if (input.task.expectedResult && this.adaptiveValidation) {
+      return this.determineAdaptiveResult(input.task.id, checks);
     }
 
     const allPassed = checks.every((c) => c.status === "passed");
@@ -92,6 +110,47 @@ export class ValidationEngine {
     return {
       taskId: input.task.id,
       status: finalStatus,
+      checks,
+      createdAt: now(),
+    };
+  }
+
+  private determineAdaptiveResult(taskId: string, checks: ValidationCheck[]): ValidationResult {
+    const outcomeCheck = checks.find((c) => c.type === "outcome_comparison");
+    const otherChecks = checks.filter((c) => c.type !== "outcome_comparison");
+    const otherFailed = otherChecks.some((c) => c.status === "failed");
+
+    if (outcomeCheck) {
+      let finalStatus: ValidationResult["status"];
+
+      switch (outcomeCheck.status) {
+        case "passed":
+          finalStatus = otherFailed ? "warning" : "passed";
+          break;
+        case "warning":
+          finalStatus = otherFailed ? "failed" : "warning";
+          break;
+        case "failed":
+          finalStatus = "failed";
+          break;
+        default:
+          finalStatus = outcomeCheck.status;
+      }
+
+      return {
+        taskId,
+        status: finalStatus,
+        checks,
+        createdAt: now(),
+      };
+    }
+
+    const allPassed = checks.every((c) => c.status === "passed");
+    const anyFailed = checks.some((c) => c.status === "failed");
+
+    return {
+      taskId,
+      status: anyFailed ? "failed" : allPassed ? "passed" : "warning",
       checks,
       createdAt: now(),
     };

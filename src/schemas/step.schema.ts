@@ -23,6 +23,7 @@ export const StepSchema = z.object({
   type: StepTypeSchema.default("command"),
   command: z.string().optional(),
   status: StepStatusSchema,
+  expectedResult: z.string().optional(),
   requiresApproval: z.boolean().default(false),
   approvalReason: z.string().optional(),
   exitCode: z.number().int().optional(),

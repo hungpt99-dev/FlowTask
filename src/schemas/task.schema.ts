@@ -39,6 +39,7 @@ export const TaskSchema = z.object({
   dependsOn: z.array(z.string()).default([]),
   acceptanceCriteria: z.array(z.string()).default([]),
   validation: ValidationConfigSchema.optional(),
+  expectedResult: z.string().optional(),
   retryCount: z.number().int().min(0).default(0),
   maxRetries: z.number().int().min(0).default(2),
   createdAt: z.string().datetime(),

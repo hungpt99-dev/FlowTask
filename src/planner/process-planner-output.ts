@@ -83,6 +83,7 @@ export async function processPlannerOutput(
         requiredArtifacts: aiTask.validation?.requiredArtifacts ?? [],
         requireGitDiff: aiTask.validation?.requireGitDiff ?? false,
       },
+      expectedResult: aiTask.expectedResult,
       retryCount: 0,
       maxRetries: 2,
       createdAt: timestamp,

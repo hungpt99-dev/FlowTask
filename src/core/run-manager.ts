@@ -259,7 +259,7 @@ export class RunManager {
         t.status === "pending" &&
         t.dependsOn.every((dep) => {
           const depTask = tasks.find((dt) => dt.id === dep);
-          return depTask?.status === "done";
+          return depTask?.status === "done" || depTask?.status === "skipped";
         }),
     );
     return pending[0] ?? null;

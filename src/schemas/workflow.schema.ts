@@ -23,6 +23,7 @@ export const WorkflowTaskSchema = z.object({
   dependsOn: z.array(z.string()).default([]),
   acceptanceCriteria: z.array(z.string()).default([]),
   validation: WorkflowValidationConfigSchema.optional(),
+  expectedResult: z.string().optional(),
   maxRetries: z.number().int().min(0).optional(),
 });
 

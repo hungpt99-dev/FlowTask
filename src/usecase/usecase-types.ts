@@ -44,7 +44,8 @@ export const TaskTemplateSchema = z.object({
       title: z.string(),
       description: z.string(),
       executor: z.string().default("shell"),
-      acceptanceCriteria: z.array(z.string()),
+      acceptanceCriteria: z.array(z.string().min(1)).min(1),
+      expectedResult: z.string().optional(),
     }),
   ),
 });

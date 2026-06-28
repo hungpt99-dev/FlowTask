@@ -20,21 +20,32 @@ export class SimplePlanner implements Planner {
     const useCase = input.useCase ?? this.detector.detect(input.prompt);
     const template = getTaskTemplate(useCase.type);
 
-    const tasks: Task[] = template.tasks.map((t) => ({
-      id: generateTaskId(),
-      runId,
-      title: t.title,
-      description: t.description,
-      status: "pending" as const,
-      executor: t.executor,
-      dependsOn: [],
-      acceptanceCriteria: t.acceptanceCriteria,
-      validation: { commands: [], requiredArtifacts: [] },
-      retryCount: 0,
-      maxRetries: 2,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    }));
+    const tasks: Task[] = [];
+
+    for (const t of template.tasks) {
+      if (!t.acceptanceCriteria || t.acceptanceCriteria.length === 0) {
+        throw new Error(
+          `Task "${t.title}" in template "${template.title}" has no acceptance criteria defined. Each task must have at least one acceptance criterion.`,
+        );
+      }
+
+      tasks.push({
+        id: generateTaskId(),
+        runId,
+        title: t.title,
+        description: t.description,
+        status: "pending" as const,
+        executor: t.executor,
+        dependsOn: [],
+        acceptanceCriteria: t.acceptanceCriteria,
+        validation: { commands: [], requiredArtifacts: [] },
+        expectedResult: t.expectedResult,
+        retryCount: 0,
+        maxRetries: 2,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      });
+    }
 
     for (let i = 1; i < tasks.length; i++) {
       const prev = tasks[i - 1]!;

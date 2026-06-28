@@ -44,6 +44,17 @@ describe("StepSchema", () => {
     expect(result.data!.requiresApproval).toBe(false);
   });
 
+  it("should accept step with expectedResult", () => {
+    const result = StepSchema.safeParse({
+      ...validStep,
+      expectedResult: "Dependency is installed and confirmed via version check",
+    });
+    expect(result.success).toBe(true);
+    expect(result.data!.expectedResult).toBe(
+      "Dependency is installed and confirmed via version check",
+    );
+  });
+
   it("should reject step with empty id", () => {
     const result = StepSchema.safeParse({ ...validStep, id: "" });
     expect(result.success).toBe(false);

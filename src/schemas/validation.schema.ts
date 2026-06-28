@@ -20,6 +20,7 @@ export const ValidationCheckSchema = z.object({
     "ai_review",
     "acceptance_criteria",
     "content",
+    "outcome_comparison",
   ]),
   status: ValidationCheckStatusSchema,
   message: z.string().optional(),

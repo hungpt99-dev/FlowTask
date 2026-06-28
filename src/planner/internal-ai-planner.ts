@@ -352,6 +352,7 @@ export class InternalAiPlanner implements Planner {
                 requiredArtifacts: ["artifacts/task_001/report.md"],
                 requireGitDiff: false,
               },
+              expectedResult: "Describe what the expected outcome of this task looks like",
             },
           ],
         },
@@ -370,6 +371,9 @@ export class InternalAiPlanner implements Planner {
       "- requiredArtifacts must be relative file paths with a file extension like .md, .json, .txt, .log, .csv, .html, .svg.",
     );
     parts.push("- dependsOn may use previous task titles. FlowTask will normalize them.");
+    parts.push(
+      "- Each task should include expectedResult describing what the concrete outcome or evidence of completion will be.",
+    );
     parts.push("- Do not create tasks that install dependencies unless explicitly required.");
     parts.push("- Do not create unsafe commands.");
     parts.push("- Do not mark the final validation task as an AI task.");
@@ -473,6 +477,7 @@ export class InternalAiPlanner implements Planner {
                 requiredArtifacts: ["string"],
                 requireGitDiff: true,
               },
+              expectedResult: "string",
             },
           ],
         },
@@ -522,6 +527,9 @@ export class InternalAiPlanner implements Planner {
     parts.push("## Task Planning Rules");
     parts.push("- Break the work into logical sequential tasks.");
     parts.push("- Each task must have at least one acceptance criterion.");
+    parts.push(
+      "- Each task should include expectedResult describing the concrete outcome or evidence that will exist after the task completes.",
+    );
     parts.push("- Dependencies reference the exact `title` of previous tasks.");
     parts.push("- Maximum 15 tasks per run.");
     parts.push('- If the user asks to "update README", create a task plan for updating README.');

@@ -17,6 +17,7 @@ function createConfig(overrides?: Partial<FlowTaskConfig>): FlowTaskConfig {
     process: { gracefulStopTimeoutMs: 5000, forceKillTimeoutMs: 10000 },
     validation: {
       profile: "safe",
+      adaptiveValidation: true,
       concurrency: 1,
       timeoutMs: 300000,
       killGraceMs: 5000,
@@ -76,6 +77,7 @@ describe("ResourceGuard", () => {
     const config = createConfig({
       validation: {
         profile: "full",
+        adaptiveValidation: true,
         concurrency: 1,
         timeoutMs: 300000,
         killGraceMs: 5000,
@@ -109,6 +111,7 @@ describe("ResourceGuard", () => {
     const config = createConfig({
       validation: {
         profile: "full",
+        adaptiveValidation: true,
         concurrency: 1,
         timeoutMs: 300000,
         killGraceMs: 5000,

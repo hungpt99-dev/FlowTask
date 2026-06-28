@@ -39,6 +39,7 @@ function makeMinimalConfig(): FlowTaskConfig {
     quality: { enabledByDefault: false, commands: [] },
     validation: {
       profile: "safe",
+      adaptiveValidation: true,
       concurrency: 1,
       timeoutMs: 300000,
       killGraceMs: 5000,

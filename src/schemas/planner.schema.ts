@@ -25,6 +25,7 @@ export const AiPlannerTaskSchema = z.object({
   acceptanceCriteria: z.array(z.string().min(1)).min(1),
   commands: z.array(z.string()).optional().default([]),
   validation: PlannerTaskValidationSchema.optional().default({}),
+  expectedResult: z.string().optional(),
 });
 
 export const AiPlannerOutputSchema = z.object({

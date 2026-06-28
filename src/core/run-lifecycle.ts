@@ -652,7 +652,7 @@ export class RunLifecycle {
 
       const depsMet = task.dependsOn.every((depId) => {
         const depTask = tasks.find((t) => t.id === depId);
-        return depTask && depTask.status === "done";
+        return depTask && (depTask.status === "done" || depTask.status === "skipped");
       });
 
       if (!depsMet) {
@@ -1016,35 +1016,69 @@ export class RunLifecycle {
           executorResult,
         });
 
+        const hasOutcomeCheck = validationResult.checks.some(
+          (c) => c.type === "outcome_comparison",
+        );
+        const adaptiveLabel = hasOutcomeCheck ? "Adaptive validation" : "Validation";
+
         await this.eventStore.appendToRun(run.runId, {
           type: validationResult.status === "passed" ? "validation_passed" : "validation_failed",
           runId: run.runId,
           taskId: task.id,
-          details: { checkCount: validationResult.checks.length },
+          details: {
+            checkCount: validationResult.checks.length,
+            adaptiveValidation: hasOutcomeCheck,
+          },
         });
 
         const failedChecks = validationResult.checks.filter((c) => c.status === "failed");
+        const warningChecks = validationResult.checks.filter((c) => c.status === "warning");
         for (const check of failedChecks) {
-          console.log(picocolors.red(`  Validation failed: ${check.message}`));
+          console.log(picocolors.red(`  ${adaptiveLabel}: ${check.message}`));
           await this.logManager.writeTaskLog(
             run.runId,
             task.id,
             `Validation failed: ${check.message}`,
           );
         }
+        for (const check of warningChecks) {
+          const level = check.type === "outcome_comparison" ? picocolors.yellow : picocolors.dim;
+          console.log(level(`  ${check.message}`));
+          await this.logManager.writeTaskLog(
+            run.runId,
+            task.id,
+            `Validation warning: ${check.message}`,
+          );
+        }
 
         if (validationResult.status === "passed") {
-          console.log(picocolors.green(`  Status: done (all validations passed)`));
+          const message = hasOutcomeCheck
+            ? "Status: done (adaptive validation — outcome achieved)"
+            : "Status: done (all validations passed)";
+          console.log(picocolors.green(`  ${message}`));
           break;
         }
 
         if (validationResult.status === "warning" && failedChecks.length === 0) {
-          console.log(
-            picocolors.yellow(
-              "  Status: done (validations passed with warnings — acceptance criteria unverifiable)",
-            ),
-          );
+          const message = hasOutcomeCheck
+            ? "Status: done (outcome achieved with minor warnings)"
+            : "Status: done (validations passed with warnings)";
+          console.log(picocolors.yellow(`  ${message}`));
           break;
+        }
+
+        if (hasOutcomeCheck) {
+          const outcomeFailed = validationResult.checks.find(
+            (c) => c.type === "outcome_comparison" && c.status === "failed",
+          );
+          if (outcomeFailed) {
+            console.log(picocolors.red(`  Outcome not achieved: ${outcomeFailed.message}`));
+            await this.logManager.writeTaskLog(
+              run.runId,
+              task.id,
+              `Adaptive validation: expected outcome not achieved: ${task.expectedResult}`,
+            );
+          }
         }
 
         const isSpawnError = executorResult.exitCode === undefined;
@@ -1079,35 +1113,6 @@ export class RunLifecycle {
           task.executor = defaultExecutor;
           retryCount = 0;
           continue;
-        }
-
-        const allFileNotFound =
-          failedChecks.length > 0 &&
-          failedChecks.every((c) => c.message?.startsWith("File not found:"));
-        if (allFileNotFound && executorResult.exitCode === 0) {
-          console.log(
-            picocolors.yellow(
-              "  Executor succeeded but expected output files were not found. Task still accepted.",
-            ),
-          );
-          await this.logManager.writeTaskLog(
-            run.runId,
-            task.id,
-            "Validation: expected output files not found, but executor succeeded. Accepting task result.",
-          );
-          await this.runManager.updateTaskStatus(run.runId, task.id, "done");
-          await this.eventStore.appendToRun(run.runId, {
-            type: "task_completed",
-            runId: run.runId,
-            taskId: task.id,
-            message: `Task completed: ${task.title}`,
-          });
-          await this.logManager.writeTaskLog(
-            run.runId,
-            task.id,
-            "Task accepted despite missing output files",
-          );
-          return true;
         }
 
         retryCount++;
@@ -1213,14 +1218,18 @@ export class RunLifecycle {
       validationResult &&
       (validationResult.status === "passed" || validationResult.status === "warning")
     ) {
+      const hasOutcomeCheck = validationResult.checks.some((c) => c.type === "outcome_comparison");
+      const completedMsg = hasOutcomeCheck
+        ? "Task completed: expected outcome achieved"
+        : "Task completed successfully";
       await this.runManager.updateTaskStatus(run.runId, task.id, "done");
       await this.eventStore.appendToRun(run.runId, {
         type: "task_completed",
         runId: run.runId,
         taskId: task.id,
-        message: `Task completed: ${task.title}`,
+        message: completedMsg,
       });
-      await this.logManager.writeTaskLog(run.runId, task.id, "Task completed successfully");
+      await this.logManager.writeTaskLog(run.runId, task.id, completedMsg);
       return true;
     }
 
@@ -1232,11 +1241,20 @@ export class RunLifecycle {
       message: `Task failed: ${task.title}`,
     });
 
-    console.log(picocolors.red(`\n  Task failed: ${task.title}`));
+    const adaptivePrefix = validationResult?.checks.some((c) => c.type === "outcome_comparison")
+      ? "Adaptive validation failed"
+      : "Task failed";
+    console.log(picocolors.red(`\n  ${adaptivePrefix}: ${task.title}`));
     if (validationResult) {
       const failed = validationResult.checks.filter((c) => c.status === "failed");
       for (const check of failed) {
-        console.log(picocolors.red(`    ${check.message}`));
+        console.log(picocolors.red(`    ${check.type}: ${check.message}`));
+      }
+      const outcomeCheck = validationResult.checks.find((c) => c.type === "outcome_comparison");
+      if (outcomeCheck && outcomeCheck.details?.resultType) {
+        console.log(
+          picocolors.yellow(`    (detected task type: ${outcomeCheck.details.resultType})`),
+        );
       }
     }
 

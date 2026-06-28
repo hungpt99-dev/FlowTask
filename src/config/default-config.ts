@@ -74,6 +74,7 @@ export function generateDefaultConfig(): FlowTaskConfig {
     },
     validation: {
       profile: "safe",
+      adaptiveValidation: true,
       concurrency: 1,
       timeoutMs: 300000,
       killGraceMs: 5000,
