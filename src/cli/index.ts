@@ -93,7 +93,7 @@ program
   .description("Start a new run from a prompt")
   .allowUnknownOption(true)
   .argument("<prompt>", "The prompt describing the work to be done")
-  .option("--executor <name>", "Executor to use (shell, opencode, claude, codex)", "shell")
+  .option("--executor <name>", "Executor to use (shell, opencode, claude, codex)")
   .option("--mode <mode>", "Run mode: auto | manual | plan-only | dry-run | debug", "auto")
   .option("--planner <mode>", "Planner mode: simple | ai | auto", "auto")
   .option("--planner-provider <name>", "AI planner provider (e.g. openai, anthropic, gemini)")

@@ -282,6 +282,17 @@ export class RunLifecycle {
             `  Task "${t.title}" uses unknown executor "${t.executor}", falling back to "${defaultExecutor}"`,
           ),
         );
+      } else if (
+        t.executor === "shell" &&
+        (!t.validation?.commands || t.validation.commands.length === 0) &&
+        defaultExecutor !== "shell"
+      ) {
+        executor = defaultExecutor;
+        console.log(
+          picocolors.dim(
+            `  Task "${t.title}" has shell executor with no commands, using "${defaultExecutor}" instead`,
+          ),
+        );
       }
       return { ...t, executor, runId: run.runId };
     });

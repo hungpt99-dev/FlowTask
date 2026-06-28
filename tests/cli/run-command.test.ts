@@ -73,7 +73,7 @@ describe("runCommand", { timeout: 30000 }, () => {
     }
 
     expect(output).toContain("Planner:");
-    expect(output).toContain("Executor:");
+    expect(output).toContain("Default executor:");
   });
 
   it("should suppress verbose CLI header when --quiet is set", async () => {
@@ -86,7 +86,7 @@ describe("runCommand", { timeout: 30000 }, () => {
     }
 
     expect(output).not.toContain("Planner:");
-    expect(output).not.toContain("Executor:");
+    expect(output).not.toContain("Default executor:");
     expect(output).toContain("Plan-only mode");
   });
 

@@ -4,6 +4,7 @@ import { EventStore } from "../../core/event-store.js";
 import { ApiKeyValidator } from "../../ai/api-key-validator.js";
 import picocolors from "picocolors";
 import type { Run } from "../../schemas/run.schema.js";
+import type { FlowTaskConfig } from "../../schemas/config.schema.js";
 import { selectPlanner } from "./run-planner.js";
 import { getEventBus } from "../../ui/event-bus.js";
 import { formatErrorBlock } from "../../ui/formatters/error-format.js";
@@ -172,7 +173,7 @@ function printRunHeader(
   executor?: string,
   plannerMode?: string,
   plannerType?: string,
-  config?: { planner?: { provider?: string; model?: string; stream?: boolean } },
+  config?: FlowTaskConfig,
   out?: OutputOptions,
 ): void {
   if (out?.quiet) return;
@@ -189,6 +190,7 @@ function printRunHeader(
         console.log(picocolors.dim(`  Streaming: enabled`));
       }
     }
-    console.log(picocolors.dim(`  Executor: ${executor ?? "shell"}`));
+    const defaultExecutor = config?.defaultExecutor ?? "shell";
+    console.log(picocolors.dim(`  Default executor: ${executor ?? defaultExecutor}`));
   }
 }
