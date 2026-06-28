@@ -8,6 +8,7 @@ import { CommandValidator } from "./command-validator.js";
 import { AcceptanceCriteriaValidator } from "./acceptance-criteria-validator.js";
 import { ContentValidator } from "./content-validator.js";
 import { OutcomeComparisonValidator } from "./outcome-comparison-validator.js";
+import { OutputPlanValidator } from "./output-plan-validator.js";
 import { now } from "../utils/time.js";
 
 export interface ValidateTaskInput {
@@ -23,6 +24,7 @@ export class ValidationEngine {
   private acceptanceCriteriaValidator: AcceptanceCriteriaValidator;
   private contentValidator: ContentValidator;
   private outcomeComparisonValidator: OutcomeComparisonValidator;
+  private outputPlanValidator: OutputPlanValidator;
   private adaptiveValidation: boolean;
 
   constructor(config?: FlowTaskConfig) {
@@ -32,6 +34,7 @@ export class ValidationEngine {
     this.acceptanceCriteriaValidator = new AcceptanceCriteriaValidator();
     this.contentValidator = new ContentValidator();
     this.outcomeComparisonValidator = new OutcomeComparisonValidator();
+    this.outputPlanValidator = new OutputPlanValidator();
     this.adaptiveValidation = config?.validation?.adaptiveValidation ?? true;
   }
 

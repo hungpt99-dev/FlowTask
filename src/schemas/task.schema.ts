@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { OutputPlanSchema } from "./output-plan.schema.js";
 
 export const TaskStatusSchema = z.enum([
   "pending",
@@ -40,6 +41,7 @@ export const TaskSchema = z.object({
   acceptanceCriteria: z.array(z.string()).default([]),
   validation: ValidationConfigSchema.optional(),
   expectedResult: z.string().optional(),
+  outputPlan: OutputPlanSchema.optional(),
   retryCount: z.number().int().min(0).default(0),
   maxRetries: z.number().int().min(0).default(2),
   createdAt: z.string().datetime(),

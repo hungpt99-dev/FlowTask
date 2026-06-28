@@ -40,6 +40,7 @@ export class SimplePlanner implements Planner {
         acceptanceCriteria: t.acceptanceCriteria,
         validation: { commands: [], requiredArtifacts: [] },
         expectedResult: t.expectedResult,
+        outputPlan: t.outputPlan,
         retryCount: 0,
         maxRetries: 2,
         createdAt: timestamp,

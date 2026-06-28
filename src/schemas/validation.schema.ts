@@ -21,6 +21,7 @@ export const ValidationCheckSchema = z.object({
     "acceptance_criteria",
     "content",
     "outcome_comparison",
+    "output_plan",
   ]),
   status: ValidationCheckStatusSchema,
   message: z.string().optional(),

@@ -353,6 +353,15 @@ export class InternalAiPlanner implements Planner {
                 requireGitDiff: false,
               },
               expectedResult: "Describe what the expected outcome of this task looks like",
+              outputPlan: [
+                {
+                  action: "create | modify | delete",
+                  target: "path/to/output/file.md",
+                  description: "Description of what this output is",
+                  validationMethod:
+                    "file_exists | file_diff | file_content | command_output | test | ai_review | manual",
+                },
+              ],
             },
           ],
         },
@@ -378,6 +387,15 @@ export class InternalAiPlanner implements Planner {
     parts.push("- Do not create unsafe commands.");
     parts.push("- Do not mark the final validation task as an AI task.");
     parts.push("");
+    parts.push(
+      "- Each task should include an `outputPlan` array listing expected outputs (files, artifacts) with action type, target path, description, and validation method.",
+    );
+    parts.push(
+      '- Use validationMethod "file_exists" for newly created files, "file_diff" for modified files, and "file_content" when specific file content must be checked.',
+    );
+    parts.push(
+      "- For tasks that produce no files (e.g., running validation), set outputPlan to an empty array.",
+    );
 
     if (useCase && useCase.type !== "general") {
       const hint = this.getUseCaseHint(useCase.type);
@@ -478,6 +496,15 @@ export class InternalAiPlanner implements Planner {
                 requireGitDiff: true,
               },
               expectedResult: "string",
+              outputPlan: [
+                {
+                  action: "create | modify | delete",
+                  target: "path/to/output/file.md",
+                  description: "string",
+                  validationMethod:
+                    "file_exists | file_diff | file_content | command_output | test | ai_review | manual",
+                },
+              ],
             },
           ],
         },
@@ -538,6 +565,12 @@ export class InternalAiPlanner implements Planner {
     parts.push('  "shell" for read-only/file operations, "opencode" or other for creative work.');
     parts.push("- Set commands only when executor is shell and the command is safe.");
     parts.push("- requiredArtifacts must be relative file paths with file extensions.");
+    parts.push(
+      "- Each task should include an `outputPlan` array listing expected outputs with action type (create/modify/delete), target path, description, and validation method.",
+    );
+    parts.push(
+      '- Use validationMethod "file_exists" for newly created files, "file_diff" for modified files, "file_content" when specific content must be checked.',
+    );
 
     return parts.join("\n");
   }

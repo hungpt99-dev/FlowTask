@@ -102,7 +102,22 @@ export class PlannerContextBuilder {
         "requiredFiles": ["src/generated/output.ts"],
         "requiredArtifacts": [],
         "requireGitDiff": false
-      }
+      },
+      "expectedResult": "Describe what the expected outcome of this task looks like",
+      "outputPlan": [
+        {
+          "action": "create",
+          "target": "src/generated/output.ts",
+          "description": "Generated output file with implementation",
+          "validationMethod": "file_exists"
+        },
+        {
+          "action": "modify",
+          "target": "src/existing-file.ts",
+          "description": "Modified existing file",
+          "validationMethod": "file_diff"
+        }
+      ]
     }
   ]
 }\n`);
@@ -118,6 +133,12 @@ export class PlannerContextBuilder {
     );
     parts.push(
       '- Choose `executor` based on what the task needs: "shell" for read-only/file operations, "opencode" or other AI executors for creative work.\n',
+    );
+    parts.push(
+      "- Each task should include an `outputPlan` array listing expected outputs (files, artifacts) with action type (create/modify/delete), target path, description, and validation method.\n",
+    );
+    parts.push(
+      '- Use validationMethod "file_exists" for newly created files, "file_diff" for modified files, and "file_content" when specific content must be checked.\n',
     );
 
     parts.push("\n## Final Reminder — Read Carefully\n");

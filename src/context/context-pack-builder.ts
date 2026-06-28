@@ -64,6 +64,21 @@ export class ContextPackBuilder {
       parts.push("");
     }
 
+    if (input.task.outputPlan && input.task.outputPlan.length > 0) {
+      parts.push("## Expected Outputs\n");
+      for (const output of input.task.outputPlan) {
+        const actionLabel =
+          output.action === "create" ? "Create" : output.action === "modify" ? "Modify" : "Delete";
+        parts.push(`- **${actionLabel}** \`${output.target}\``);
+        if (output.description) {
+          parts.push(`  - ${output.description}`);
+        }
+        parts.push(`  - Validation: ${output.validationMethod}`);
+        parts.push("");
+      }
+      parts.push("");
+    }
+
     parts.push("## Instructions\n");
     parts.push("- Work only on this task.");
     parts.push("- Do not rewrite unrelated files.");

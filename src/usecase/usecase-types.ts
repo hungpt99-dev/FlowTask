@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { OutputPlanSchema } from "../schemas/output-plan.schema.js";
 
 export const UseCaseTypeSchema = z.enum([
   "coding",
@@ -46,6 +47,7 @@ export const TaskTemplateSchema = z.object({
       executor: z.string().default("shell"),
       acceptanceCriteria: z.array(z.string().min(1)).min(1),
       expectedResult: z.string().optional(),
+      outputPlan: OutputPlanSchema.optional(),
     }),
   ),
 });

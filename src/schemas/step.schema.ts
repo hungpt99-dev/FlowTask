@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { OutputPlanSchema } from "./output-plan.schema.js";
 
 export const StepStatusSchema = z.enum([
   "pending",
@@ -24,6 +25,7 @@ export const StepSchema = z.object({
   command: z.string().optional(),
   status: StepStatusSchema,
   expectedResult: z.string().optional(),
+  outputPlan: OutputPlanSchema.optional(),
   requiresApproval: z.boolean().default(false),
   approvalReason: z.string().optional(),
   exitCode: z.number().int().optional(),

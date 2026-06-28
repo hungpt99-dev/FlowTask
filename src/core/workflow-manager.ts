@@ -9,6 +9,7 @@ import {
   WorkflowFileSchema,
   WorkflowValidationResultSchema,
 } from "../schemas/workflow.schema.js";
+import type { OutputPlan } from "../schemas/output-plan.schema.js";
 import { writeTextFile, readTextFile } from "../utils/fs.js";
 import { getSnapshotsDir } from "../utils/paths.js";
 import { now } from "../utils/time.js";
@@ -84,6 +85,7 @@ export class WorkflowManager {
             requireGitDiff: t.validation.requireGitDiff,
           }
         : undefined,
+      outputPlan: t.outputPlan as OutputPlan | undefined,
       maxRetries: t.maxRetries !== 2 ? t.maxRetries : undefined,
     }));
 
@@ -186,6 +188,7 @@ export class WorkflowManager {
                 requireGitDiff: wt.validation.requireGitDiff,
               }
             : undefined,
+          outputPlan: wt.outputPlan,
           retryCount: 0,
           maxRetries: wt.maxRetries ?? 2,
           createdAt: nowStr,
@@ -545,6 +548,7 @@ export class WorkflowManager {
             requireGitDiff: wt.validation.requireGitDiff,
           }
         : existing.validation,
+      outputPlan: (wt.outputPlan ?? existing.outputPlan) as OutputPlan | undefined,
       maxRetries: wt.maxRetries ?? existing.maxRetries,
       updatedAt: now(),
     };

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { OutputPlanSchema } from "./output-plan.schema.js";
 
 export const PlannerRiskLevelSchema = z.enum([
   "safe",
@@ -26,6 +27,7 @@ export const AiPlannerTaskSchema = z.object({
   commands: z.array(z.string()).optional().default([]),
   validation: PlannerTaskValidationSchema.optional().default({}),
   expectedResult: z.string().optional(),
+  outputPlan: OutputPlanSchema.optional(),
 });
 
 export const AiPlannerOutputSchema = z.object({

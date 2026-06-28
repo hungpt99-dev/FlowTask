@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { OutputPlanSchema } from "./output-plan.schema.js";
 
 const INJECTION_PATTERNS = /\$\(|`/;
 
@@ -24,6 +25,7 @@ export const WorkflowTaskSchema = z.object({
   acceptanceCriteria: z.array(z.string()).default([]),
   validation: WorkflowValidationConfigSchema.optional(),
   expectedResult: z.string().optional(),
+  outputPlan: OutputPlanSchema.optional(),
   maxRetries: z.number().int().min(0).optional(),
 });
 

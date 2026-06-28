@@ -22,6 +22,19 @@ export class ManualExecutor implements Executor {
     if (input.task.description) {
       console.log(`Description: ${input.task.description}`);
     }
+    if (input.task.outputPlan && input.task.outputPlan.length > 0) {
+      console.log("\nExpected Outputs:");
+      for (const output of input.task.outputPlan) {
+        const actionLabel =
+          output.action === "create" ? "Create" : output.action === "modify" ? "Modify" : "Delete";
+        console.log(`  - ${actionLabel} ${output.target}`);
+        if (output.description) {
+          console.log(`    ${output.description}`);
+        }
+        console.log(`    Validation: ${output.validationMethod}`);
+      }
+      console.log("");
+    }
     console.log(`Context: ${input.contextPackPath}\n`);
     console.log("Press Enter when done, or type 'skip' to skip this task.");
 

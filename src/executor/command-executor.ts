@@ -1,4 +1,9 @@
-import { type Executor, type ExecutorInput, type ExecutorResult } from "./executor.js";
+import {
+  type Executor,
+  type ExecutorInput,
+  type ExecutorResult,
+  serializeOutputPlan,
+} from "./executor.js";
 import { spawn } from "node:child_process";
 import { now } from "../utils/time.js";
 import type { ExecutorEntry } from "../schemas/config.schema.js";
@@ -70,6 +75,11 @@ export class CommandExecutor implements Executor {
       }
     };
 
+    const outputPlanStr = serializeOutputPlan(input.task.outputPlan);
+    if (outputPlanStr) {
+      writeLog("info", `[output-plan] ${outputPlanStr}`);
+    }
+
     eventBus.emit({
       type: "executor_started",
       runId,
@@ -95,6 +105,7 @@ export class CommandExecutor implements Executor {
             FLOWTASK_CONTEXT_PACK: input.contextPackContent,
             FLOWTASK_TASK_ID: taskId,
             FLOWTASK_RUN_ID: runId,
+            ...(outputPlanStr ? { FLOWTASK_OUTPUT_PLAN: outputPlanStr } : {}),
           }),
           stdio: ["pipe", "pipe", "pipe"],
           signal: input.signal,

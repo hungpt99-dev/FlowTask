@@ -1,4 +1,9 @@
-import { type Executor, type ExecutorInput, type ExecutorResult } from "./executor.js";
+import {
+  type Executor,
+  type ExecutorInput,
+  type ExecutorResult,
+  serializeOutputPlan,
+} from "./executor.js";
 import { spawn } from "node:child_process";
 import { now } from "../utils/time.js";
 import { getShell, getShellCommandFlag } from "../utils/shell.js";
@@ -45,6 +50,11 @@ export class ShellExecutor implements Executor {
       }
     };
 
+    const outputPlanStr = serializeOutputPlan(input.task.outputPlan);
+    if (outputPlanStr) {
+      writeLog("info", `[output-plan] ${outputPlanStr}`);
+    }
+
     let command = commands.join(" && ");
 
     if (!input.allowShellMetachars) {
@@ -80,6 +90,7 @@ export class ShellExecutor implements Executor {
             FLOWTASK_TASK_ID: taskId,
             FLOWTASK_RUN_ID: runId,
             FLOWTASK_CONTEXT_PACK: input.contextPackContent,
+            ...(outputPlanStr ? { FLOWTASK_OUTPUT_PLAN: outputPlanStr } : {}),
           }),
           stdio: ["pipe", "pipe", "pipe"],
           signal: input.signal,

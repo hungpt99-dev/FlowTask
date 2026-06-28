@@ -1,4 +1,5 @@
 import type { Task } from "../schemas/task.schema.js";
+import type { OutputPlanItem } from "../schemas/output-plan.schema.js";
 
 export interface ExecutorInput {
   projectRoot: string;
@@ -11,14 +12,28 @@ export interface ExecutorInput {
   allowShellMetachars?: boolean;
 }
 
+export interface OutputPlanResult {
+  target: string;
+  action: "create" | "modify" | "delete";
+  description?: string;
+  produced: boolean;
+  evidence?: string;
+}
+
 export interface ExecutorResult {
   status: "done" | "failed" | "skipped" | "cancelled" | "timeout";
   exitCode?: number;
   output?: string;
   error?: string;
   artifacts?: string[];
+  outputPlanResults?: OutputPlanResult[];
   startedAt: string;
   finishedAt: string;
+}
+
+export function serializeOutputPlan(outputPlan: OutputPlanItem[] | undefined): string {
+  if (!outputPlan || outputPlan.length === 0) return "";
+  return JSON.stringify(outputPlan);
 }
 
 export interface Executor {
