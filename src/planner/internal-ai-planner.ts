@@ -1,25 +1,19 @@
 import path from "node:path";
 import picocolors from "picocolors";
 import { type Planner, type PlannerInput, type PlannerResult } from "./planner.js";
-import {
-  type AiPlannerOutput,
-  AiPlannerOutputSchema,
-  validateArtifactPaths,
-} from "../schemas/planner.schema.js";
-import { generateRunId, generateTaskId } from "../utils/ids.js";
-import { now } from "../utils/time.js";
-import { type Task } from "../schemas/task.schema.js";
+import { type AiPlannerOutput, validateArtifactPaths } from "../schemas/planner.schema.js";
+import { generateRunId } from "../utils/ids.js";
 import type { FlowTaskConfig } from "../schemas/config.schema.js";
 import { writeTextFile, ensureDir } from "../utils/fs.js";
-import { extractJsonObject } from "../utils/json-extractor.js";
 import { ProviderRegistry } from "../ai/provider-registry.js";
+import { processPlannerOutput } from "./process-planner-output.js";
 import type { AiProviderStreamChunk } from "../ai/ai-provider.js";
 import { getEventBus } from "../ui/event-bus.js";
 import { UseCaseDetector } from "../usecase/usecase-detector.js";
 import type { UseCaseDetection } from "../usecase/usecase-types.js";
 import { getUseCaseName } from "../usecase/task-templates.js";
 
-const VALID_EXECUTORS = new Set(["shell", "manual"]);
+const VALID_EXECUTORS = new Set(["shell", "manual", "opencode", "claude", "codex", "aider"]);
 
 export interface PlannerProviderMetadata {
   provider: string;
@@ -545,84 +539,18 @@ export class InternalAiPlanner implements Planner {
     input: PlannerInput,
     runId: string | undefined,
   ): Promise<PlannerResult> {
-    const extraction = extractJsonObject(rawOutput);
-
-    const parsed = JSON.parse(extraction.jsonText) as unknown;
-    const schemaResult = AiPlannerOutputSchema.safeParse(parsed);
-
-    if (!schemaResult.success) {
-      const errors = schemaResult.error.issues
-        .map((i) => `${i.path.join(".")}: ${i.message}`)
-        .join("; ");
-      const errorText = `Internal AI plan output validation failed: ${errors}`;
-
-      if (runId) {
-        const errorDir = path.join(input.projectRoot, ".flowtask", "runs", runId, "outputs");
-        await ensureDir(errorDir);
-        await writeTextFile(
-          path.join(errorDir, "internal-ai-planner-validation-error.txt"),
-          `${errorText}\n\nRaw output:\n${rawOutput}\n\nExtracted JSON:\n${extraction.jsonText}`,
-        );
-      }
-
-      throw new Error(errorText);
-    }
-
-    const data: AiPlannerOutput = schemaResult.data;
-
-    this.validateShellTasks(data);
-    this.validateArtifacts(data);
-    this.validateExecutors(data);
-
-    const runIdFinal = runId ?? generateRunId(input.prompt);
-    const timestamp = now();
-
-    const title = data.title || input.prompt.slice(0, 80).trim();
-
-    const taskMap = new Map<string, string>();
-    const tasks: Task[] = [];
-
-    for (const aiTask of data.tasks) {
-      const taskId = generateTaskId();
-      taskMap.set(aiTask.title, taskId);
-
-      const depTaskIds: string[] = (aiTask.dependsOn ?? []).map((dep) => {
-        const id = taskMap.get(dep);
-        if (!id) {
-          throw new Error(
-            `Internal AI plan task "${aiTask.title}" depends on unknown task "${dep}". Each dependency must reference the exact "title" of a previous task in the plan.`,
-          );
-        }
-        return id;
-      });
-
-      const resolvedExecutor = this.resolveExecutor(aiTask.executor);
-
-      tasks.push({
-        id: taskId,
-        runId: runIdFinal,
-        title: aiTask.title,
-        description: aiTask.description,
-        status: "pending",
-        executor: resolvedExecutor,
-        dependsOn: depTaskIds,
-        acceptanceCriteria: aiTask.acceptanceCriteria,
-        validation: {
-          commands: aiTask.validation?.commands ?? [],
-          requiredFiles: aiTask.validation?.requiredFiles ?? [],
-          requiredArtifacts: aiTask.validation?.requiredArtifacts ?? [],
-          requireGitDiff: aiTask.validation?.requireGitDiff ?? false,
-        },
-        retryCount: 0,
-        maxRetries: 2,
-        createdAt: timestamp,
-        updatedAt: timestamp,
-      });
-    }
-
-    const planMarkdown = `# Plan: ${title}\n\n## Summary\n\n${data.summary}\n\n## Tasks\n\n${tasks.map((t, i) => `${i + 1}. ${t.title}${t.dependsOn.length ? ` (depends on: ${t.dependsOn.map((d) => tasks.find((x) => x.id === d)?.title ?? d).join(", ")})` : ""}`).join("\n")}`;
-
-    return { title, planMarkdown, tasks };
+    return processPlannerOutput({
+      rawOutput,
+      input,
+      runId: runId ?? generateRunId(input.prompt),
+      validateExecutors: (data) => {
+        this.validateShellTasks(data);
+        this.validateArtifacts(data);
+        this.validateExecutors(data);
+      },
+      resolveExecutor: (taskExecutor) => this.resolveExecutor(taskExecutor),
+      getAvailableExecutors: () => [],
+    });
   }
 
   private validateShellTasks(data: AiPlannerOutput): void {
