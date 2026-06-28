@@ -15,72 +15,131 @@ import {
   extractOllamaDone,
   extractModel,
 } from "../src/stream.js";
-import type { StreamParseResult } from "../src/stream.js";
 
 describe("stream barrel module", () => {
-  it("exports LineBuffer", () => {
-    expect(LineBuffer).toBeDefined();
-    expect(LineBuffer).toBeInstanceOf(Function);
+  it("extracts OpenAI delta from choices", () => {
+    expect(extractOpenAiDelta({ choices: [{ delta: { content: "hello" } }] })).toBe("hello");
+    expect(extractOpenAiDelta({})).toBeNull();
+    expect(extractOpenAiDelta({ choices: [{ delta: {} }] })).toBeNull();
   });
 
-  it("exports stripAnsi", () => {
-    expect(stripAnsi).toBeDefined();
-    expect(stripAnsi).toBeInstanceOf(Function);
+  it("extracts OpenAI finish reason", () => {
+    expect(extractOpenAiFinishReason({ choices: [{ finish_reason: "stop" }] })).toBe("stop");
+    expect(extractOpenAiFinishReason({})).toBeNull();
   });
 
-  it("exports parseSseStream", () => {
-    expect(parseSseStream).toBeDefined();
-    expect(parseSseStream).toBeInstanceOf(Function);
+  it("extracts OpenAI usage", () => {
+    const result = extractOpenAiUsage({
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+    });
+    expect(result).toEqual({ inputTokens: 10, outputTokens: 5, totalTokens: 15 });
+    expect(extractOpenAiUsage({})).toBeUndefined();
   });
 
-  it("exports parseNdjsonStream", () => {
-    expect(parseNdjsonStream).toBeDefined();
-    expect(parseNdjsonStream).toBeInstanceOf(Function);
+  it("extracts Anthropic delta from content_block_delta", () => {
+    expect(
+      extractAnthropicDelta({
+        type: "content_block_delta",
+        delta: { type: "text_delta", text: "hi" },
+      }),
+    ).toBe("hi");
+    expect(extractAnthropicDelta({ type: "ping" })).toBeNull();
+    expect(
+      extractAnthropicDelta({ type: "content_block_delta", delta: { type: "other" } }),
+    ).toBeNull();
   });
 
-  it("exports StreamParseResult type", () => {
-    const _typeCheck: StreamParseResult | undefined = undefined;
-    expect(_typeCheck).toBeUndefined();
+  it("detects Anthropic done from message_stop or message_delta", () => {
+    expect(extractAnthropicDone({ type: "message_stop" })).toBe(true);
+    expect(extractAnthropicDone({ type: "message_delta" })).toBe(true);
+    expect(extractAnthropicDone({ type: "content_block_delta" })).toBe(false);
   });
 
-  it("exports extractOpenAiDelta", () => {
-    expect(extractOpenAiDelta).toBeInstanceOf(Function);
+  it("extracts Gemini delta from candidates parts", () => {
+    expect(
+      extractGeminiDelta({
+        candidates: [{ content: { parts: [{ text: "Hello " }, { text: "World" }] } }],
+      }),
+    ).toBe("Hello World");
+    expect(extractGeminiDelta({})).toBeNull();
   });
 
-  it("exports extractOpenAiFinishReason", () => {
-    expect(extractOpenAiFinishReason).toBeInstanceOf(Function);
+  it("extracts Gemini usage from usageMetadata", () => {
+    const result = extractGeminiUsage({
+      usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 10, totalTokenCount: 15 },
+    });
+    expect(result).toEqual({ inputTokens: 5, outputTokens: 10, totalTokens: 15 });
+    expect(extractGeminiUsage({})).toBeUndefined();
   });
 
-  it("exports extractOpenAiUsage", () => {
-    expect(extractOpenAiUsage).toBeInstanceOf(Function);
+  it("extracts Ollama delta from message content", () => {
+    expect(extractOllamaDelta({ message: { content: "hello" } })).toBe("hello");
+    expect(extractOllamaDelta({})).toBeNull();
   });
 
-  it("exports extractAnthropicDelta", () => {
-    expect(extractAnthropicDelta).toBeInstanceOf(Function);
+  it("detects Ollama done from done flag", () => {
+    expect(extractOllamaDone({ done: true })).toBe(true);
+    expect(extractOllamaDone({ done: false })).toBe(false);
+    expect(extractOllamaDone({})).toBe(false);
   });
 
-  it("exports extractAnthropicDone", () => {
-    expect(extractAnthropicDone).toBeInstanceOf(Function);
+  it("extracts model from data", () => {
+    expect(extractModel({ model: "gpt-4" })).toBe("gpt-4");
+    expect(extractModel({})).toBeUndefined();
   });
 
-  it("exports extractGeminiDelta", () => {
-    expect(extractGeminiDelta).toBeInstanceOf(Function);
+  it("parses SSE stream with parseSseStream", async () => {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"A"}}]}\n'));
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"B"}}]}\n'));
+        controller.enqueue(encoder.encode("data: [DONE]\n"));
+        controller.close();
+      },
+    });
+    const reader = stream.getReader();
+    const result = await parseSseStream(
+      reader,
+      (data, emit) => {
+        const delta = extractOpenAiDelta(data);
+        if (delta) emit({ textDelta: delta });
+        const reason = extractOpenAiFinishReason(data);
+        if (reason) emit({ textDelta: "" });
+        return {};
+      },
+      "openai",
+      "gpt-4",
+    );
+    expect(result.text).toBe("AB");
   });
 
-  it("exports extractGeminiUsage", () => {
-    expect(extractGeminiUsage).toBeInstanceOf(Function);
-  });
-
-  it("exports extractOllamaDelta", () => {
-    expect(extractOllamaDelta).toBeInstanceOf(Function);
-  });
-
-  it("exports extractOllamaDone", () => {
-    expect(extractOllamaDone).toBeInstanceOf(Function);
-  });
-
-  it("exports extractModel", () => {
-    expect(extractModel).toBeInstanceOf(Function);
+  it("parses NDJSON stream with parseNdjsonStream", async () => {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(JSON.stringify({ message: { content: "X" }, done: false }) + "\n"),
+        );
+        controller.enqueue(
+          encoder.encode(JSON.stringify({ message: { content: "Y" }, done: true }) + "\n"),
+        );
+        controller.close();
+      },
+    });
+    const reader = stream.getReader();
+    const result = await parseNdjsonStream(
+      reader,
+      (data, emit) => {
+        const content = extractOllamaDelta(data);
+        if (content) emit({ textDelta: content });
+        return { done: extractOllamaDone(data) };
+      },
+      "ollama",
+      "llama3.1",
+    );
+    expect(result.text).toBe("XY");
+    expect(result.model).toBe("llama3.1");
   });
 
   it("delegates stripAnsi correctly", () => {

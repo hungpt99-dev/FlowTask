@@ -1,11 +1,16 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import { AzureOpenAiProvider } from "../../src/ai/providers/azure-openai-provider.js";
 
+const originalFetch = global.fetch;
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
 describe("AzureOpenAiProvider", () => {
   let provider: AzureOpenAiProvider;
+
+  afterAll(() => {
+    global.fetch = originalFetch;
+  });
 
   beforeEach(() => {
     vi.clearAllMocks();

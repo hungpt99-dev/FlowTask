@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { parseSseStream, parseNdjsonStream, stripAnsi } from "../../src/utils/stream-parser.js";
+import { parseSseStream, parseNdjsonStream } from "../../src/utils/stream-parser.js";
+import { stripAnsi } from "../../src/utils/stream-lines.js";
 import { mockReadableStream } from "../../src/utils/test-streams.js";
 
 describe("parseSseStream", () => {

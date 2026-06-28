@@ -38,15 +38,10 @@ describe("runCommand", { timeout: 30000 }, () => {
   });
 
   it("should show error and exit when project not initialized", async () => {
-    try {
-      await runCommand("do something", {});
-      expect.unreachable("Should have thrown");
-    } catch (e) {
-      const err = e as Error;
-      expect(err.message).toContain("process.exit(1)");
-    }
+    await runCommand("do something", {});
     expect(output).toContain("not initialized");
     expect(output).toContain("flowtask init");
+    expect(process.exitCode).toBe(1);
   });
 
   it("should show run header and execute with simple planner", async () => {

@@ -124,7 +124,7 @@ describe("cleanCommand", () => {
 
     output = "";
     try {
-      await cleanCommand({});
+      await cleanCommand({ yes: true });
     } catch {
       // process.exit expected
     }

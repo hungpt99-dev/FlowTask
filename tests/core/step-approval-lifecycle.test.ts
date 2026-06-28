@@ -87,7 +87,7 @@ describe("Step Approval Integration in RunLifecycle", () => {
     expect(reqStep!.status).toBe("approved");
   });
 
-  it("should auto-approve pending_approval steps in non-TTY env", async () => {
+  it("should deny pending_approval steps in non-TTY env when approval required", async () => {
     const originalIsTTY = process.stdin.isTTY;
     process.stdin.isTTY = false as unknown as boolean;
     try {
@@ -108,7 +108,7 @@ describe("Step Approval Integration in RunLifecycle", () => {
 
       const steps = await stepManager.loadSteps(run.runId, "task_nontty");
       const approved = steps.find((s) => s.id === "step_nontty_001");
-      expect(approved!.status).toBe("approved");
+      expect(approved!.status).toBe("denied");
     } finally {
       process.stdin.isTTY = originalIsTTY;
     }

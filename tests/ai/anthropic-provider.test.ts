@@ -1,11 +1,16 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import { AnthropicProvider } from "../../src/ai/providers/anthropic-provider.js";
 
+const originalFetch = global.fetch;
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
 describe("AnthropicProvider", () => {
   let provider: AnthropicProvider;
+
+  afterAll(() => {
+    global.fetch = originalFetch;
+  });
 
   beforeEach(() => {
     vi.clearAllMocks();

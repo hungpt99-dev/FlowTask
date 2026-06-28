@@ -1,11 +1,16 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import { GeminiProvider } from "../../src/ai/providers/gemini-provider.js";
 
+const originalFetch = global.fetch;
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
 describe("GeminiProvider", () => {
   let provider: GeminiProvider;
+
+  afterAll(() => {
+    global.fetch = originalFetch;
+  });
 
   beforeEach(() => {
     vi.clearAllMocks();

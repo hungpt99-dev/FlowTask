@@ -145,7 +145,7 @@ describe("Approval Flow via RunLifecycle", () => {
     runManager = new RunManager(projectDir);
   });
 
-  it("should not execute waiting_approval tasks on continueRun", async () => {
+  it("should resume waiting_approval tasks on continueRun", async () => {
     const run = await runManager.createRun(projectId, "Manual run", "manual");
     await runManager.savePrompt(run.runId, "test prompt");
 
@@ -170,8 +170,7 @@ describe("Approval Flow via RunLifecycle", () => {
     const lifecycle = new RunLifecycle(projectDir, projectId, config);
     const result = await lifecycle.continueRun(run.runId);
 
-    expect(result.paused).toBe(false);
-    expect(result.success).toBe(true);
+    expect(result.paused).toBe(true);
 
     const loaded = await runManager.loadTasks(run.runId);
     const task = loaded.find((t) => t.id === "task_waiting");
