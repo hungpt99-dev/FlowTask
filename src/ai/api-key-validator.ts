@@ -69,9 +69,10 @@ export class ApiKeyValidator {
         provider: summary.name,
         type: summary.type,
         needsApiKey: true,
-        apiKeyAvailable: true,
-        valid: true,
-        message: `Provider "${summary.name}" (${summary.type}) — API key configured.`,
+        apiKeyAvailable: false,
+        valid: false,
+        message: `Provider "${summary.name}" (${summary.type}) — needs API key but no env var configured.`,
+        suggestion: `Set apiKeyEnv for "${summary.name}" in .flowtask/config.json, or run: flowtask setup --provider ${summary.name}`,
       };
     }
 
