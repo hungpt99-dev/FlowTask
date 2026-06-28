@@ -45,13 +45,15 @@ export async function runCommand(
   if (!initialized) {
     console.log(picocolors.red("FlowTask project not initialized."));
     console.log(picocolors.yellow("Run: flowtask init"));
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   const loadedProject = await manager.load(rootPath);
   if (!loadedProject) {
     console.log(picocolors.red("Failed to load project."));
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
   const project = loadedProject;
   const config = await manager.loadConfig(rootPath);
@@ -107,7 +109,8 @@ export async function runCommand(
         console.log(picocolors.yellow(`  ${keyResult.suggestion}`));
       }
       console.log(picocolors.dim(`  Or run with --planner simple to skip AI planning.\n`));
-      process.exit(1);
+      process.exitCode = 1;
+      return;
     }
   }
 
@@ -131,7 +134,7 @@ export async function runCommand(
     });
 
     if (!result.success) {
-      process.exit(1);
+      process.exitCode = 1;
     }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
@@ -141,7 +144,7 @@ export async function runCommand(
         { label: "Retry", command: `flowtask run "${prompt.slice(0, 40)}..."` },
       ]),
     );
-    process.exit(1);
+    process.exitCode = 1;
   } finally {
     unsubscribeRenderer();
     await lifecycle.flushLogs();

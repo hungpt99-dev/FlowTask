@@ -94,7 +94,7 @@ export async function retryCommand(
   const previousTaskLog = await runManager.loadTaskOutput(runId, taskId);
 
   const contextBuilder = new ContextPackBuilder();
-  const rulesContext = "";
+  const rulesContext = await runManager.loadRulesContext(runId);
   const completedTasks = tasks.filter((t) => t.status === "done");
 
   const retryPack = contextBuilder.build({

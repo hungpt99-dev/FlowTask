@@ -1,4 +1,5 @@
 import picocolors from "picocolors";
+import Enquirer from "enquirer";
 import { ProjectManager } from "../../core/project-manager.js";
 import { RunManager } from "../../core/run-manager.js";
 
@@ -6,6 +7,7 @@ export async function cleanCommand(options: {
   olderThan?: string;
   status?: string;
   dryRun?: boolean;
+  yes?: boolean;
 }): Promise<void> {
   const rootPath = process.cwd();
   const manager = new ProjectManager();
@@ -57,6 +59,25 @@ export async function cleanCommand(options: {
     }
     console.log(picocolors.dim("\nRun without --dry-run to actually delete."));
     process.exit(0);
+  }
+
+  if (!options.yes) {
+    const enquirer = new Enquirer();
+    let confirmed = false;
+    try {
+      const response = await enquirer.prompt({
+        type: "confirm" as const,
+        name: "confirm",
+        message: `Delete ${toDelete.length} run(s)? This cannot be undone.`,
+      });
+      confirmed = (response as Record<string, boolean>).confirm ?? false;
+    } catch {
+      confirmed = false;
+    }
+    if (!confirmed) {
+      console.log(picocolors.yellow("Clean cancelled."));
+      process.exit(0);
+    }
   }
 
   console.log(picocolors.yellow(`\nCleaning ${toDelete.length} run(s)...`));

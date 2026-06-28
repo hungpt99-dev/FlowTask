@@ -11,3 +11,4 @@ coverage/
 .flowtask/rules/
 test-results/
 temp/
+analysis/

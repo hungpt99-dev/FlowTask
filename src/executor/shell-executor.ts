@@ -75,7 +75,12 @@ export class ShellExecutor implements Executor {
       return await new Promise<ExecutorResult>((resolve) => {
         const child = spawn(getShell(), [getShellCommandFlag(), command], {
           cwd: input.projectRoot,
-          env: buildChildEnv({ ...input.env, FLOWTASK_TASK_ID: taskId, FLOWTASK_RUN_ID: runId }),
+          env: buildChildEnv({
+            ...input.env,
+            FLOWTASK_TASK_ID: taskId,
+            FLOWTASK_RUN_ID: runId,
+            FLOWTASK_CONTEXT_PACK: input.contextPackContent,
+          }),
           stdio: ["pipe", "pipe", "pipe"],
           signal: input.signal,
           shell: false,

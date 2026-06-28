@@ -8,6 +8,16 @@ export class ManualExecutor implements Executor {
 
   async execute(input: ExecutorInput): Promise<ExecutorResult> {
     const startedAt = now();
+
+    if (!process.stdin.isTTY) {
+      console.log("\n[manual-executor] Non-TTY mode detected, marking task as done.");
+      return {
+        status: "done",
+        startedAt,
+        finishedAt: now(),
+      };
+    }
+
     console.log(`\n=== Manual Task: ${input.task.title} ===`);
     if (input.task.description) {
       console.log(`Description: ${input.task.description}`);
@@ -31,7 +41,7 @@ export class ManualExecutor implements Executor {
         const inputStr = data.toString().trim();
         if (inputStr.toLowerCase() === "skip") {
           resolve({
-            status: "failed",
+            status: "skipped",
             error: "Skipped by user",
             startedAt,
             finishedAt: now(),

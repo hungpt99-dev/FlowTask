@@ -6,6 +6,8 @@ import type { ValidationResult } from "../schemas/validation.schema.js";
 import type { ExecutorResult } from "../executor/executor.js";
 import type { Planner } from "../planner/planner.js";
 import type { PlannerMode } from "../planner/planner-registry.js";
+import type { EventType } from "../schemas/event.schema.js";
+import { createRunEvent } from "../utils/event-factory.js";
 import { RunManager } from "./run-manager.js";
 import { StateManager } from "./state-manager.js";
 import { EventStore } from "./event-store.js";
@@ -161,24 +163,26 @@ export class RunLifecycle {
     if (usePlanner && (options?.plannerMode === "ai" || options?.plannerMode === "auto")) {
       const plannerType = this.config.planner?.type ?? "internal-ai";
       const isExternal = plannerType === "external-ai";
-      const startedEvent = isExternal ? "ai_planner_started" : "internal_ai_planner_started";
-      const passedEvent = isExternal
+      const startedEvent: EventType = isExternal
+        ? "ai_planner_started"
+        : "internal_ai_planner_started";
+      const passedEvent: EventType = isExternal
         ? "ai_planner_validation_passed"
         : "internal_ai_planner_validation_passed";
-      const failedEvent = isExternal
+      const failedEvent: EventType = isExternal
         ? "ai_planner_validation_failed"
         : "internal_ai_planner_validation_failed";
-      const repairFailedEvent = isExternal
+      const repairFailedEvent: EventType = isExternal
         ? "ai_planner_repair_failed"
         : "internal_ai_planner_repair_failed";
-      const fallbackEvent = isExternal
+      const fallbackEvent: EventType = isExternal
         ? "ai_planner_fallback_to_simple"
         : "internal_ai_planner_fallback_to_simple";
 
-      await this.eventStore.appendToRun(run.runId, {
-        type: startedEvent as never,
-        runId: run.runId,
-      });
+      await this.eventStore.appendToRun(
+        run.runId,
+        createRunEvent(startedEvent, { runId: run.runId }),
+      );
       const executors = this.config.executors ?? {};
       const availableExecutors = (
         await Promise.all(
@@ -202,19 +206,23 @@ export class RunLifecycle {
           availableExecutors,
           runId: run.runId,
         });
-        await this.eventStore.appendToRun(run.runId, {
-          type: passedEvent as never,
-          runId: run.runId,
-          message: `Planner created ${planResult.tasks.length} tasks`,
-        });
+        await this.eventStore.appendToRun(
+          run.runId,
+          createRunEvent(passedEvent, {
+            runId: run.runId,
+            message: `Planner created ${planResult.tasks.length} tasks`,
+          }),
+        );
         if (debug) console.log(picocolors.yellow(`[debug] Planner used`));
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : String(err);
-        await this.eventStore.appendToRun(run.runId, {
-          type: (errorMessage.includes("after repair") ? repairFailedEvent : failedEvent) as never,
-          runId: run.runId,
-          details: { error: errorMessage },
-        });
+        await this.eventStore.appendToRun(
+          run.runId,
+          createRunEvent(errorMessage.includes("after repair") ? repairFailedEvent : failedEvent, {
+            runId: run.runId,
+            details: { error: errorMessage },
+          }),
+        );
 
         if (options?.plannerMode === "ai") {
           console.log(picocolors.red(`\n  Planner failed: ${errorMessage}`));
@@ -226,11 +234,10 @@ export class RunLifecycle {
           throw err;
         }
 
-        await this.eventStore.appendToRun(run.runId, {
-          type: fallbackEvent as never,
-          runId: run.runId,
-          details: { error: errorMessage },
-        });
+        await this.eventStore.appendToRun(
+          run.runId,
+          createRunEvent(fallbackEvent, { runId: run.runId, details: { error: errorMessage } }),
+        );
 
         console.log(picocolors.yellow(`\n  Planner still returned invalid output after retry.`));
         console.log(
@@ -367,13 +374,14 @@ export class RunLifecycle {
         event.type === "executor_failed"
       ) {
         try {
-          const storeEvent = {
-            type: event.type,
-            runId: event.runId ?? run.runId,
-            taskId: "taskId" in event ? event.taskId : undefined,
-            details: { ...event },
-          } as never;
-          await this.eventStore.appendToRun(run.runId, storeEvent);
+          await this.eventStore.appendToRun(
+            run.runId,
+            createRunEvent(event.type as EventType, {
+              runId: event.runId ?? run.runId,
+              taskId: "taskId" in event ? event.taskId : undefined,
+              details: { ...event },
+            }),
+          );
         } catch {
           // persistence is non-critical
         }
@@ -390,8 +398,6 @@ export class RunLifecycle {
         updatedRun,
         tasksWithRunId,
       );
-
-      await this.gitService.takeAfterSnapshot(this.rootPath, run.runId);
 
       if (paused) {
         const pausedRun = await this.runManager.updateRunStatus(run.runId, "paused");
@@ -452,7 +458,13 @@ export class RunLifecycle {
         : await this.runManager.updateRunStatus(run.runId, "failed");
 
       const finalTasks = await this.runManager.loadTasks(run.runId);
-      const report = new ReportGenerator().generate(finalRun, finalTasks);
+      const events = await this.eventStore.readRunEvents(finalRun.runId);
+      const report = await new ReportGenerator().generate(
+        finalRun,
+        finalTasks,
+        this.rootPath,
+        events,
+      );
       const reportMarkdown = new ReportGenerator().generateMarkdown(report);
       await this.runManager.saveFinalReport(run.runId, reportMarkdown);
 
@@ -493,7 +505,10 @@ export class RunLifecycle {
     await this.processManager.stop(this.rootPath, runId);
 
     const tasks = await this.runManager.loadTasks(runId);
-    const pending = tasks.filter((t) => t.status === "pending" || t.status === "interrupted");
+    const pending = tasks.filter(
+      (t) =>
+        t.status === "pending" || t.status === "interrupted" || t.status === "waiting_approval",
+    );
 
     if (pending.length === 0) {
       return { success: true, paused: false };
@@ -515,13 +530,14 @@ export class RunLifecycle {
         event.type === "executor_failed"
       ) {
         try {
-          const storeEvent = {
-            type: event.type,
-            runId: event.runId ?? runId,
-            taskId: "taskId" in event ? event.taskId : undefined,
-            details: { ...event },
-          } as never;
-          await this.eventStore.appendToRun(runId, storeEvent);
+          await this.eventStore.appendToRun(
+            runId,
+            createRunEvent(event.type as EventType, {
+              runId: event.runId ?? runId,
+              taskId: "taskId" in event ? event.taskId : undefined,
+              details: { ...event },
+            }),
+          );
         } catch {
           // persistence is non-critical
         }
@@ -585,13 +601,14 @@ export class RunLifecycle {
         event.type === "executor_failed"
       ) {
         try {
-          const storeEvent = {
-            type: event.type,
-            runId: event.runId ?? runId,
-            taskId: "taskId" in event ? event.taskId : undefined,
-            details: { ...event },
-          } as never;
-          await this.eventStore.appendToRun(runId, storeEvent);
+          await this.eventStore.appendToRun(
+            runId,
+            createRunEvent(event.type as EventType, {
+              runId: event.runId ?? runId,
+              taskId: "taskId" in event ? event.taskId : undefined,
+              details: { ...event },
+            }),
+          );
         } catch {
           // persistence is non-critical
         }
@@ -626,7 +643,12 @@ export class RunLifecycle {
 
     for (let i = 0; i < tasks.length; i++) {
       const task = tasks[i]!;
-      if (task.status !== "pending" && task.status !== "interrupted") continue;
+      if (
+        task.status !== "pending" &&
+        task.status !== "interrupted" &&
+        task.status !== "waiting_approval"
+      )
+        continue;
 
       const depsMet = task.dependsOn.every((depId) => {
         const depTask = tasks.find((t) => t.id === depId);
@@ -709,16 +731,6 @@ export class RunLifecycle {
       }
 
       if (!success) {
-        const failCtx: HookContext = {
-          runId: run.runId,
-          taskId: task.id,
-          taskTitle: task.title,
-          error: "Task failed",
-        };
-        await this.hookManager.runOnFailure(failCtx);
-      }
-
-      if (!success) {
         runSuccess = false;
         break;
       }
@@ -750,14 +762,14 @@ export class RunLifecycle {
 
     if (!process.stdin.isTTY) {
       for (const step of pendingApproval) {
-        await stepManager.updateStepStatus(run.runId, task.id, step.id, "approved");
+        await stepManager.denyStep(run.runId, task.id, step.id);
         await this.logManager.writeTaskLog(
           run.runId,
           task.id,
-          `Step ${step.id} auto-approved (non-TTY)`,
+          `Step ${step.id} denied (non-TTY, approval needed)`,
         );
       }
-      return true;
+      return false;
     }
 
     for (const step of pendingApproval) {
@@ -778,8 +790,9 @@ export class RunLifecycle {
       }
     }
 
+    const updatedSteps = await stepManager.loadSteps(run.runId, task.id);
     const allDenied = pendingApproval.every((s) => {
-      const current = steps.find((st) => st.id === s.id);
+      const current = updatedSteps.find((st) => st.id === s.id);
       return current?.status === "denied";
     });
 
@@ -837,7 +850,7 @@ export class RunLifecycle {
     if (!stepApproved) {
       await this.runManager.updateTaskStatus(run.runId, task.id, "skipped");
       await this.eventStore.appendToRun(run.runId, {
-        type: "run_cancelled" as never,
+        type: "task_skipped",
         runId: run.runId,
         taskId: task.id,
         message: `Task skipped: all steps denied approval`,
@@ -850,10 +863,42 @@ export class RunLifecycle {
     let executorResult: ExecutorResult;
     let validationResult: ValidationResult | null = null;
     let retryCount = 0;
+    let additionalRetryCount = 0;
     const maxRetries = task.maxRetries;
+    const MAX_ADDITIONAL_RETRIES = 3;
 
     try {
       do {
+        if (task.validation?.commands) {
+          for (const cmd of task.validation.commands) {
+            const safetyResult = this.safetyChecker.check(cmd);
+            if (safetyResult.riskLevel === "blocked") {
+              await this.eventStore.appendToRun(run.runId, {
+                type: "command_blocked",
+                runId: run.runId,
+                taskId: task.id,
+                message: `Command blocked: ${safetyResult.reason}`,
+              });
+              await this.runManager.updateTaskStatus(run.runId, task.id, "failed");
+              await this.logManager.writeTaskLog(
+                run.runId,
+                task.id,
+                `Command blocked: ${safetyResult.reason}`,
+              );
+              console.log(picocolors.red(`  Command blocked: ${safetyResult.reason}`));
+              return false;
+            }
+            if (safetyResult.riskLevel === "risky") {
+              await this.logManager.writeTaskLog(
+                run.runId,
+                task.id,
+                `Command flagged as risky: ${safetyResult.reason}`,
+              );
+              console.log(picocolors.yellow(`  Command flagged as risky: ${safetyResult.reason}`));
+            }
+          }
+        }
+
         const executor = this.executorRegistry.get(task.executor);
 
         if (!executor) {
@@ -885,11 +930,28 @@ export class RunLifecycle {
           });
 
           await this.eventStore.appendToRun(run.runId, {
-            type: executorResult.status === "done" ? "executor_completed" : "executor_failed",
+            type:
+              executorResult.status === "done"
+                ? "executor_completed"
+                : executorResult.status === "skipped"
+                  ? "executor_completed"
+                  : "executor_failed",
             runId: run.runId,
             taskId: task.id,
             details: { exitCode: executorResult.exitCode },
           });
+        }
+
+        if (executorResult.status === "skipped") {
+          await this.runManager.updateTaskStatus(run.runId, task.id, "skipped");
+          await this.eventStore.appendToRun(run.runId, {
+            type: "task_skipped",
+            runId: run.runId,
+            taskId: task.id,
+            message: `Task skipped: ${task.title}`,
+          });
+          console.log(picocolors.yellow(`  Task skipped: ${task.title}`));
+          return false;
         }
 
         await this.logManager.writeTaskLog(
@@ -1017,7 +1079,7 @@ export class RunLifecycle {
 
         retryCount++;
 
-        if (retryCount > 1) {
+        if (retryCount >= 1) {
           const retryCtx: HookContext = {
             runId: run.runId,
             taskId: task.id,
@@ -1068,6 +1130,20 @@ export class RunLifecycle {
           });
 
           if (retryApproved) {
+            additionalRetryCount++;
+            if (additionalRetryCount > MAX_ADDITIONAL_RETRIES) {
+              console.log(
+                picocolors.red(
+                  `  Max additional retries (${MAX_ADDITIONAL_RETRIES}) reached. Giving up.`,
+                ),
+              );
+              await this.logManager.writeTaskLog(
+                run.runId,
+                task.id,
+                `Max additional retries (${MAX_ADDITIONAL_RETRIES}) reached. Giving up.`,
+              );
+              break;
+            }
             console.log(
               picocolors.cyan(`  User approved additional retry (${retryCount}/${maxRetries})...`),
             );

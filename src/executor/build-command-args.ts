@@ -14,6 +14,11 @@ export function buildCommandArgs(input: {
     case "stdin":
       return { args: input.args, stdin: input.contextPackContent };
     case "argument": {
+      if (input.contextPackContent.length > MAX_ARG_LENGTH) {
+        console.warn(
+          `[build-command-args] Context pack truncated from ${input.contextPackContent.length} to ${MAX_ARG_LENGTH} characters`,
+        );
+      }
       const truncated =
         input.contextPackContent.length > MAX_ARG_LENGTH
           ? input.contextPackContent.slice(0, MAX_ARG_LENGTH) + "\n... [truncated]"

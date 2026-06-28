@@ -10,7 +10,15 @@ const SecretsFileSchema = z.record(z.string());
 
 function secretsFilePath(): string {
   const envOverride = process.env.FLOWTASK_SECRETS_PATH;
-  if (envOverride) return envOverride;
+  if (envOverride) {
+    const resolved = path.resolve(envOverride);
+    const allowedDir = path.join(homedir(), ".flowtask");
+    const relative = path.relative(allowedDir, resolved);
+    if (relative.startsWith("..")) {
+      throw new Error("FLOWTASK_SECRETS_PATH must be within ~/.flowtask/");
+    }
+    return resolved;
+  }
   return path.join(homedir(), ".flowtask", "secrets.json");
 }
 
@@ -107,9 +115,7 @@ export function getDefaultEnvVar(providerName: string, type: string): string | u
   if (name === "openrouter") return "OPENROUTER_API_KEY";
   if (name === "deepseek") return "DEEPSEEK_API_KEY";
   if (name === "groq") return "GROQ_API_KEY";
-  if (name === "azure-openai" || name === "azure-openai") return "AZURE_OPENAI_API_KEY";
-
-  if (type === "openai") return "OPENAI_API_KEY";
+  if (name === "azure-openai" || type === "azure-openai") return "AZURE_OPENAI_API_KEY";
 
   return undefined;
 }

@@ -12,7 +12,7 @@ export interface ExecutorInput {
 }
 
 export interface ExecutorResult {
-  status: "done" | "failed" | "cancelled" | "timeout";
+  status: "done" | "failed" | "skipped" | "cancelled" | "timeout";
   exitCode?: number;
   output?: string;
   error?: string;

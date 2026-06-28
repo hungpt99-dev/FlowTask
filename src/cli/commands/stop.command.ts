@@ -3,6 +3,7 @@ import { ProjectManager } from "../../core/project-manager.js";
 import { RunManager } from "../../core/run-manager.js";
 import { ProcessManager } from "../../core/process-manager.js";
 import { EventStore } from "../../core/event-store.js";
+import type { EventType } from "../../schemas/event.schema.js";
 import { ConfigLoader } from "../../config/config-loader.js";
 
 export async function stopCommand(): Promise<void> {
@@ -26,7 +27,8 @@ export async function stopCommand(): Promise<void> {
 
   if (!run) {
     console.log(picocolors.red(`Active run not found: ${state.activeRunId}`));
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   const configLoader = new ConfigLoader();
@@ -48,14 +50,14 @@ export async function stopCommand(): Promise<void> {
       gracefulTimeoutMs: gracefulTimeout,
     });
 
-    let eventType: string;
+    let eventType: EventType;
     if (result.success) {
       eventType = result.finalStatus === "killed" ? "process_force_killed" : "process_stopped";
     } else {
-      eventType = result.finalStatus === "stale" ? "process_stale" : "process_stale";
+      eventType = "process_stale";
     }
     await eventStore.appendToRun(state.activeRunId, {
-      type: eventType as never,
+      type: eventType,
       runId: state.activeRunId,
       message: result.success
         ? `Process ${result.finalStatus}`

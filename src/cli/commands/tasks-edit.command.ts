@@ -1,7 +1,6 @@
 import { ProjectManager } from "../../core/project-manager.js";
 import { RunManager } from "../../core/run-manager.js";
-import { WorkflowValidator } from "../../validation/workflow-validator.js";
-import type { FlowTaskConfig } from "../../schemas/config.schema.js";
+import { ValidationConfigSchema } from "../../schemas/task.schema.js";
 import picocolors from "picocolors";
 
 export async function tasksEditCommand(
@@ -37,7 +36,6 @@ export async function tasksEditCommand(
     process.exit(1);
   }
 
-  const config: FlowTaskConfig = await manager.loadConfig(rootPath);
   const runManager = new RunManager(rootPath);
   const tasks = await runManager.loadTasks(runId);
   const task = tasks.find((t) => t.id === taskId);
@@ -90,12 +88,10 @@ export async function tasksEditCommand(
         .map((s) => s.trim())
         .filter(Boolean);
     }
-    const validator = new WorkflowValidator(config);
-    const valid = await validator.validateValidationConfig(newValidation);
-    if (!valid.valid) {
-      console.log(
-        picocolors.red(`Validation error: ${valid.error ?? "Invalid validation config"}`),
-      );
+    const valid = ValidationConfigSchema.safeParse(newValidation);
+    if (!valid.success) {
+      const error = valid.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
+      console.log(picocolors.red(`Validation error: ${error}`));
       process.exit(1);
     }
     updates.validation = newValidation;

@@ -1,4 +1,3 @@
-import path from "node:path";
 import { spawnWithPromise } from "../utils/process.js";
 import { writeTextFile, ensureDir } from "../utils/fs.js";
 import { gitBeforePath, gitAfterPath, gitDiffStatPath, getOutputsDir } from "../utils/paths.js";
@@ -51,9 +50,7 @@ export class GitService {
     await ensureDir(outputsDir);
     const snap = await this.snapshot(rootPath);
     await writeTextFile(gitBeforePath(rootPath, runId), `Branch: ${snap.branch}\n\n${snap.status}`);
-    const gitBeforeDir = path.dirname(gitBeforePath(rootPath, runId));
-    const diffStatPath = path.join(gitBeforeDir, "git-before-diff-stat.txt");
-    await writeTextFile(diffStatPath, snap.diffStat);
+    await writeTextFile(gitDiffStatPath(rootPath, runId), snap.diffStat);
   }
 
   async takeAfterSnapshot(rootPath: string, runId: string): Promise<void> {

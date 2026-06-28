@@ -1,20 +1,25 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { z } from "zod";
 import { ensureDir } from "../utils/fs.js";
 import { getRunDir } from "../utils/paths.js";
 import { EventStore } from "./event-store.js";
+import type { EventType } from "../schemas/event.schema.js";
+import { createRunEvent } from "../utils/event-factory.js";
 import { killProcessTree, isAlive, waitForExit } from "../utils/process-tree-kill.js";
 
-export interface ProcessMetadata {
-  runId: string;
-  taskId: string | undefined;
-  pid: number;
-  executor: string;
-  command: string;
-  args: string[];
-  startedAt: string;
-  status: "running" | "exited" | "stopped" | "killed" | "stale";
-}
+export const ProcessMetadataSchema = z.object({
+  runId: z.string(),
+  taskId: z.string().optional(),
+  pid: z.number(),
+  executor: z.string(),
+  command: z.string(),
+  args: z.array(z.string()),
+  startedAt: z.string(),
+  status: z.enum(["running", "exited", "stopped", "killed", "stale"]),
+});
+
+export type ProcessMetadata = z.infer<typeof ProcessMetadataSchema>;
 
 export interface StopOptions {
   gracefulTimeoutMs?: number;
@@ -50,7 +55,9 @@ export class ProcessManager {
   async read(rootPath: string, runId: string): Promise<ProcessMetadata | null> {
     try {
       const content = await fs.readFile(this.getProcessPath(rootPath, runId), "utf-8");
-      return JSON.parse(content) as ProcessMetadata;
+      const parsed = JSON.parse(content);
+      const result = ProcessMetadataSchema.safeParse(parsed);
+      return result.success ? result.data : null;
     } catch {
       return null;
     }
@@ -122,12 +129,7 @@ export class ProcessManager {
     message?: string,
   ): Promise<void> {
     const store = new EventStore(rootPath);
-    await store.appendToRun(runId, {
-      type: type as never,
-      runId,
-      taskId,
-      message,
-    });
+    await store.appendToRun(runId, createRunEvent(type as EventType, { runId, taskId, message }));
   }
 
   private async updateStatus(

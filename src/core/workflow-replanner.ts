@@ -101,6 +101,32 @@ export class WorkflowReplanner {
 
     const merged = await this.mergeWithExisting(existingTasks, newPlan, strategy);
 
+    // Persist the merged tasks to disk
+    const mergedTasks: Task[] = merged.workflow.tasks.map((t) => {
+      const existing = existingTasks.find((e) => e.id === t.id);
+      return {
+        id: t.id,
+        runId,
+        title: t.title,
+        description: t.description,
+        status:
+          existing?.status === "done"
+            ? "done"
+            : existing?.status === "running"
+              ? "interrupted"
+              : "pending",
+        executor: t.executor ?? existing?.executor ?? "shell",
+        dependsOn: t.dependsOn ?? [],
+        acceptanceCriteria: t.acceptanceCriteria ?? [],
+        validation: t.validation || existing?.validation,
+        retryCount: 0,
+        maxRetries: t.maxRetries ?? 2,
+        createdAt: existing?.createdAt ?? now(),
+        updatedAt: now(),
+      };
+    });
+    await this.runManager.saveTasks(runId, mergedTasks);
+
     await this.eventStore.appendToRun(runId, {
       type: "workflow_replanned",
       message: `Workflow replanned with strategy: ${strategy}`,

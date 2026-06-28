@@ -1,52 +1,5 @@
 import { type FlowTaskConfig } from "../schemas/config.schema.js";
 
-export const DEFAULT_EXECUTORS: Record<
-  string,
-  {
-    type: string;
-    command: string;
-    args: string[];
-    inputMode: string;
-    timeoutMs: number;
-  }
-> = {
-  opencode: {
-    type: "command",
-    command: "opencode",
-    args: ["run"],
-    inputMode: "stdin",
-    timeoutMs: 1800000,
-  },
-  claude: {
-    type: "command",
-    command: "claude",
-    args: [],
-    inputMode: "stdin",
-    timeoutMs: 1800000,
-  },
-  codex: {
-    type: "command",
-    command: "codex",
-    args: [],
-    inputMode: "stdin",
-    timeoutMs: 1800000,
-  },
-  gemini: {
-    type: "command",
-    command: "gemini",
-    args: [],
-    inputMode: "stdin",
-    timeoutMs: 1800000,
-  },
-  aider: {
-    type: "command",
-    command: "aider",
-    args: ["--message"],
-    inputMode: "argument",
-    timeoutMs: 1800000,
-  },
-};
-
 export function generateDefaultConfig(): FlowTaskConfig {
   return {
     version: "1.0",
