@@ -54,12 +54,14 @@ export class AcceptanceCriteriaValidator {
           ? evidence.join("; ")
           : "No automated evidence found — manual verification recommended";
 
-      const isMet = evidence.some(
-        (e) =>
-          e.startsWith("Mentioned in") ||
-          e.includes("exists") ||
-          e.includes("completed successfully"),
-      );
+      const isMet =
+        processPassed &&
+        evidence.some(
+          (e) =>
+            e.startsWith("Mentioned in") ||
+            e.includes("exists") ||
+            e.includes("completed successfully"),
+        );
 
       checks.push({
         type: "acceptance_criteria",
@@ -94,9 +96,14 @@ export class AcceptanceCriteriaValidator {
     output: string,
   ): Promise<string[]> {
     const evidence: string[] = [];
+    const resolvedRoot = path.resolve(projectRoot);
 
     for (const fp of filePaths) {
-      const fullPath = path.isAbsolute(fp) ? fp : path.join(projectRoot, fp);
+      const fullPath = path.isAbsolute(fp) ? fp : path.resolve(projectRoot, fp);
+      const relative = path.relative(resolvedRoot, fullPath);
+      if (relative.startsWith("..") || path.isAbsolute(relative)) {
+        continue;
+      }
       const exists = await fileExists(fullPath);
       if (exists) {
         const content = await readTextFile(fullPath).catch(() => "");
@@ -119,7 +126,11 @@ export class AcceptanceCriteriaValidator {
     }
 
     for (const fp of outputPaths) {
-      const fullPath = path.isAbsolute(fp) ? fp : path.join(projectRoot, fp);
+      const fullPath = path.isAbsolute(fp) ? fp : path.resolve(projectRoot, fp);
+      const relative = path.relative(resolvedRoot, fullPath);
+      if (relative.startsWith("..") || path.isAbsolute(relative)) {
+        continue;
+      }
       const exists = await fileExists(fullPath);
       if (exists) {
         evidence.push(`Referenced file exists: ${fp}`);

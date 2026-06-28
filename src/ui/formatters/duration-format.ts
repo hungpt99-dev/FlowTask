@@ -16,8 +16,10 @@ export function formatDuration(ms: number): string {
 
 export function formatTimeAgo(isoDate: string): string {
   const date = new Date(isoDate);
+  const time = date.getTime();
+  if (isNaN(time)) return "just now";
   const now = Date.now();
-  const diff = now - date.getTime();
+  const diff = now - time;
   if (diff < 0) return "just now";
   if (diff < 60000) return "just now";
   if (diff < 3600000) {

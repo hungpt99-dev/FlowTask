@@ -199,11 +199,9 @@ export class EventBus {
         entry.errorCount++;
         if (entry.errorCount >= this.options.maxListenerErrors) {
           this.disabledListeners.add(entry.callback);
-          if (this.options.debug) {
-            console.error(
-              `[flowtask] Disabling listener "${entry.name}" after ${entry.errorCount} errors`,
-            );
-          }
+          console.warn(
+            `[flowtask] Disabling listener "${entry.name}" after ${entry.errorCount} errors`,
+          );
         }
       }
     }
@@ -218,6 +216,9 @@ export class EventBus {
           entry.errorCount++;
           if (entry.errorCount >= this.options.maxListenerErrors) {
             this.disabledListeners.add(entry.callback);
+            console.warn(
+              `[flowtask] Disabling listener "${entry.name}" after ${entry.errorCount} errors`,
+            );
           }
         }
       });

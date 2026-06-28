@@ -102,7 +102,8 @@ export class ValidationRunner {
     for (let i = 0; i < params.commands.length; i++) {
       const command = params.commands[i]!;
       const safeCommand = this.resourceGuard.getSafeCommand(command);
-      const cacheKey = this.dedupeCache.key(command, params.cwd);
+      const executedCommand = safeFrameCommand(safeCommand);
+      const cacheKey = this.dedupeCache.key(executedCommand, params.cwd);
 
       if (dedupeEnabled && this.dedupeCache.isCompleted(cacheKey)) {
         const cached = this.dedupeCache.getCompleted(cacheKey)!;
@@ -167,7 +168,7 @@ export class ValidationRunner {
       await appendToFile(path.join(logsDir, "validation.log"), logLine);
 
       const result = await this.runSingleCommand({
-        command: safeFrameCommand(safeCommand),
+        command: executedCommand,
         cwd: params.cwd,
         runId: params.runId,
         env: params.env,

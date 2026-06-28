@@ -72,6 +72,15 @@ export class ValidationEngine {
       checks.push(...criteriaChecks);
     }
 
+    if (checks.length === 0) {
+      return {
+        taskId: input.task.id,
+        status: "warning",
+        checks: [],
+        createdAt: now(),
+      };
+    }
+
     const allPassed = checks.every((c) => c.status === "passed");
     const anyFailed = checks.some((c) => c.status === "failed");
 
