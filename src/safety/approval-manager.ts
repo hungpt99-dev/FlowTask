@@ -16,6 +16,14 @@ export interface RetryApprovalRequest {
   maxRetries: number;
 }
 
+export type StepFailureAction = "retry" | "skip" | "stop";
+
+export interface StepFailureRequest {
+  taskId: string;
+  taskTitle: string;
+  error?: string;
+}
+
 export type ApprovalMode = "interactive" | "auto" | "skip";
 
 export interface ApprovalConfig {
@@ -60,6 +68,29 @@ export class ApprovalManager {
       return result ?? false;
     } catch {
       return false;
+    }
+  }
+
+  async requestStepFailureResolution(request: StepFailureRequest): Promise<StepFailureAction> {
+    if (!process.stdin.isTTY) {
+      return "skip";
+    }
+
+    if (this.config.mode === "auto" || this.config.mode === "skip" || this.config.autoApprove) {
+      return "skip";
+    }
+
+    const enquirer = new Enquirer();
+    try {
+      const response = await enquirer.prompt({
+        type: "select" as const,
+        name: "action",
+        message: `Task "${request.taskTitle}" failed.\nWhat would you like to do?`,
+        choices: ["retry", "skip", "stop"],
+      });
+      return (response as Record<string, StepFailureAction>).action ?? "stop";
+    } catch {
+      return "stop";
     }
   }
 

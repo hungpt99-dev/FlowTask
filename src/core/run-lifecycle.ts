@@ -731,6 +731,39 @@ export class RunLifecycle {
       }
 
       if (!success) {
+        const action = await this.approvalManager.requestStepFailureResolution({
+          taskId: task.id,
+          taskTitle: task.title,
+        });
+
+        if (action === "retry") {
+          task.retryCount = 0;
+          task.status = "pending";
+          await this.runManager.updateTaskStatus(run.runId, task.id, "pending");
+          await this.runManager.saveTasks(run.runId, tasks);
+          await this.logManager.writeTaskLog(run.runId, task.id, "User chose to retry the task");
+          console.log(picocolors.cyan(`  User chose to retry: ${task.title}`));
+          i--;
+          continue;
+        }
+
+        if (action === "skip") {
+          await this.runManager.updateTaskStatus(run.runId, task.id, "skipped");
+          await this.eventStore.appendToRun(run.runId, {
+            type: "task_skipped",
+            runId: run.runId,
+            taskId: task.id,
+            message: `Task skipped by user: ${task.title}`,
+          });
+          await this.logManager.writeTaskLog(
+            run.runId,
+            task.id,
+            "Task skipped by user after failure",
+          );
+          console.log(picocolors.yellow(`  Task skipped: ${task.title}`));
+          continue;
+        }
+
         runSuccess = false;
         break;
       }

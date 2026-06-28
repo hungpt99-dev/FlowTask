@@ -91,4 +91,47 @@ describe("ApprovalManager", () => {
     });
     expect(result).toBe(true);
   });
+
+  describe("requestStepFailureResolution", () => {
+    it("should skip in non-TTY environment", async () => {
+      const original = process.stdin.isTTY;
+      process.stdin.isTTY = false as unknown as boolean;
+      try {
+        const result = await manager.requestStepFailureResolution({
+          taskId: "task_1",
+          taskTitle: "Test task",
+        });
+        expect(result).toBe("skip");
+      } finally {
+        process.stdin.isTTY = original;
+      }
+    });
+
+    it("should skip in auto mode", async () => {
+      manager.setConfig({ mode: "auto" });
+      const result = await manager.requestStepFailureResolution({
+        taskId: "task_1",
+        taskTitle: "Test task",
+      });
+      expect(result).toBe("skip");
+    });
+
+    it("should skip in skip mode", async () => {
+      manager.setConfig({ mode: "skip" });
+      const result = await manager.requestStepFailureResolution({
+        taskId: "task_1",
+        taskTitle: "Test task",
+      });
+      expect(result).toBe("skip");
+    });
+
+    it("should skip when autoApprove is true", async () => {
+      manager.setConfig({ autoApprove: true });
+      const result = await manager.requestStepFailureResolution({
+        taskId: "task_1",
+        taskTitle: "Test task",
+      });
+      expect(result).toBe("skip");
+    });
+  });
 });
