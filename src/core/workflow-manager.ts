@@ -10,12 +10,36 @@ import {
   WorkflowValidationResultSchema,
 } from "../schemas/workflow.schema.js";
 import type { OutputPlan } from "../schemas/output-plan.schema.js";
-import { writeTextFile, readTextFile } from "../utils/fs.js";
-import { getSnapshotsDir } from "../utils/paths.js";
+import {
+  type WorkflowStatus,
+  type WorkflowLifecycleEvent,
+  type WorkflowState,
+  type PendingGate,
+  type ApprovalHistoryEntry,
+  WorkflowStateSchema,
+  WorkflowLifecycleEventTypeSchema,
+  WorkflowStatusSchema,
+  isValidWorkflowTransition,
+  isWorkflowTerminal,
+  isWorkflowActive,
+  PendingGateSchema,
+} from "../schemas/workflow-lifecycle.schema.js";
+import {
+  writeTextFile,
+  readTextFile,
+  atomicWriteJsonFile,
+  fileExists,
+  readJsonFile,
+} from "../utils/fs.js";
+import { getRunDir, getSnapshotsDir } from "../utils/paths.js";
 import { now } from "../utils/time.js";
 import { generateTaskId } from "../utils/ids.js";
 import { RunManager } from "./run-manager.js";
 import { EventStore } from "./event-store.js";
+import { ApprovalGateChecker } from "../safety/approval-gate.js";
+import type { ActionType, ApprovalGateResult } from "../safety/approval-gate.js";
+import type { GateDecision } from "../safety/approval-manager.js";
+import { randomUUID } from "node:crypto";
 
 const MAX_SNAPSHOTS = 10;
 const MODIFIABLE_STATUSES = new Set(["pending", "failed", "interrupted", "cancelled", "blocked"]);
@@ -57,6 +81,203 @@ export class WorkflowManager {
     private runManager: RunManager,
     private eventStore: EventStore,
   ) {}
+
+  private workflowStatePath(runId: string): string {
+    return path.join(getRunDir(this.rootPath, runId), "workflow-state.json");
+  }
+
+  async loadWorkflowState(runId: string): Promise<WorkflowState | null> {
+    const sPath = this.workflowStatePath(runId);
+    const exists = await fileExists(sPath);
+    if (!exists) return null;
+    try {
+      const raw = await readJsonFile<Record<string, unknown>>(sPath);
+      const result = WorkflowStateSchema.safeParse(raw);
+      return result.success ? result.data : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async saveWorkflowState(state: WorkflowState): Promise<void> {
+    const updated = { ...state, updatedAt: now() };
+    const parsed = WorkflowStateSchema.parse(updated);
+    await atomicWriteJsonFile(this.workflowStatePath(state.runId), parsed);
+  }
+
+  async initWorkflowState(runId: string): Promise<WorkflowState> {
+    const nowStr = now();
+    const state: WorkflowState = {
+      runId,
+      status: "created",
+      retryCount: 0,
+      errorCount: 0,
+      lifecycle: [
+        {
+          type: "workflow_created",
+          timestamp: nowStr,
+          workflowStatus: "created",
+          message: "Workflow created",
+        },
+      ],
+      updatedAt: nowStr,
+    };
+    await this.saveWorkflowState(state);
+    return state;
+  }
+
+  async transitionWorkflowState(
+    runId: string,
+    newStatus: WorkflowStatus,
+    message?: string,
+    details?: Record<string, unknown>,
+  ): Promise<WorkflowState> {
+    const state = (await this.loadWorkflowState(runId)) ?? (await this.initWorkflowState(runId));
+
+    if (!isValidWorkflowTransition(state.status, newStatus)) {
+      throw new Error(`Invalid workflow state transition: ${state.status} → ${newStatus}`);
+    }
+
+    const previousStatus = state.status;
+
+    const event: WorkflowLifecycleEvent = {
+      type: "state_transition",
+      timestamp: now(),
+      workflowStatus: newStatus,
+      message: message ?? `State transition: ${previousStatus} → ${newStatus}`,
+      details: { ...details, previousStatus },
+    };
+
+    const updated: WorkflowState = {
+      ...state,
+      status: newStatus,
+      previousStatus,
+      lifecycle: [...state.lifecycle, event],
+      updatedAt: now(),
+    };
+
+    if (isWorkflowTerminal(newStatus)) {
+      updated.completedAt = now();
+    }
+    if (newStatus === "paused") {
+      updated.pausedAt = now();
+    }
+    if (newStatus === "running" && !updated.startedAt) {
+      updated.startedAt = now();
+    }
+
+    await this.saveWorkflowState(updated);
+
+    await this.eventStore.appendToRun(runId, {
+      type: "workflow_applied",
+      message: `Workflow state: ${previousStatus} → ${newStatus}`,
+      details: { previousStatus, newStatus },
+    });
+
+    return updated;
+  }
+
+  async pauseWorkflow(runId: string): Promise<WorkflowState> {
+    const state = await this.transitionWorkflowState(runId, "paused", "Workflow paused");
+
+    await this.eventStore.appendToRun(runId, {
+      type: "workflow_applied",
+      message: "Workflow paused",
+    });
+
+    return { ...state, pausedAt: now() };
+  }
+
+  async resumeWorkflow(runId: string): Promise<WorkflowState> {
+    const state = await this.transitionWorkflowState(runId, "running", "Workflow resumed");
+
+    await this.eventStore.appendToRun(runId, {
+      type: "workflow_applied",
+      message: "Workflow resumed",
+    });
+
+    return state;
+  }
+
+  async cancelWorkflow(runId: string): Promise<WorkflowState> {
+    return this.transitionWorkflowState(runId, "cancelled", "Workflow cancelled");
+  }
+
+  async failWorkflow(runId: string, errorMessage?: string): Promise<WorkflowState> {
+    return this.transitionWorkflowState(runId, "failed", errorMessage ?? "Workflow failed");
+  }
+
+  async completeWorkflow(runId: string): Promise<WorkflowState> {
+    return this.transitionWorkflowState(runId, "succeeded", "Workflow completed successfully");
+  }
+
+  async markWorkflowStuck(runId: string, reason?: string): Promise<WorkflowState> {
+    return this.transitionWorkflowState(runId, "stuck", reason ?? "Workflow stuck");
+  }
+
+  async markWorkflowNeedsReview(runId: string, reason?: string): Promise<WorkflowState> {
+    return this.transitionWorkflowState(
+      runId,
+      "needs_user_review",
+      reason ?? "Workflow needs user review",
+    );
+  }
+
+  async retryWorkflow(runId: string): Promise<WorkflowState> {
+    const state = await this.loadWorkflowState(runId);
+    if (!state) throw new Error(`No workflow state for run: ${runId}`);
+
+    const updated: WorkflowState = {
+      ...state,
+      status: "running",
+      retryCount: (state.retryCount ?? 0) + 1,
+      lifecycle: [
+        ...state.lifecycle,
+        {
+          type: "state_transition",
+          timestamp: now(),
+          workflowStatus: "running",
+          message: `Workflow retry #${(state.retryCount ?? 0) + 1}`,
+          details: { previousStatus: state.status, retryCount: (state.retryCount ?? 0) + 1 },
+        },
+      ],
+      updatedAt: now(),
+    };
+
+    await this.saveWorkflowState(updated);
+
+    await this.eventStore.appendToRun(runId, {
+      type: "workflow_applied",
+      message: `Workflow retry #${(state.retryCount ?? 0) + 1}`,
+    });
+
+    return updated;
+  }
+
+  async getWorkflowStatus(runId: string): Promise<WorkflowStatus | null> {
+    const state = await this.loadWorkflowState(runId);
+    return state?.status ?? null;
+  }
+
+  async getWorkflowTimeline(runId: string): Promise<WorkflowLifecycleEvent[]> {
+    const state = await this.loadWorkflowState(runId);
+    return state?.lifecycle ?? [];
+  }
+
+  async isWorkflowPaused(runId: string): Promise<boolean> {
+    const status = await this.getWorkflowStatus(runId);
+    return status === "paused";
+  }
+
+  async isWorkflowActive(runId: string): Promise<boolean> {
+    const status = await this.getWorkflowStatus(runId);
+    return status ? isWorkflowActive(status) : false;
+  }
+
+  async isWorkflowTerminal(runId: string): Promise<boolean> {
+    const status = await this.getWorkflowStatus(runId);
+    return status ? isWorkflowTerminal(status) : false;
+  }
 
   async exportWorkflow(
     runId: string,
@@ -656,6 +877,285 @@ export class WorkflowManager {
         }
       }
     }
+  }
+
+  async checkWorkflowRiskyActions(workflow: WorkflowFile): Promise<{
+    allSafe: boolean;
+    riskyActions: Array<{
+      taskId: string;
+      actionType: ActionType;
+      riskLevel: string;
+      reason: string;
+    }>;
+  }> {
+    const checker = new ApprovalGateChecker();
+    const riskyActions: Array<{
+      taskId: string;
+      actionType: ActionType;
+      riskLevel: string;
+      reason: string;
+    }> = [];
+
+    for (const task of workflow.tasks) {
+      const actionType = checker.classifyStepType(task.title, task.validation?.commands?.join(" "));
+      const result = checker.checkAction(actionType);
+      if (result.requiresApproval) {
+        riskyActions.push({
+          taskId: task.id,
+          actionType: result.actionType,
+          riskLevel: result.riskLevel,
+          reason: result.reason,
+        });
+      }
+    }
+
+    return { allSafe: riskyActions.length === 0, riskyActions };
+  }
+
+  async requirePlanApproval(
+    workflow: WorkflowFile,
+    approvalGateChecker?: ApprovalGateChecker,
+  ): Promise<{
+    requiresApproval: boolean;
+    riskyActions: Array<{
+      taskId: string;
+      actionType: ActionType;
+      riskLevel: string;
+      reason: string;
+    }>;
+  }> {
+    const checker = approvalGateChecker ?? new ApprovalGateChecker();
+    const requiresPlanApproval = checker.getConfig().requirePlanApproval;
+
+    if (!requiresPlanApproval) {
+      return { requiresApproval: false, riskyActions: [] };
+    }
+
+    const { riskyActions } = await this.checkWorkflowRiskyActions(workflow);
+
+    if (riskyActions.length === 0) {
+      return { requiresApproval: false, riskyActions: [] };
+    }
+
+    return { requiresApproval: true, riskyActions };
+  }
+
+  async applyWorkflowWithApprovalCheck(
+    runId: string,
+    workflow: WorkflowFile,
+    options?: ApplyOptions & { approved?: boolean },
+  ): Promise<ApplyResult> {
+    if (!options?.noConfirm && !options?.approved) {
+      const { requiresApproval, riskyActions } = await this.requirePlanApproval(workflow);
+
+      if (requiresApproval && !options?.force) {
+        return {
+          applied: false,
+          added: 0,
+          removed: 0,
+          modified: 0,
+          unchanged: 0,
+          errors: [
+            "Workflow contains risky actions and requires approval. " +
+              "Use --force to bypass or approve the plan first via CLI.",
+          ],
+          warnings: riskyActions.map(
+            (r) =>
+              `Risky action: ${r.actionType} (${r.riskLevel}) in task ${r.taskId}: ${r.reason}`,
+          ),
+        };
+      }
+    }
+
+    return this.applyWorkflow(runId, workflow, options);
+  }
+
+  checkStepRequiresApproval(
+    stepTitle: string,
+    stepCommand?: string,
+    context?: {
+      estimatedCost?: number;
+      failureCount?: number;
+    },
+  ): ApprovalGateResult {
+    const checker = new ApprovalGateChecker();
+    const actionType = checker.classifyStepType(stepTitle, stepCommand);
+    return checker.checkAction(actionType, context);
+  }
+
+  async requireGateApproval(
+    runId: string,
+    taskId: string,
+    actionType: string,
+    riskLevel: string,
+    reason: string,
+    details?: string,
+  ): Promise<string> {
+    const state = await this.loadWorkflowState(runId);
+    if (!state) throw new Error(`No workflow state for run: ${runId}`);
+
+    const gateId = `gate_${Date.now()}_${randomUUID().slice(0, 8)}`;
+    const nowStr = now();
+
+    const gate: PendingGate = {
+      id: gateId,
+      taskId,
+      actionType,
+      riskLevel,
+      reason,
+      details,
+      status: "pending",
+      createdAt: nowStr,
+    };
+
+    const pendingGates = [...(state.pendingGates ?? []), gate];
+    const updated: WorkflowState = {
+      ...state,
+      status: "waiting_approval",
+      pendingGates,
+      lifecycle: [
+        ...state.lifecycle,
+        {
+          type: "gate_approval_required",
+          timestamp: nowStr,
+          workflowStatus: "waiting_approval",
+          message: `Gate approval required: ${actionType} for task ${taskId}`,
+          details: { gateId, actionType, riskLevel, reason, taskId },
+        },
+      ],
+      updatedAt: nowStr,
+    };
+
+    await this.saveWorkflowState(updated);
+    await this.runManager.addRunApproval(runId, {
+      id: gateId,
+      type: "step",
+      status: "pending",
+      reason: `${actionType} (${riskLevel}): ${reason}`,
+    });
+    await this.eventStore.appendToRun(runId, {
+      type: "approval_requested",
+      message: `Gate approval required: ${actionType} for task ${taskId}`,
+      details: { gateId, actionType, riskLevel, reason, taskId },
+    });
+
+    return gateId;
+  }
+
+  async resolveGateApproval(
+    runId: string,
+    gateId: string,
+    decision: GateDecision,
+    resolvedBy?: string,
+  ): Promise<boolean> {
+    const state = await this.loadWorkflowState(runId);
+    if (!state) throw new Error(`No workflow state for run: ${runId}`);
+
+    const gates = state.pendingGates ?? [];
+    const idx = gates.findIndex((g) => g.id === gateId);
+    if (idx < 0) return false;
+
+    const gate = gates[idx]!;
+    const nowStr = now();
+
+    const gateStatus =
+      decision === "approved" ? "approved" : decision === "override" ? "overridden" : "rejected";
+
+    const updatedGates = [...gates];
+    updatedGates[idx] = {
+      ...gate,
+      status: gateStatus,
+      resolvedAt: nowStr,
+      resolvedBy,
+    };
+
+    const historyEntry: ApprovalHistoryEntry = {
+      id: gateId,
+      taskId: gate.taskId,
+      actionType: gate.actionType,
+      riskLevel: gate.riskLevel,
+      decision,
+      reason: `Resolved by ${resolvedBy ?? "user"}`,
+      autoApproved: false,
+      createdAt: nowStr,
+    };
+
+    const remainingUnresolved = updatedGates.filter((g) => g.status === "pending");
+    const newStatus: WorkflowStatus =
+      remainingUnresolved.length > 0 ? "waiting_approval" : "running";
+
+    const updated: WorkflowState = {
+      ...state,
+      status: newStatus,
+      pendingGates: updatedGates,
+      approvalHistory: [...(state.approvalHistory ?? []), historyEntry],
+      lifecycle: [
+        ...state.lifecycle,
+        {
+          type:
+            decision === "approved" || decision === "override" ? "gate_approved" : "gate_rejected",
+          timestamp: nowStr,
+          workflowStatus: newStatus,
+          message: `Gate ${decision}: ${gate.actionType} (${gate.riskLevel})`,
+          details: { gateId, decision, actionType: gate.actionType, taskId: gate.taskId },
+        },
+      ],
+      updatedAt: nowStr,
+    };
+
+    await this.saveWorkflowState(updated);
+
+    await this.runManager.resolveRunApproval(
+      runId,
+      gateId,
+      decision === "approved" ? "approved" : "rejected",
+    );
+
+    await this.eventStore.appendToRun(runId, {
+      type: "approval_approved",
+      message: `Gate ${decision}: ${gate.actionType}`,
+      details: { gateId, decision, actionType: gate.actionType, taskId: gate.taskId },
+    });
+
+    return true;
+  }
+
+  async getPendingGates(runId: string): Promise<PendingGate[]> {
+    const state = await this.loadWorkflowState(runId);
+    if (!state) return [];
+    const gates = state.pendingGates ?? [];
+    return gates.filter((g) => g.status === "pending");
+  }
+
+  async recordGateDecision(
+    runId: string,
+    actionType: string,
+    riskLevel: string,
+    decision: GateDecision,
+    reason?: string,
+    autoApproved?: boolean,
+  ): Promise<void> {
+    const state = await this.loadWorkflowState(runId);
+    if (!state) return;
+
+    const nowStr = now();
+    const historyEntry: ApprovalHistoryEntry = {
+      id: `hist_${Date.now()}_${randomUUID().slice(0, 8)}`,
+      actionType,
+      riskLevel,
+      decision,
+      reason,
+      autoApproved: autoApproved ?? false,
+      createdAt: nowStr,
+    };
+
+    const updated: WorkflowState = {
+      ...state,
+      approvalHistory: [...(state.approvalHistory ?? []), historyEntry],
+      updatedAt: nowStr,
+    };
+
+    await this.saveWorkflowState(updated);
   }
 
   private async cleanOldSnapshots(runId: string): Promise<void> {

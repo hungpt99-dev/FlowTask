@@ -1,9 +1,13 @@
 import type { Run } from "../schemas/run.schema.js";
 import type { Task } from "../schemas/task.schema.js";
 import type { FlowTaskEvent } from "../schemas/event.schema.js";
-import { readTextFile } from "../utils/fs.js";
-import path from "node:path";
-import { getContextDir } from "../utils/paths.js";
+import type { Step } from "../schemas/step.schema.js";
+import type { ArtifactRecord } from "../schemas/artifact.schema.js";
+import type { ValidationResult } from "../schemas/validation.schema.js";
+import type { FileChange } from "./file-tracker.js";
+import type { TimelineEvent, RunApproval, RunError } from "../schemas/run.schema.js";
+import type { WorkflowState } from "../schemas/workflow-lifecycle.schema.js";
+import { FinalReportGenerator, type ReportData } from "./final-report.js";
 
 export interface Report {
   prompt: string;
@@ -23,11 +27,22 @@ export interface Report {
 }
 
 export class ReportGenerator {
+  private finalReportGenerator = new FinalReportGenerator();
+
   async generate(
     run: Run,
     tasks: Task[],
     rootPath?: string,
     events?: FlowTaskEvent[],
+    steps?: Step[],
+    artifacts?: ArtifactRecord[],
+    fileChanges?: FileChange[],
+    validations?: ValidationResult[],
+    timeline?: TimelineEvent[],
+    approvals?: RunApproval[],
+    runErrors?: RunError[],
+    workflowState?: WorkflowState | null,
+    auditSummary?: { total: number; errors: number; warnings: number } | null,
   ): Promise<Report> {
     const completedTasks = tasks.filter((t) => t.status === "done");
     const failedTasks = tasks.filter((t) => t.status === "failed");
@@ -35,10 +50,10 @@ export class ReportGenerator {
 
     const commandsExecuted: string[] = [];
     const changedFiles: string[] = [];
-    const artifacts: string[] = [];
+    const artifactsList: string[] = [];
     const validationResults: string[] = [];
     const qualityResults: string[] = [];
-    let planMarkdown = "";
+    const planMarkdown = "";
     const rules: string[] = [];
 
     for (const task of tasks) {
@@ -46,6 +61,8 @@ export class ReportGenerator {
         commandsExecuted.push(...task.validation.commands);
       }
     }
+
+    let reportData: ReportData | undefined;
 
     if (rootPath) {
       try {
@@ -69,29 +86,54 @@ export class ReportGenerator {
       }
 
       try {
-        const planPath = path.join(getContextDir(rootPath, run.runId), "plan.md");
-        planMarkdown = await readTextFile(planPath);
+        reportData = await this.finalReportGenerator.generateReport(run, tasks, {
+          rootPath,
+          steps: steps ?? [],
+          artifacts: artifacts ?? [],
+          fileChanges: fileChanges ?? [],
+          validations: validations ?? [],
+          events: events ?? [],
+          timeline: timeline ?? [],
+          approvals: approvals ?? [],
+          runErrors: runErrors ?? [],
+          workflowState: workflowState ?? null,
+          auditSummary: auditSummary ?? null,
+        });
       } catch {
-        // plan may not exist
+        // fall back to basic report
+      }
+
+      if (artifacts) {
+        for (const a of artifacts) {
+          artifactsList.push(`${a.title} (${a.type})`);
+        }
+      }
+
+      if (fileChanges) {
+        for (const fc of fileChanges) {
+          changedFiles.push(fc.filePath);
+        }
       }
     }
 
     return {
       prompt: run.title,
       rules: [...new Set(rules)],
-      summary: `Run ${run.runId} completed with ${completedTasks.length}/${tasks.length} tasks done. ${failedTasks.length > 0 ? `${failedTasks.length} task(s) failed.` : ""}`,
-      planMarkdown,
+      summary:
+        reportData?.summary ??
+        `Run ${run.runId} completed with ${completedTasks.length}/${tasks.length} tasks done. ${failedTasks.length > 0 ? `${failedTasks.length} task(s) failed.` : ""}`,
+      planMarkdown: reportData?.planMarkdown ?? planMarkdown,
       completedTasks,
       failedTasks,
       skippedTasks,
       changedFiles: [...new Set(changedFiles)],
       commandsExecuted: [...new Set(commandsExecuted)],
-      artifacts: [...new Set(artifacts.filter(Boolean))],
+      artifacts: [...new Set(artifactsList.filter(Boolean))],
       validationResults,
       qualityResults,
       errors: failedTasks.map(
         (t) =>
-          `Task failed: ${t.title}${t.validation?.commands ? ` (commands: ${t.validation.commands.join(", ")})` : ""}`,
+          `Task failed: ${t.title}${t.validation?.commands ? ` (commands: ${t.validation.commands.join(", ")})` : ""}${t.retryCount && t.retryCount > 0 ? ` [retries: ${t.retryCount}]` : ""}`,
       ),
       manualNextSteps:
         failedTasks.length > 0
@@ -100,6 +142,37 @@ export class ReportGenerator {
             ]
           : [],
     };
+  }
+
+  async generateFinalReportData(
+    run: Run,
+    tasks: Task[],
+    rootPath?: string,
+    steps?: Step[],
+    artifacts?: ArtifactRecord[],
+    fileChanges?: FileChange[],
+    validations?: ValidationResult[],
+    events?: FlowTaskEvent[],
+    timeline?: TimelineEvent[],
+    approvals?: RunApproval[],
+    runErrors?: RunError[],
+    workflowState?: WorkflowState | null,
+    auditSummary?: { total: number; errors: number; warnings: number } | null,
+  ): Promise<ReportData | undefined> {
+    if (!rootPath) return undefined;
+    return this.finalReportGenerator.generateReport(run, tasks, {
+      rootPath,
+      steps: steps ?? [],
+      artifacts: artifacts ?? [],
+      fileChanges: fileChanges ?? [],
+      validations: validations ?? [],
+      events: events ?? [],
+      timeline: timeline ?? [],
+      approvals: approvals ?? [],
+      runErrors: runErrors ?? [],
+      workflowState: workflowState ?? null,
+      auditSummary: auditSummary ?? null,
+    });
   }
 
   generateMarkdown(report: Report): string {
@@ -186,7 +259,17 @@ export class ReportGenerator {
       for (const err of report.errors) {
         lines.push(`- ${err}`);
       }
-      lines.push("");
+      if (report.failedTasks.length > 0) {
+        lines.push("");
+        lines.push("### Suggested Actions\n");
+        for (const ft of report.failedTasks) {
+          lines.push(`- Review and retry: \`flowtask retry ${ft.id}\``);
+          if (ft.validation?.commands) {
+            lines.push(`  - Failed command: \`${ft.validation.commands.join(" && ")}\``);
+          }
+        }
+        lines.push("");
+      }
     }
 
     if (report.manualNextSteps.length > 0) {
@@ -198,5 +281,9 @@ export class ReportGenerator {
     }
 
     return lines.join("\n");
+  }
+
+  generateReportDataMarkdown(reportData: ReportData): string {
+    return this.finalReportGenerator.generateMarkdown(reportData);
   }
 }

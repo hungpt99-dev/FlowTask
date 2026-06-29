@@ -1,3 +1,4 @@
+import type { ChildProcess } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
@@ -33,6 +34,7 @@ export interface StopResult {
 
 export class ProcessManager {
   private abortControllers: Map<string, AbortController> = new Map();
+  private childProcesses: Map<string, ChildProcess> = new Map();
 
   getProcessPath(rootPath: string, runId: string): string {
     return path.join(getRunDir(rootPath, runId), "process.json");
@@ -44,6 +46,30 @@ export class ProcessManager {
 
   getController(runId: string): AbortController | undefined {
     return this.abortControllers.get(runId);
+  }
+
+  registerChildProcess(runId: string, child: ChildProcess): void {
+    this.childProcesses.set(runId, child);
+  }
+
+  getChildProcess(runId: string): ChildProcess | null {
+    return this.childProcesses.get(runId) ?? null;
+  }
+
+  unregisterChildProcess(runId: string): void {
+    this.childProcesses.delete(runId);
+  }
+
+  sendInput(runId: string, input: string): boolean {
+    const child = this.childProcesses.get(runId);
+    if (!child) return false;
+    if (!child.stdin || child.stdin.destroyed) return false;
+    try {
+      child.stdin.write(input + "\n");
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async save(rootPath: string, metadata: ProcessMetadata): Promise<void> {
@@ -65,6 +91,7 @@ export class ProcessManager {
 
   async clear(rootPath: string, runId: string): Promise<void> {
     this.abortControllers.delete(runId);
+    this.childProcesses.delete(runId);
     try {
       await fs.unlink(this.getProcessPath(rootPath, runId));
     } catch {

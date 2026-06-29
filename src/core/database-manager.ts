@@ -11,7 +11,7 @@ import type { FlowTaskEvent } from "../schemas/event.schema.js";
 import { ensureDir } from "../utils/fs.js";
 import { now } from "../utils/time.js";
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 const SCHEMA_VERSION_TABLE = `CREATE TABLE IF NOT EXISTS schema_version (
   version INTEGER PRIMARY KEY,
@@ -138,6 +138,15 @@ const MIGRATIONS: string[] = [
   CREATE INDEX IF NOT EXISTS idx_events_type ON events(type);
   CREATE INDEX IF NOT EXISTS idx_events_run_id ON events(run_id);`,
   `ALTER TABLE steps ADD COLUMN expected_result TEXT;`,
+  `ALTER TABLE artifacts ADD COLUMN step_id TEXT;
+   ALTER TABLE artifacts ADD COLUMN path TEXT;
+   ALTER TABLE artifacts ADD COLUMN summary TEXT;
+   ALTER TABLE artifacts ADD COLUMN origin TEXT NOT NULL DEFAULT 'expected';
+   ALTER TABLE artifacts ADD COLUMN validation_status TEXT NOT NULL DEFAULT 'pending';
+   ALTER TABLE artifacts ADD COLUMN diff_text TEXT;
+   ALTER TABLE artifacts ADD COLUMN diff_stat TEXT;
+   ALTER TABLE artifacts ADD COLUMN metadata TEXT;
+   ALTER TABLE artifacts ADD COLUMN modified_at TEXT;`,
 ];
 
 export interface DbStatus {
@@ -436,21 +445,31 @@ export class DatabaseManager {
     this.db
       .prepare(
         `INSERT OR REPLACE INTO artifacts
-         (artifact_id, run_id, task_id, title, type, file_path,
-          file_size, mime_type, hash_sha256, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (artifact_id, run_id, task_id, step_id, title, type, path, file_path,
+          file_size, mime_type, hash_sha256, summary, origin, validation_status,
+          diff_text, diff_stat, metadata, created_at, modified_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         artifact.artifactId,
         artifact.runId,
         artifact.taskId ?? null,
+        artifact.stepId ?? null,
         artifact.title,
         artifact.type,
+        artifact.path,
         artifact.filePath,
         artifact.fileSize,
         artifact.mimeType ?? null,
         artifact.hashSha256 ?? null,
+        artifact.summary ?? null,
+        artifact.origin,
+        artifact.validationStatus,
+        artifact.diff ?? null,
+        artifact.diffStat ?? null,
+        artifact.metadata ? JSON.stringify(artifact.metadata) : null,
         artifact.createdAt,
+        artifact.modifiedAt ?? null,
       );
   }
 
@@ -466,6 +485,33 @@ export class DatabaseManager {
       .prepare("SELECT * FROM artifacts WHERE task_id = ? ORDER BY created_at")
       .all(taskId) as Record<string, unknown>[];
     return rows.map(rowToArtifact);
+  }
+
+  updateArtifact(artifactId: string, updates: Partial<ArtifactRecord>): void {
+    const fields: string[] = [];
+    const values: unknown[] = [];
+
+    for (const [key, value] of Object.entries(updates)) {
+      const col = snakeCase(key);
+      if (col === "metadata") {
+        fields.push(`${col} = ?`);
+        values.push(value ? JSON.stringify(value) : null);
+      } else {
+        fields.push(`${col} = ?`);
+        values.push(value ?? null);
+      }
+    }
+
+    if (fields.length === 0) return;
+    values.push(artifactId);
+
+    this.db
+      .prepare(`UPDATE artifacts SET ${fields.join(", ")} WHERE artifact_id = ?`)
+      .run(...values);
+  }
+
+  deleteArtifact(artifactId: string): void {
+    this.db.prepare("DELETE FROM artifacts WHERE artifact_id = ?").run(artifactId);
   }
 
   // ── Checkpoints ───────────────────────────────────
@@ -686,10 +732,23 @@ function rowToRun(row: Record<string, unknown>): Run {
     title: row.title as string,
     status: row.status as Run["status"],
     mode: (row.mode as Run["mode"]) ?? "auto",
+    userGoal: (row.user_goal as string) ?? undefined,
     taskCount: (row.task_count as number) ?? 0,
     completedTaskCount: (row.completed_task_count as number) ?? 0,
+    artifactCount: 0,
+    fileChangeCount: 0,
+    errorCount: (row.error_count as number) ?? 0,
+    retryCount: (row.retry_count as number) ?? 0,
+    approvalCount: 0,
     promptPath: (row.prompt_path as string) ?? undefined,
     planPath: (row.plan_path as string) ?? undefined,
+    startedAt: (row.started_at as string) ?? undefined,
+    finishedAt: (row.finished_at as string) ?? undefined,
+    durationMs: (row.total_duration_ms as number) ?? undefined,
+    timeline: [],
+    approvals: [],
+    errors: [],
+    fileChanges: [],
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   };
@@ -738,6 +797,7 @@ function rowToStep(row: Record<string, unknown>): Step {
     expectedResult: (row.expected_result as string) ?? undefined,
     requiresApproval: (row.requires_approval as number) === 1,
     exitCode: (row.exit_code as number) ?? undefined,
+    dependsOn: [],
     order: (row.order as number) ?? 0,
     startedAt: (row.started_at as string) ?? undefined,
     finishedAt: (row.finished_at as string) ?? undefined,
@@ -751,13 +811,24 @@ function rowToArtifact(row: Record<string, unknown>): ArtifactRecord {
     artifactId: row.artifact_id as string,
     runId: row.run_id as string,
     taskId: (row.task_id as string) ?? undefined,
+    stepId: (row.step_id as string) ?? undefined,
     title: row.title as string,
     type: row.type as string,
+    path: (row.path as string) ?? (row.file_path as string),
     filePath: row.file_path as string,
     fileSize: (row.file_size as number) ?? 0,
     mimeType: (row.mime_type as string) ?? undefined,
     hashSha256: (row.hash_sha256 as string) ?? undefined,
+    summary: (row.summary as string) ?? undefined,
+    origin: (row.origin as ArtifactRecord["origin"]) ?? "expected",
+    validationStatus: (row.validation_status as ArtifactRecord["validationStatus"]) ?? "pending",
+    diff: (row.diff_text as string) ?? undefined,
+    diffStat: (row.diff_stat as string) ?? undefined,
+    metadata: row.metadata
+      ? (JSON.parse(row.metadata as string) as Record<string, unknown>)
+      : undefined,
     createdAt: row.created_at as string,
+    modifiedAt: (row.modified_at as string) ?? undefined,
   };
 }
 
