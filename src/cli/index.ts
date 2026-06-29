@@ -10,6 +10,11 @@ import { logsCommand } from "./commands/logs.command.js";
 import { resumeCommand } from "./commands/resume.command.js";
 import { retryCommand } from "./commands/retry.command.js";
 import { inspectCommand } from "./commands/inspect.command.js";
+import { showCommand } from "./commands/show.command.js";
+import { historyCommand } from "./commands/history.command.js";
+import { duplicateCommand } from "./commands/duplicate.command.js";
+import { diffCommand } from "./commands/diff.command.js";
+import { exportCommand } from "./commands/export.command.js";
 import { stopCommand } from "./commands/stop.command.js";
 import { cancelCommand } from "./commands/cancel.command.js";
 import { cleanCommand } from "./commands/clean.command.js";
@@ -50,14 +55,35 @@ import {
   stepDenyCommand,
   stepApproveAllCommand,
 } from "./commands/step.command.js";
+import { inputCommand } from "./commands/input.command.js";
+import { watchCommand } from "./commands/watch.command.js";
+import { killCommand } from "./commands/kill.command.js";
+import {
+  approveCommand,
+  rejectCommand,
+  continueCommand,
+  overrideCommand,
+} from "./commands/approve.command.js";
+import {
+  templatesListCommand,
+  templatesShowCommand,
+  templatesCategoriesCommand,
+  templatesInferCommand,
+} from "./commands/templates.command.js";
+import { scanCommand } from "./commands/scan.command.js";
+import { planCommand } from "./commands/plan.command.js";
+import { artifactsCommand } from "./commands/artifacts.command.js";
+import { validateCommand } from "./commands/validate.command.js";
+import { pauseCommand } from "./commands/pause.command.js";
+import { graphCommand } from "./commands/graph.command.js";
+import { skipCommand } from "./commands/skip.command.js";
+import { reportCommand } from "./commands/report.command.js";
 
 const program = new Command();
 
 program
   .name("flowtask")
-  .description(
-    "Local-first AI task runtime CLI — turn prompts into visible, validated, resumable AI task flows",
-  )
+  .description("AI workflow orchestrator. Give AI a task. Watch it run.")
   .version("0.1.0");
 
 program
@@ -121,13 +147,22 @@ program
   )
   .action(runCommand);
 
-program.command("status").description("Show current project and run status").action(statusCommand);
+program
+  .command("status")
+  .description("Show current project and run status")
+  .argument("[runId]", "Run ID to show status for")
+  .action((runId?: string) => {
+    statusCommand(runId);
+  });
 
 program
   .command("runs")
   .description("List all runs in the project")
-  .option("--status <status>", "Filter by status")
+  .option("--status <status>", "Filter by status (comma-separated)")
   .option("--limit <number>", "Limit number of results", "20")
+  .option("--offset <number>", "Skip N results", "0")
+  .option("--mode <mode>", "Filter by mode (comma-separated)")
+  .option("--query <query>", "Search by title or user goal")
   .action(runsCommand);
 
 program
@@ -175,13 +210,28 @@ program
 program
   .command("logs")
   .description("Show logs for runs and tasks")
+  .argument("[runId]", "Run ID (optional, uses active run if omitted)")
   .option("--follow", "Follow logs in real time (tail -f style)")
-  .option("--run <runId>", "Filter by run ID")
+  .option("--run <runId>", "Filter by run ID (alternative to positional arg)")
   .option("--task <taskId>", "Filter by task ID")
   .option("--validation", "Show validation logs only")
   .option("--runtime", "Show runtime logs only")
   .option("--tail <number>", "Number of lines to show from the end", "80")
-  .action(logsCommand);
+  .action(
+    (
+      runId: string | undefined,
+      opts: {
+        follow?: boolean;
+        run?: string;
+        task?: string;
+        validation?: boolean;
+        runtime?: boolean;
+        tail?: string;
+      },
+    ) => {
+      logsCommand({ ...opts, run: runId ?? opts.run });
+    },
+  );
 
 program
   .command("resume")
@@ -194,12 +244,14 @@ program
 
 program
   .command("retry")
-  .description("Retry a failed task immediately")
-  .argument("<taskId>", "Task ID to retry")
+  .description("Retry a failed task, failed tasks in a run, or from a point in the workflow")
+  .argument("<taskOrRunId>", "Task ID to retry (or run ID with --failed-only or --from)")
   .option("--run <runId>", "Run ID containing the task")
   .option("--continue", "Continue remaining pending tasks after retry")
   .option("--force", "Force retry even if maxRetries reached")
   .option("--dry-run", "Show retry plan without executing")
+  .option("--failed-only", "Retry all failed and interrupted tasks in the run")
+  .option("--from <taskId>", "Retry all tasks from this point forward")
   .action(retryCommand);
 
 program
@@ -209,9 +261,136 @@ program
   .action(inspectCommand);
 
 program
+  .command("show")
+  .description("Show detailed run information including timeline, cost, and full history")
+  .argument("<runId>", "Run ID to show")
+  .option("--json", "Output as JSON")
+  .option("--full", "Show full details without truncation")
+  .action(showCommand);
+
+program
+  .command("history")
+  .description("Search and filter run history")
+  .option("--status <status>", "Filter by status (comma-separated)")
+  .option("--limit <number>", "Limit results", "30")
+  .option("--offset <number>", "Skip N results", "0")
+  .option("--mode <mode>", "Filter by mode (comma-separated)")
+  .option("--query <query>", "Search by title or user goal")
+  .option("--created-after <date>", "Filter by created after (ISO date)")
+  .option("--created-before <date>", "Filter by created before (ISO date)")
+  .option("--has-errors", "Only show runs with errors")
+  .option("--unfinished", "Only show unfinished runs")
+  .option("--json", "Output as JSON")
+  .action(historyCommand);
+
+program
+  .command("duplicate")
+  .description("Duplicate an existing run with its task structure")
+  .argument("<runId>", "Run ID to duplicate")
+  .option("--title <title>", "New title for the duplicated run")
+  .option("--no-tasks", "Do not copy tasks from the source run")
+  .option("--dry-run", "Show what would be duplicated without executing")
+  .action(duplicateCommand);
+
+program
+  .command("diff")
+  .description("Show workflow diff (expected vs actual) or compare two runs")
+  .argument("<runId>", "Run ID for workflow diff (or first run for comparison)")
+  .argument("[compareRunId]", "Second run ID for run comparison")
+  .option("--json", "Output as JSON")
+  .option("--detailed", "Show detailed diffs")
+  .option("--workflow", "Show workflow diff (expected vs actual) for a single run")
+  .action(
+    (
+      runId: string,
+      compareRunId: string | undefined,
+      opts: { json?: boolean; detailed?: boolean; workflow?: boolean },
+    ) => {
+      diffCommand(runId, compareRunId, opts);
+    },
+  );
+
+program
+  .command("export")
+  .description("Export run data to JSON or YAML")
+  .argument("<runId>", "Run ID to export")
+  .option("--format <format>", "Output format: json | yaml", "json")
+  .option("--out <file>", "Save to file instead of stdout")
+  .action(exportCommand);
+
+program
   .command("stop")
   .description("Stop the current running task and its executor process")
   .action(stopCommand);
+
+program
+  .command("kill")
+  .description("Kill a stuck or waiting process by run ID")
+  .argument("<runId>", "Run ID of the process to kill")
+  .action(killCommand);
+
+program
+  .command("watch")
+  .description("Watch the status and recent output of an interactive process")
+  .argument("<runId>", "Run ID to watch")
+  .option("--follow", "Continuously follow session output in real time")
+  .option("--poll-interval <ms>", "Poll interval in ms when following", "2000")
+  .action(watchCommand);
+
+program
+  .command("input")
+  .description("Send input to a waiting process in an interactive session")
+  .argument("<runId>", "Run ID of the waiting process")
+  .argument("[input]", "Input text to send")
+  .option("--secure", "Do not log the input value")
+  .action(async (runId: string, input: string | undefined, options: { secure?: boolean }) => {
+    if (!input && process.stdin.isTTY) {
+      const { createInterface } = await import("node:readline");
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      rl.question("Input: ", (answer: string) => {
+        rl.close();
+        inputCommand(runId, answer, options);
+      });
+      return;
+    }
+    inputCommand(runId, input ?? "", options);
+  });
+
+program
+  .command("approve")
+  .description("Approve an interactive prompt (sends 'y' to a waiting process)")
+  .argument("<runId>", "Run ID of the waiting process")
+  .option("--run <runId>", "Run ID (alternative position)")
+  .action((runId: string, options: Record<string, unknown>) => {
+    approveCommand(runId, options);
+  });
+
+program
+  .command("reject")
+  .description("Reject an interactive prompt (sends 'n' to a waiting process)")
+  .argument("<runId>", "Run ID of the waiting process")
+  .option("--run <runId>", "Run ID (alternative position)")
+  .action((runId: string, options: Record<string, unknown>) => {
+    rejectCommand(runId, options);
+  });
+
+program
+  .command("continue")
+  .description("Send empty input (enter) to a waiting process to continue")
+  .argument("<runId>", "Run ID of the waiting process")
+  .option("--run <runId>", "Run ID (alternative position)")
+  .action((runId: string, options: Record<string, unknown>) => {
+    continueCommand(runId, options);
+  });
+
+program
+  .command("override")
+  .description("Override an approval gate (force proceed despite risk)")
+  .argument("<runId>", "Run ID of the blocked process")
+  .option("--run <runId>", "Run ID (alternative position)")
+  .action((runId: string, options: Record<string, unknown>) => {
+    overrideCommand(runId, options);
+  });
 
 program
   .command("cancel")
@@ -226,6 +405,148 @@ program
   .option("--status <status>", "Delete runs with specific status")
   .option("--dry-run", "Show what would be deleted without actually deleting")
   .action(cleanCommand);
+
+program
+  .command("scan")
+  .description("Scan the workspace and build compact context")
+  .option("--prompt <text>", "Optional prompt to guide what to scan for")
+  .option("--output <path>", "Output directory for scan cache")
+  .option("--json", "Output as JSON")
+  .action((opts: { prompt?: string; output?: string; json?: boolean }) => {
+    scanCommand(opts);
+  });
+
+program
+  .command("plan")
+  .description("Generate a workflow plan from a prompt without executing")
+  .argument("<prompt>", "The prompt describing the work to be done")
+  .option("--template <name>", "Template to guide planning")
+  .option("--save", "Save the plan as a run for later execution")
+  .option("--json", "Output as JSON")
+  .option("--output <file>", "Save plan to file")
+  .option("--planner <mode>", "Planner mode: simple | ai | auto", "auto")
+  .action(
+    (
+      prompt: string,
+      opts: {
+        template?: string;
+        save?: boolean;
+        json?: boolean;
+        output?: string;
+        planner?: string;
+      },
+    ) => {
+      planCommand(prompt, opts);
+    },
+  );
+
+program
+  .command("artifacts")
+  .description("List artifacts produced by a run")
+  .argument("[runId]", "Run ID to list artifacts for")
+  .option("--task <taskId>", "Filter by task ID")
+  .option("--type <type>", "Filter by artifact type")
+  .option("--json", "Output as JSON")
+  .option("--full", "Show full details")
+  .action(
+    (
+      runId: string | undefined,
+      opts: { task?: string; type?: string; json?: boolean; full?: boolean },
+    ) => {
+      artifactsCommand(runId ?? "", opts);
+    },
+  );
+
+program
+  .command("validate")
+  .description("Validate a run's task results")
+  .argument("[runId]", "Run ID to validate")
+  .option("--task <taskId>", "Validate a specific task")
+  .option("--step <stepId>", "Validate a specific step")
+  .option("--verbose", "Show detailed check results")
+  .action(
+    (runId: string | undefined, opts: { task?: string; step?: string; verbose?: boolean }) => {
+      validateCommand(runId ?? "", opts);
+    },
+  );
+
+program
+  .command("pause")
+  .description("Pause a running workflow")
+  .argument("[runId]", "Run ID to pause")
+  .option("--reason <text>", "Reason for pausing")
+  .action((runId: string | undefined, opts: { reason?: string }) => {
+    pauseCommand(runId ?? "", opts);
+  });
+
+program
+  .command("graph")
+  .description("Show workflow graph visualization")
+  .argument("[runId]", "Run ID to visualize")
+  .option("--json", "Output as JSON")
+  .action((runId: string | undefined, opts: { json?: boolean }) => {
+    graphCommand(runId ?? "", opts);
+  });
+
+program
+  .command("skip")
+  .description("Skip a step in a task")
+  .argument("<stepId>", "Step ID to skip")
+  .argument("[runId]", "Run ID containing the step (optional, uses active run)")
+  .option("--run <runId>", "Run ID containing the step (alternative to positional arg)")
+  .option("--task <taskId>", "Task ID containing the step")
+  .option("--reason <text>", "Reason for skipping")
+  .action(
+    (
+      stepId: string,
+      runId: string | undefined,
+      opts: { run?: string; task?: string; reason?: string },
+    ) => {
+      skipCommand(stepId, { ...opts, run: runId ?? opts.run });
+    },
+  );
+
+program
+  .command("report")
+  .description("Generate a comprehensive final report for a run")
+  .argument("<runId>", "Run ID to generate report for")
+  .option("--json", "Output as JSON")
+  .option("--output <file>", "Save report to file")
+  .action(reportCommand);
+
+const templateCommand = new Command("templates")
+  .description("List, show, and infer workflow templates")
+  .addCommand(
+    new Command("list")
+      .description("List available workflow templates")
+      .argument("[filter]", "Optional filter by name, category, or workflow type")
+      .action(async (filter?: string) => {
+        await templatesListCommand(filter);
+      }),
+  )
+  .addCommand(
+    new Command("show")
+      .description("Show template details")
+      .argument("<templateId>", "Template ID to show")
+      .action(async (templateId: string) => {
+        await templatesShowCommand(templateId);
+      }),
+  )
+  .addCommand(
+    new Command("categories").description("List template categories").action(async () => {
+      await templatesCategoriesCommand();
+    }),
+  )
+  .addCommand(
+    new Command("infer")
+      .description("Infer which template best matches a prompt")
+      .argument("<prompt>", "Prompt to analyze")
+      .action(async (prompt: string) => {
+        await templatesInferCommand(prompt);
+      }),
+  );
+
+program.addCommand(templateCommand);
 
 program
   .command("doctor")

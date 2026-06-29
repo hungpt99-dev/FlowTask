@@ -1,6 +1,13 @@
 import type { Project } from "../schemas/project.schema.js";
 import type { FlowTaskConfig } from "../schemas/config.schema.js";
-import type { Run, RunMode, RunStatus, RunIndex } from "../schemas/run.schema.js";
+import type {
+  Run,
+  RunMode,
+  RunStatus,
+  RunIndex,
+  TimelineEvent,
+  TimelineEventType,
+} from "../schemas/run.schema.js";
 import type { Task, TaskStatus } from "../schemas/task.schema.js";
 import type { Step, StepStatus } from "../schemas/step.schema.js";
 import type {
@@ -12,8 +19,14 @@ import type {
 import type { ArtifactRecord } from "../schemas/artifact.schema.js";
 import type { CheckpointRecord } from "../schemas/checkpoint.schema.js";
 import type { TaskResultRecord } from "../schemas/task-result.schema.js";
-import type { FlowTaskEvent } from "../schemas/event.schema.js";
+import type { FlowTaskEvent, AuditEvent, AuditAction } from "../schemas/event.schema.js";
 import type { ProjectState, RunState } from "../schemas/state.schema.js";
+import type {
+  TimelineFilter,
+  AuditFilter,
+  RunStatusSummary,
+  StepProgress,
+} from "../core/event-store.js";
 import type { DbStatus } from "../core/database-manager.js";
 import type { ReplanStrategy, ReplanResult } from "../core/workflow-replanner.js";
 import type {
@@ -36,6 +49,12 @@ import { ArtifactManager } from "../core/artifact-manager.js";
 import { WorkflowManager } from "../core/workflow-manager.js";
 import { WorkflowReplanner } from "../core/workflow-replanner.js";
 import { RunLifecycle } from "../core/run-lifecycle.js";
+import {
+  PluginManager,
+  type Plugin,
+  type PluginMeta,
+  type PluginCapability,
+} from "../core/plugin-manager.js";
 import path from "node:path";
 import { dbPath } from "../utils/paths.js";
 
@@ -61,6 +80,7 @@ export class FlowTaskAPI {
   private artifactManager: ArtifactManager;
   private _runLifecycle: RunLifecycle | null = null;
   private runLifecyclePromise: Promise<RunLifecycle> | null = null;
+  private pluginManager: PluginManager;
 
   constructor(options: ApiOptions = {}) {
     this.rootPath = options.rootPath ?? process.cwd();
@@ -71,6 +91,7 @@ export class FlowTaskAPI {
     this.logManager = new LogManager(this.rootPath);
     this.stepManager = new StepManager(this.rootPath);
     this.artifactManager = new ArtifactManager();
+    this.pluginManager = new PluginManager();
   }
 
   getRootPath(): string {
@@ -86,6 +107,7 @@ export class FlowTaskAPI {
     this.stepManager = new StepManager(rootPath);
     this._runLifecycle = null;
     this.runLifecyclePromise = null;
+    this.pluginManager = new PluginManager();
   }
 
   // ── Database ────────────────────────────────────────
@@ -436,7 +458,15 @@ export class FlowTaskAPI {
     taskId: string,
     fileName: string,
     content: string,
-  ): Promise<import("../core/artifact-manager.js").Artifact> {
+  ): Promise<{
+    artifactId: string;
+    runId: string;
+    taskId?: string;
+    type: string;
+    title: string;
+    path: string;
+    createdAt: string;
+  }> {
     return this.artifactManager.saveArtifact(this.rootPath, runId, taskId, fileName, content);
   }
 
@@ -483,6 +513,117 @@ export class FlowTaskAPI {
 
   async appendEvent(runId: string, event: Omit<FlowTaskEvent, "time">): Promise<void> {
     return this.eventStore.appendToRun(runId, event);
+  }
+
+  // ── Timeline ──────────────────────────────────────────
+
+  async appendTimeline(
+    runId: string,
+    type: TimelineEventType,
+    message?: string,
+    details?: Record<string, unknown>,
+    taskId?: string,
+    stepId?: string,
+    status?: string,
+  ): Promise<TimelineEvent> {
+    return this.eventStore.appendTimeline(runId, type, message, details, taskId, stepId, status);
+  }
+
+  async getTimeline(runId: string, filter?: TimelineFilter): Promise<TimelineEvent[]> {
+    return this.eventStore.getTimeline(runId, filter);
+  }
+
+  async searchTimeline(runId: string, query: string): Promise<TimelineEvent[]> {
+    return this.eventStore.searchTimeline(runId, query);
+  }
+
+  async getTimelineSummary(runId: string): Promise<{
+    total: number;
+    byType: Record<string, number>;
+    firstEvent: TimelineEvent | null;
+    lastEvent: TimelineEvent | null;
+  }> {
+    return this.eventStore.getTimelineSummary(runId);
+  }
+
+  // ── Audit Log ─────────────────────────────────────────
+
+  async appendAudit(
+    runId: string,
+    action: AuditAction,
+    message?: string,
+    details?: Record<string, unknown>,
+    actor?: string,
+    target?: string,
+    severity?: AuditEvent["severity"],
+  ): Promise<AuditEvent> {
+    return this.eventStore.appendAudit(runId, action, message, details, actor, target, severity);
+  }
+
+  async getAuditLog(runId: string, filter?: AuditFilter): Promise<AuditEvent[]> {
+    return this.eventStore.getAuditLog(runId, filter);
+  }
+
+  async searchAuditLog(runId: string, query: string): Promise<AuditEvent[]> {
+    return this.eventStore.searchAuditLog(runId, query);
+  }
+
+  async getAuditSummary(runId: string): Promise<{
+    total: number;
+    byAction: Record<string, number>;
+    bySeverity: Record<string, number>;
+    errors: number;
+    warnings: number;
+    firstEvent: AuditEvent | null;
+    lastEvent: AuditEvent | null;
+  }> {
+    return this.eventStore.getAuditSummary(runId);
+  }
+
+  // ── Real-Time Visibility ──────────────────────────────
+
+  getActiveRuns(): string[] {
+    return this.eventStore.getActiveRuns();
+  }
+
+  isRunActive(runId: string): boolean {
+    return this.eventStore.isRunActive(runId);
+  }
+
+  markRunActive(runId: string): void {
+    this.eventStore.markRunActive(runId);
+  }
+
+  markRunInactive(runId: string): void {
+    this.eventStore.markRunInactive(runId);
+  }
+
+  subscribeToRun(runId: string, callback: (event: FlowTaskEvent) => void): () => void {
+    return this.eventStore.subscribeToRun(runId, callback);
+  }
+
+  async getRunStatusSummary(
+    runId: string,
+    runStatus: RunStatus,
+    steps?: { status: string }[],
+    events?: FlowTaskEvent[],
+    errorCount?: number,
+    retryCount?: number,
+    startedAt?: string,
+  ): Promise<RunStatusSummary> {
+    return this.eventStore.getRunStatusSummary(
+      runId,
+      runStatus,
+      steps,
+      events,
+      errorCount,
+      retryCount,
+      startedAt,
+    );
+  }
+
+  getStepProgress(steps: { status: string }[]): StepProgress {
+    return this.eventStore.getStepProgress(steps);
   }
 
   // ── Logs ────────────────────────────────────────────
@@ -565,6 +706,41 @@ export class FlowTaskAPI {
     return keys.sort();
   }
 
+  // ── Plugin ──────────────────────────────────────────
+
+  async initPlugins(): Promise<void> {
+    const config = await this.loadConfig();
+    await this.pluginManager.initialize(this.rootPath, config);
+  }
+
+  getPluginManager(): PluginManager {
+    return this.pluginManager;
+  }
+
+  registerPlugin(plugin: Plugin): void {
+    this.pluginManager.register(plugin);
+  }
+
+  unregisterPlugin(pluginId: string): void {
+    this.pluginManager.unregister(pluginId);
+  }
+
+  listPlugins(): PluginMeta[] {
+    return this.pluginManager.listPlugins();
+  }
+
+  getPlugin(pluginId: string): Plugin | undefined {
+    return this.pluginManager.getPlugin(pluginId);
+  }
+
+  getPluginsByCapability(capability: PluginCapability): Plugin[] {
+    return this.pluginManager.getPluginsByCapability(capability);
+  }
+
+  hasPlugin(pluginId: string): boolean {
+    return this.pluginManager.hasPlugin(pluginId);
+  }
+
   // ── Run Lifecycle ───────────────────────────────────
 
   private async getRunLifecycle(): Promise<RunLifecycle> {
@@ -610,7 +786,10 @@ export class FlowTaskAPI {
     return this.withRunLifecycle((lifecycle) => lifecycle.continueRun(runId, quality));
   }
 
-  async retryTask(runId: string, taskId: string): Promise<boolean> {
+  async retryTask(
+    runId: string,
+    taskId: string,
+  ): Promise<boolean | "waiting" | "waiting_input" | "waiting_approval"> {
     return this.withRunLifecycle((lifecycle) => lifecycle.executeSingleTask(runId, taskId));
   }
 
@@ -662,6 +841,122 @@ export class FlowTaskAPI {
         `Failed to build TaskContext: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+  }
+
+  // ── Templates ───────────────────────────────────────
+
+  private templateRegistry: import("../templates/template-registry.js").TemplateRegistry | null =
+    null;
+
+  private async getTemplateRegistry(): Promise<
+    import("../templates/template-registry.js").TemplateRegistry
+  > {
+    if (!this.templateRegistry) {
+      const { TemplateRegistry } = await import("../templates/template-registry.js");
+      this.templateRegistry = new TemplateRegistry();
+    }
+    return this.templateRegistry;
+  }
+
+  async listTemplateNames(): Promise<
+    {
+      id: string;
+      name: string;
+      description: string;
+      category: string;
+      workflowType: string;
+      typicalSteps: number;
+    }[]
+  > {
+    const reg = await this.getTemplateRegistry();
+    return reg.getTemplateNames();
+  }
+
+  async getTemplate(
+    templateId: string,
+  ): Promise<import("../schemas/template.schema.js").WorkflowTemplate | undefined> {
+    const reg = await this.getTemplateRegistry();
+    return reg.getTemplate(templateId);
+  }
+
+  async findTemplates(
+    filter: import("../templates/template-registry.js").TemplateFilter,
+  ): Promise<import("../schemas/template.schema.js").WorkflowTemplate[]> {
+    const reg = await this.getTemplateRegistry();
+    return reg.findTemplates(filter);
+  }
+
+  async inferTemplate(
+    prompt: string,
+  ): Promise<{ templateId: string; templateName: string } | null> {
+    const { inferTemplateId } = await import("../templates/template-registry.js");
+    const id = inferTemplateId(prompt);
+    const reg = await this.getTemplateRegistry();
+    const template = await reg.getTemplate(id);
+    if (!template) return null;
+    return { templateId: template.id, templateName: template.name };
+  }
+
+  // ── Final Report ────────────────────────────────────
+
+  async getFinalReportData(
+    runId: string,
+  ): Promise<import("../core/final-report.js").ReportData | null> {
+    const run = await this.runManager.loadRun(runId);
+    if (!run) return null;
+    const tasks = await this.runManager.loadTasks(runId);
+    const events = await this.eventStore.readRunEvents(runId);
+    const timeline = await this.runManager.getRunTimeline(runId);
+    const runErrors = await this.runManager.getRunErrors(runId);
+    const approvals = await this.runManager.getRunApprovals(runId);
+    const allStepsByTask = await this.stepManager.loadAllSteps(runId);
+    const steps = Object.values(allStepsByTask).flat();
+    const artifacts = this.db ? this.db.getArtifactsByRun(runId) : [];
+    const runState = await this.stateManager.loadRunState(runId);
+    const auditSummary = await this.eventStore.getAuditSummary(runId);
+    const generator = new (await import("../core/final-report.js")).FinalReportGenerator();
+    const workflowState = runState
+      ? {
+          runId,
+          status: run.status as import("../schemas/workflow-lifecycle.schema.js").WorkflowStatus,
+          retryCount: run.retryCount ?? 0,
+          errorCount: run.errorCount ?? 0,
+          lifecycle: timeline.map((t) => ({
+            type: t.type as import("../schemas/workflow-lifecycle.schema.js").WorkflowLifecycleEventType,
+            timestamp: t.timestamp,
+            workflowStatus:
+              run.status as import("../schemas/workflow-lifecycle.schema.js").WorkflowStatus,
+            message: t.message,
+            details: t.details,
+          })),
+          updatedAt: run.updatedAt,
+        }
+      : null;
+
+    return generator.generateReport(run, tasks, {
+      rootPath: this.rootPath,
+      steps,
+      artifacts,
+      fileChanges: [],
+      validations: [],
+      events,
+      timeline,
+      approvals,
+      runErrors,
+      workflowState,
+      auditSummary: {
+        total: auditSummary.total,
+        errors: auditSummary.errors,
+        warnings: auditSummary.warnings,
+      },
+    });
+  }
+
+  async getFinalReportMarkdown(runId: string): Promise<string | null> {
+    const data = await this.getFinalReportData(runId);
+    if (!data) return null;
+    const generator = new (await import("../core/final-report.js")).FinalReportGenerator();
+    return generator.generateMarkdown(data);
   }
 
   // ── Info ────────────────────────────────────────────

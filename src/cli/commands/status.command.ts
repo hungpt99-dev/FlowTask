@@ -4,7 +4,7 @@ import picocolors from "picocolors";
 import { coloredSymbol, projectStatusLabel } from "../../ui/formatters/status-format.js";
 import { formatTimeAgo } from "../../ui/formatters/duration-format.js";
 
-export async function statusCommand(): Promise<void> {
+export async function statusCommand(runIdArg?: string): Promise<void> {
   const rootPath = process.cwd();
   const manager = new ProjectManager();
 
@@ -25,12 +25,17 @@ export async function statusCommand(): Promise<void> {
   console.log(`  ${picocolors.dim("Status:")}   ${projectStatusLabel(state?.status ?? "unknown")}`);
 
   const runManager = new RunManager(rootPath);
-  const targetRunId = state?.activeRunId ?? state?.lastRunId;
+  const targetRunId = runIdArg ?? state?.activeRunId ?? state?.lastRunId;
 
   if (targetRunId) {
     const run = await runManager.loadRun(targetRunId);
     if (run) {
-      const label = run.runId === state?.activeRunId ? "Active Run" : "Last Run";
+      const label =
+        !runIdArg && run.runId === state?.activeRunId
+          ? "Active Run"
+          : !runIdArg && run.runId === state?.lastRunId && !state?.activeRunId
+            ? "Last Run"
+            : "Run";
       console.log(picocolors.dim(`  ${"─".repeat(50)}`));
       console.log(`  ${picocolors.bold(label)}`);
       console.log(`  ${picocolors.dim("Title:")}    ${picocolors.cyan(run.title)}`);
@@ -57,6 +62,8 @@ export async function statusCommand(): Promise<void> {
           console.log(`    ${icon} ${t.title}${isCurrent}`);
         }
       }
+    } else if (runIdArg) {
+      console.log(picocolors.yellow(`  Run not found: ${runIdArg}`));
     }
   }
 
