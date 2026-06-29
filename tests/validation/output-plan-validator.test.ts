@@ -5,6 +5,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { writeTextFile, ensureDir } from "../../src/utils/fs.js";
+import type { AiVerdict } from "../../src/validation/ai-validator.js";
+import type { AiValidator } from "../../src/validation/ai-validator.js";
 
 const baseResult = {
   status: "done" as const,
@@ -13,6 +15,14 @@ const baseResult = {
   startedAt: now(),
   finishedAt: now(),
 };
+
+function createMockAiValidator(verdict: AiVerdict): AiValidator {
+  return {
+    validate: async () => verdict,
+    appendSuggestionToContext: (ctx: string, v: AiVerdict) =>
+      `${ctx}\n\n## AI Validation Feedback\n\n${v.suggestion}\n`,
+  } as unknown as AiValidator;
+}
 
 describe("OutputPlanValidator", () => {
   let tempDir: string;
@@ -336,6 +346,96 @@ describe("OutputPlanValidator", () => {
       expect(checks[0]?.message).toContain("Manual verification needed");
       expect(checks[0]?.evidence).toContain("Flagged for manual review");
     });
+
+    it("should pass when AiValidator returns passed verdict", async () => {
+      const mockAi = createMockAiValidator({
+        status: "passed",
+        suggestion: "",
+        explanation: "AI review passed",
+        confidence: "high",
+        evidenceSummary: "Task completed",
+        evidenceGaps: [],
+      });
+      const validator = new OutputPlanValidator(mockAi);
+      const checks = await validator.validate(
+        [{ action: "create", target: "reviewed.txt", validationMethod: "ai_review" }],
+        { ...baseResult, output: "Created file successfully" },
+        tempDir,
+        "Create a new file",
+      );
+      expect(checks).toHaveLength(1);
+      expect(checks[0]?.type).toBe("ai_review");
+      expect(checks[0]?.status).toBe("passed");
+      expect(checks[0]?.message).toContain("AI review passed for create of reviewed.txt");
+      expect(checks[0]?.evidence).toBe("AI review completed");
+    });
+
+    it("should fail when AiValidator returns failed verdict with suggestion", async () => {
+      const mockAi = createMockAiValidator({
+        status: "failed",
+        suggestion: "File was not created: src/output.ts is missing",
+        explanation: "Required file missing",
+        confidence: "high",
+        evidenceSummary: "Evidence shows file missing",
+        evidenceGaps: ["src/output.ts"],
+      });
+      const validator = new OutputPlanValidator(mockAi);
+      const checks = await validator.validate(
+        [{ action: "create", target: "src/output.ts", validationMethod: "ai_review" }],
+        { ...baseResult, output: "" },
+        tempDir,
+        "Create the output file at src/output.ts",
+      );
+      expect(checks).toHaveLength(1);
+      expect(checks[0]?.type).toBe("ai_review");
+      expect(checks[0]?.status).toBe("failed");
+      expect(checks[0]?.message).toContain("AI review failed");
+      expect(checks[0]?.message).toContain("File was not created");
+      expect(checks[0]?.evidence).toContain("File was not created");
+    });
+
+    it("should return warning when AiValidator returns warning verdict with suggestion", async () => {
+      const mockAi = createMockAiValidator({
+        status: "warning",
+        suggestion: "Implementation is incomplete, missing error handling",
+        explanation: "Partial implementation detected",
+        confidence: "medium",
+        evidenceSummary: "Some criteria met but gaps remain",
+        evidenceGaps: ["error handling"],
+      });
+      const validator = new OutputPlanValidator(mockAi);
+      const checks = await validator.validate(
+        [{ action: "modify", target: "src/handler.ts", validationMethod: "ai_review" }],
+        { ...baseResult, output: "Modified handler.ts" },
+        tempDir,
+        "Modify the handler to add error handling",
+      );
+      expect(checks).toHaveLength(1);
+      expect(checks[0]?.type).toBe("ai_review");
+      expect(checks[0]?.status).toBe("warning");
+      expect(checks[0]?.message).toContain("AI review warning");
+      expect(checks[0]?.message).toContain("missing error handling");
+      expect(checks[0]?.evidence).toContain("missing error handling");
+    });
+
+    it("should fall back to flag for review when AiValidator throws", async () => {
+      const mockAi = {
+        validate: async () => {
+          throw new Error("API unavailable");
+        },
+        appendSuggestionToContext: (_ctx: string, _suggestion: string) => "",
+      } as unknown as AiValidator;
+      const validator = new OutputPlanValidator(mockAi);
+      const checks = await validator.validate(
+        [{ action: "create", target: "fails.txt", validationMethod: "ai_review" }],
+        baseResult,
+        tempDir,
+        "Create a file",
+      );
+      expect(checks).toHaveLength(1);
+      expect(checks[0]?.status).toBe("warning");
+      expect(checks[0]?.message).toContain("AI review needed");
+    });
   });
 
   describe("acceptance criteria on output plan items", () => {
@@ -544,6 +644,73 @@ describe("OutputPlanValidator", () => {
       );
       expect(checks).toHaveLength(1);
       expect(checks[0]?.status).toBe("warning");
+    });
+  });
+
+  describe("retry feedback loop", () => {
+    it("should embed suggestion in ai_review check details for extraction", async () => {
+      const mockAi = createMockAiValidator({
+        status: "failed",
+        suggestion: "Missing the main export function in src/index.ts",
+        explanation: "Required export missing",
+        confidence: "high",
+        evidenceSummary: "Evidence shows export is missing",
+        evidenceGaps: ["main export function"],
+      });
+      const validator = new OutputPlanValidator(mockAi);
+      const checks = await validator.validate(
+        [{ action: "modify", target: "src/index.ts", validationMethod: "ai_review" }],
+        { ...baseResult, output: "Modified file" },
+        tempDir,
+        "Add main export function to src/index.ts",
+      );
+      expect(checks).toHaveLength(1);
+      expect(checks[0]?.details?.verdict).toBeDefined();
+      const verdict = checks[0]?.details?.verdict as AiVerdict;
+      expect(verdict.status).toBe("failed");
+      expect(verdict.suggestion).toBe("Missing the main export function in src/index.ts");
+    });
+
+    it("should append suggestion to context via appendSuggestionToContext", async () => {
+      const contextPack = "# FlowTask Context Pack\n\n## Instructions\n- Do the thing\n";
+      const verdict: AiVerdict = {
+        status: "failed",
+        suggestion: "The file was not created. Please create src/output.ts.",
+        explanation: "Required file missing",
+        confidence: "high",
+        evidenceSummary: "Evidence shows file missing",
+        evidenceGaps: ["src/output.ts"],
+      };
+      const mockAi = createMockAiValidator(verdict);
+      const result = mockAi.appendSuggestionToContext(contextPack, verdict);
+      expect(result).toContain("## AI Validation Feedback");
+      expect(result).toContain(verdict.suggestion);
+      expect(result).toContain(contextPack);
+    });
+
+    it("should extract suggestion from failed ai_review check and append to context", async () => {
+      const suggestion = "Missing error handling in src/handler.ts";
+      const mockAi = createMockAiValidator({
+        status: "failed",
+        suggestion,
+        explanation: "Error handling missing",
+        confidence: "high",
+        evidenceSummary: "Evidence shows error handling is absent",
+        evidenceGaps: [suggestion],
+      });
+      const validator = new OutputPlanValidator(mockAi);
+      const checks = await validator.validate(
+        [{ action: "modify", target: "src/handler.ts", validationMethod: "ai_review" }],
+        { ...baseResult, output: "Modified handler" },
+        tempDir,
+        "Modify handler to add error handling",
+      );
+      const verdict = checks[0]?.details?.verdict as AiVerdict;
+      const contextPack = "# Context Pack\n## Current Task\nModify handler\n";
+      const updatedContext = mockAi.appendSuggestionToContext(contextPack, verdict);
+      expect(updatedContext).toContain("## AI Validation Feedback");
+      expect(updatedContext).toContain("Missing error handling");
+      expect(updatedContext).toContain("# Context Pack");
     });
   });
 });

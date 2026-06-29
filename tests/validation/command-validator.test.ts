@@ -29,6 +29,7 @@ function createConfig(overrides?: Partial<FlowTaskConfig>): FlowTaskConfig {
       resourceGuard: true,
       commands: [],
       vitest: { enabled: true, maxWorkers: 1, runMode: true },
+      aiValidation: "fallback",
     },
     logging: { maxInMemoryLines: 500, maxLineLength: 4000 },
     planner: {

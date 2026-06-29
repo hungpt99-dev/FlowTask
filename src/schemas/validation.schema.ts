@@ -7,6 +7,8 @@ export const ValidationCheckStatusSchema = z.enum([
   "failed",
   "warning",
   "skipped",
+  "needs_retry",
+  "needs_review",
 ]);
 
 export const ValidationCheckSchema = z.object({

@@ -29,6 +29,7 @@ function createConfig(overrides?: Partial<FlowTaskConfig>): FlowTaskConfig {
       resourceGuard: true,
       commands: [],
       vitest: { enabled: true, maxWorkers: 1, runMode: true },
+      aiValidation: "fallback",
     },
     logging: { maxInMemoryLines: 500, maxLineLength: 4000 },
     planner: {
@@ -105,6 +106,7 @@ describe("ValidationRunner", () => {
         resourceGuard: false,
         commands: [],
         vitest: { enabled: true, maxWorkers: 1, runMode: true },
+        aiValidation: "fallback",
       },
     });
     const serialRunner = new ValidationRunner(config);
@@ -144,6 +146,7 @@ describe("ValidationRunner", () => {
         resourceGuard: false,
         commands: [],
         vitest: { enabled: true, maxWorkers: 1, runMode: true },
+        aiValidation: "fallback",
       },
     });
     const timeoutRunner = new ValidationRunner(config);
@@ -169,6 +172,7 @@ describe("ValidationRunner", () => {
         resourceGuard: false,
         commands: [],
         vitest: { enabled: true, maxWorkers: 1, runMode: true },
+        aiValidation: "fallback",
       },
     });
     const cancelRunner = new ValidationRunner(config);
@@ -200,6 +204,7 @@ describe("ValidationRunner", () => {
         resourceGuard: false,
         commands: [],
         vitest: { enabled: true, maxWorkers: 1, runMode: true },
+        aiValidation: "fallback",
       },
       logging: { maxInMemoryLines: 3, maxLineLength: 4000 },
     });
@@ -237,6 +242,7 @@ describe("ValidationRunner", () => {
         resourceGuard: false,
         commands: [],
         vitest: { enabled: true, maxWorkers: 1, runMode: true },
+        aiValidation: "fallback",
       },
     });
     const tRunner = new ValidationRunner(config);

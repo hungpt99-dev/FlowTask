@@ -404,4 +404,47 @@ tasks:
       expect(status.dbStatus!.version).toBeGreaterThanOrEqual(0);
     });
   });
+
+  describe("TaskContext scanning", () => {
+    it("should return a TaskContext for a prompt", async () => {
+      const result = await api.getTaskContext("test project scanning");
+      expect(result.context).toBeDefined();
+      expect(result.context.projectMeta).toBeDefined();
+      expect(result.context.projectMeta.name).toBeTruthy();
+      expect(result.context.gitStatus).toBeDefined();
+      expect(result.context.contextPack).toBeTruthy();
+      expect(result.summary).toBeTruthy();
+    });
+
+    it("should return context pack with project metadata", async () => {
+      const result = await api.getTaskContext("project");
+      expect(result.context.projectMeta.type).toMatch(/code|mixed|docs/);
+      expect(result.context.projectMeta.languages).toBeDefined();
+      expect(result.context.contextPack).toContain("Project Context");
+    });
+
+    it("should handle non-code prompt gracefully", async () => {
+      const result = await api.getTaskContext("documentation readme");
+      expect(result.context).toBeDefined();
+      expect(result.context.keywordMatches).toBeDefined();
+      expect(result.summary).toBeTruthy();
+    });
+
+    it("should use custom cache directory", async () => {
+      const customCache = join(testDir, ".flowtask", "test-cache");
+      const result = await api.getTaskContext("cache test", customCache);
+      expect(result.context).toBeDefined();
+      expect(result.context.projectMeta).toBeDefined();
+    });
+
+    it("should return empty context for invalid root path", async () => {
+      const badApi = new FlowTaskAPI({ rootPath: "/nonexistent/path" });
+      const result = await badApi.getTaskContext("test");
+      expect(result.context.projectMeta.name).toBe("path");
+      expect(result.context.gitStatus.hasChanges).toBe(false);
+      expect(result.context.keywordMatches).toEqual([]);
+      expect(result.context.codeGraph).toBeNull();
+      expect(result.context.testResult).toBeNull();
+    });
+  });
 });

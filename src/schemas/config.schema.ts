@@ -89,6 +89,8 @@ export const ValidationConfigSchema = z.object({
   resourceGuard: z.boolean().default(true),
   commands: z.array(z.string()).default([]),
   vitest: VitestConfigSchema.default({}),
+  aiValidation: z.enum(["off", "fallback", "always", "high_risk_only"]).default("fallback"),
+  aiProvider: z.string().optional(),
 });
 
 export const HooksConfigSchema = z.object({

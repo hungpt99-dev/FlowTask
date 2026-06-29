@@ -86,6 +86,7 @@ export function generateDefaultConfig(): FlowTaskConfig {
         maxWorkers: 1,
         runMode: true,
       },
+      aiValidation: "fallback",
     },
     logging: {
       maxInMemoryLines: 500,

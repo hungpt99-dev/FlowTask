@@ -47,6 +47,7 @@ function makeMinimalConfig(): FlowTaskConfig {
       resourceGuard: true,
       commands: [],
       vitest: { enabled: true, maxWorkers: 1, runMode: true },
+      aiValidation: "fallback",
     },
     logging: { maxInMemoryLines: 500, maxLineLength: 4000 },
     limits: { maxRunMinutes: 120, maxTaskMinutes: 30, maxRetries: 2, maxLogSizeMb: 20 },

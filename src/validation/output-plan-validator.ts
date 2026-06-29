@@ -3,20 +3,33 @@ import type { OutputPlanItem } from "../schemas/output-plan.schema.js";
 import type { ExecutorResult } from "../executor/executor.js";
 import { fileExists, readTextFile, fileStat } from "../utils/fs.js";
 import { spawnWithPromise } from "../utils/process.js";
+import type { AiValidator } from "./ai-validator.js";
 import path from "node:path";
 
 export class OutputPlanValidator {
+  private aiValidator?: AiValidator;
+
+  constructor(aiValidator?: AiValidator) {
+    this.aiValidator = aiValidator;
+  }
+
   async validate(
     outputPlan: OutputPlanItem[],
     executorResult: ExecutorResult,
     projectRoot: string,
+    taskDescription?: string,
   ): Promise<ValidationCheck[]> {
     if (outputPlan.length === 0) return [];
 
     const checks: ValidationCheck[] = [];
 
     for (const item of outputPlan) {
-      const itemChecks = await this.validateItem(item, executorResult, projectRoot);
+      const itemChecks = await this.validateItem(
+        item,
+        executorResult,
+        projectRoot,
+        taskDescription,
+      );
       checks.push(...itemChecks);
     }
 
@@ -27,6 +40,7 @@ export class OutputPlanValidator {
     item: OutputPlanItem,
     executorResult: ExecutorResult,
     projectRoot: string,
+    taskDescription?: string,
   ): Promise<ValidationCheck[]> {
     const fullPath = path.isAbsolute(item.target)
       ? item.target
@@ -37,6 +51,7 @@ export class OutputPlanValidator {
       fullPath,
       executorResult,
       projectRoot,
+      taskDescription,
     );
 
     const checks: ValidationCheck[] = [primaryCheck];
@@ -59,6 +74,7 @@ export class OutputPlanValidator {
     fullPath: string,
     executorResult: ExecutorResult,
     projectRoot: string,
+    taskDescription?: string,
   ): Promise<ValidationCheck> {
     switch (item.validationMethod) {
       case "file_exists":
@@ -72,6 +88,9 @@ export class OutputPlanValidator {
       case "test":
         return this.validateByTest(item, fullPath, executorResult);
       case "ai_review":
+        if (this.aiValidator && taskDescription) {
+          return this.validateByAiReview(item, executorResult, taskDescription);
+        }
         return this.flagForReview(item, "ai_review");
       case "manual":
         return this.flagForReview(item, "manual");
@@ -366,6 +385,46 @@ export class OutputPlanValidator {
         fileExists: exists,
       },
     };
+  }
+
+  private async validateByAiReview(
+    item: OutputPlanItem,
+    executorResult: ExecutorResult,
+    taskDescription: string,
+  ): Promise<ValidationCheck> {
+    if (!this.aiValidator) {
+      return this.flagForReview(item, "ai_review");
+    }
+
+    try {
+      const verdict = await this.aiValidator.validate({
+        taskDescription: `${taskDescription}\n\nExpected output: ${item.action} ${item.target}${item.description ? ` — ${item.description}` : ""}`,
+        executorOutput: executorResult.output ?? "",
+        errorOutput: executorResult.error,
+        changedFiles: [item.target],
+      });
+
+      return {
+        type: "ai_review",
+        status: verdict.status,
+        path: item.target,
+        message:
+          verdict.status === "passed"
+            ? `AI review passed for ${item.action} of ${item.target}`
+            : verdict.status === "failed"
+              ? `AI review failed for ${item.action} of ${item.target}: ${verdict.suggestion}`
+              : `AI review warning for ${item.action} of ${item.target}: ${verdict.suggestion}`,
+        evidence: verdict.suggestion || "AI review completed",
+        details: {
+          action: item.action,
+          validationMethod: "ai_review",
+          target: item.target,
+          verdict,
+        },
+      };
+    } catch {
+      return this.flagForReview(item, "ai_review");
+    }
   }
 
   private flagForReview(item: OutputPlanItem, reviewType: "ai_review" | "manual"): ValidationCheck {
