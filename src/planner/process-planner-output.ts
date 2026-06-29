@@ -68,6 +68,27 @@ export async function processPlannerOutput(
       return id;
     });
 
+    const validationCommands = [...(aiTask.validation?.commands ?? [])];
+    if (aiTask.verificationCommand && !validationCommands.includes(aiTask.verificationCommand)) {
+      validationCommands.push(aiTask.verificationCommand);
+    }
+
+    const metadata: Record<string, unknown> = {};
+    if (aiTask.taskType && aiTask.taskType !== "general") metadata.taskType = aiTask.taskType;
+    if (aiTask.actionType && aiTask.actionType !== "execute")
+      metadata.actionType = aiTask.actionType;
+    if (aiTask.inputContext) metadata.inputContext = aiTask.inputContext;
+    if (aiTask.targetFiles && aiTask.targetFiles.length > 0)
+      metadata.targetFiles = aiTask.targetFiles;
+    if (aiTask.targetArtifacts && aiTask.targetArtifacts.length > 0)
+      metadata.targetArtifacts = aiTask.targetArtifacts;
+    if (aiTask.evidence && aiTask.evidence.length > 0) metadata.evidence = aiTask.evidence;
+    if (aiTask.approvalRequired) metadata.approvalRequired = aiTask.approvalRequired;
+    if (aiTask.retryPolicy) metadata.retryPolicy = aiTask.retryPolicy;
+    if (aiTask.timeout) metadata.timeout = aiTask.timeout;
+    if (aiTask.finalOutputContribution)
+      metadata.finalOutputContribution = aiTask.finalOutputContribution;
+
     tasks.push({
       id: taskId,
       runId: runIdFinal,
@@ -78,7 +99,7 @@ export async function processPlannerOutput(
       dependsOn: depTaskIds,
       acceptanceCriteria: aiTask.acceptanceCriteria,
       validation: {
-        commands: aiTask.validation?.commands ?? [],
+        commands: validationCommands,
         requiredArtifacts: aiTask.validation?.requiredArtifacts ?? [],
         requireGitDiff: aiTask.validation?.requireGitDiff ?? false,
       },
@@ -88,6 +109,7 @@ export async function processPlannerOutput(
       maxRetries: 2,
       createdAt: timestamp,
       updatedAt: timestamp,
+      metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
     });
   }
 

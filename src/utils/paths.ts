@@ -57,6 +57,14 @@ export function eventsJsonlPath(rootPath: string, runId: string): string {
   return path.join(getRunDir(rootPath, runId), "events.jsonl");
 }
 
+export function timelineJsonlPath(rootPath: string, runId: string): string {
+  return path.join(getRunDir(rootPath, runId), "timeline.jsonl");
+}
+
+export function auditJsonlPath(rootPath: string, runId: string): string {
+  return path.join(getRunDir(rootPath, runId), "audit.jsonl");
+}
+
 export function finalReportPath(rootPath: string, runId: string): string {
   return path.join(getRunDir(rootPath, runId), "final-report.md");
 }
@@ -99,6 +107,18 @@ export function getContextDir(rootPath: string, runId: string): string {
 
 export function getOutputsDir(rootPath: string, runId: string): string {
   return path.join(getRunDir(rootPath, runId), "outputs");
+}
+
+export function getFileSnapshotsDir(rootPath: string, runId: string): string {
+  return path.join(getRunDir(rootPath, runId), "file-snapshots");
+}
+
+export function getFileChangesDir(rootPath: string, runId: string): string {
+  return path.join(getRunDir(rootPath, runId), "file-changes");
+}
+
+export function getArtifactMetaPath(rootPath: string, runId: string, artifactId: string): string {
+  return path.join(getArtifactsDir(rootPath, runId), `${artifactId}.meta.json`);
 }
 
 export function getSnapshotsDir(rootPath: string, runId: string): string {

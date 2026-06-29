@@ -369,6 +369,28 @@ export class InternalAiPlanner implements Planner {
                     "file_exists | file_diff | file_content | command_output | test | ai_review | manual",
                 },
               ],
+              taskType:
+                "general | coding | documentation | research | data | writing | design | qa | release | operations | testing | analysis | review | approval | validation",
+              actionType:
+                "create | modify | delete | read | analyze | execute | validate | approve | review | transform | generate | investigate",
+              inputContext:
+                "What context information this task needs from previous steps (e.g., 'needs auth service output, validation results')",
+              targetFiles: ["src/files/to/modify.ts", "docs/to/create.md"],
+              targetArtifacts: ["report.md", "summary.txt"],
+              evidence: ["src/file.ts was created", "command exited with 0", "test passed"],
+              verificationCommand: "pnpm test -- --run",
+              approvalRequired: false,
+              retryPolicy: {
+                maxRetries: 2,
+                retryDelayMs: 1000,
+                retryBackoff: "linear | exponential | fixed",
+              },
+              timeout: {
+                durationMs: 60000,
+                action: "fail | retry | cancel | skip",
+              },
+              finalOutputContribution:
+                "This step produces the auth module which is the core of the feature",
             },
           ],
         },
@@ -402,6 +424,41 @@ export class InternalAiPlanner implements Planner {
     );
     parts.push(
       "- Do not use `requiredFiles` or `requiredContent`. These fields do not exist in the schema.",
+    );
+    parts.push("");
+    parts.push("## Structured Step Metadata Rules");
+    parts.push(
+      "- Set `taskType` to classify the kind of work: coding, documentation, research, data, writing, design, qa, release, operations, testing, analysis, review, approval, validation, or general.",
+    );
+    parts.push(
+      "- Set `actionType` to describe the primary action: create, modify, delete, read, analyze, execute, validate, approve, review, transform, generate, or investigate.",
+    );
+    parts.push(
+      "- Use `inputContext` to describe what information this task needs from previous steps. This helps the executor understand prerequisites.",
+    );
+    parts.push(
+      "- List concrete `targetFiles` that this task will create or modify. These should match the outputPlan entries.",
+    );
+    parts.push(
+      "- List non-file `targetArtifacts` this task produces (reports, summaries, checklists, decisions).",
+    );
+    parts.push(
+      "- Set `evidence` to list specific, verifiable proof that the task completed successfully (e.g., 'file exists', 'exit code 0', 'test passed').",
+    );
+    parts.push(
+      '- Use `verificationCommand` for a single command that can verify task completion (e.g., "pnpm test" or "ls src/output.ts").',
+    );
+    parts.push(
+      "- Set `approvalRequired: true` for risky operations that need human review before execution runs.",
+    );
+    parts.push(
+      "- Configure `retryPolicy` for tasks that may need retries: set maxRetries, retryDelayMs, and retryBackoff (linear/exponential/fixed).",
+    );
+    parts.push(
+      "- Configure `timeout` for tasks that should not run indefinitely: set durationMs and action (fail/retry/cancel/skip).",
+    );
+    parts.push(
+      "- Use `finalOutputContribution` to describe how this task's output feeds into the overall workflow goal. This helps with final report generation.",
     );
 
     if (useCase && useCase.type !== "general") {
@@ -530,6 +587,26 @@ export class InternalAiPlanner implements Planner {
                     "file_exists | file_diff | file_content | command_output | test | ai_review | manual",
                 },
               ],
+              taskType:
+                "general | coding | documentation | research | data | writing | design | qa | release | operations | testing | analysis | review | approval | validation",
+              actionType:
+                "create | modify | delete | read | analyze | execute | validate | approve | review | transform | generate | investigate",
+              inputContext: "string",
+              targetFiles: ["string"],
+              targetArtifacts: ["string"],
+              evidence: ["string"],
+              verificationCommand: "string",
+              approvalRequired: false,
+              retryPolicy: {
+                maxRetries: 2,
+                retryDelayMs: 1000,
+                retryBackoff: "linear | exponential | fixed",
+              },
+              timeout: {
+                durationMs: 60000,
+                action: "fail | retry | cancel | skip",
+              },
+              finalOutputContribution: "string",
             },
           ],
         },
@@ -599,6 +676,30 @@ export class InternalAiPlanner implements Planner {
     );
     parts.push(
       '- Use validationMethod "file_exists" for newly created files, "file_diff" for modified files, "file_content" when specific content must be checked.',
+    );
+    parts.push("");
+    parts.push("## Structured Step Metadata Rules");
+    parts.push(
+      "- Classify each task with `taskType`: coding, documentation, research, data, writing, design, qa, release, operations, testing, analysis, review, approval, validation, or general.",
+    );
+    parts.push(
+      "- Classify each task with `actionType`: create, modify, delete, read, analyze, execute, validate, approve, review, transform, generate, or investigate.",
+    );
+    parts.push(
+      "- Use `inputContext` to specify what data or context from prior steps this task depends on.",
+    );
+    parts.push("- List concrete `targetFiles` that will be created or modified.");
+    parts.push(
+      "- List non-file `targetArtifacts` this task produces (reports, summaries, checklists).",
+    );
+    parts.push(
+      "- Set `evidence` to specific verifiable proof items (e.g., 'file exists', 'exit code 0').",
+    );
+    parts.push("- Use `verificationCommand` for a single verification command.");
+    parts.push("- Set `approvalRequired: true` for risky steps needing human review.");
+    parts.push("- Configure `retryPolicy` and `timeout` for tasks that need them.");
+    parts.push(
+      "- Use `finalOutputContribution` to describe how this task feeds into the overall workflow goal.",
     );
     parts.push("");
     parts.push("## Detailed Blueprint Requirements");
