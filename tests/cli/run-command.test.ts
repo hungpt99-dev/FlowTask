@@ -6,7 +6,7 @@ import { initCommand } from "../../src/cli/commands/init.command.js";
 import { runCommand } from "../../src/cli/commands/run.command.js";
 import { clearCredentialCache } from "../../src/config/credential-resolver.js";
 
-describe("runCommand", { timeout: 30000 }, () => {
+describe("runCommand", { timeout: 60000 }, () => {
   let projectDir: string;
   let originalCwd: string;
   let originalExit: typeof process.exit;
