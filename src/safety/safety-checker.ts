@@ -18,7 +18,7 @@ const BLOCKED_PATTERNS: Array<{ regex: RegExp; reason: string }> = [
   { regex: /\brm\s+-rf\s+\$?HOME/i, reason: "Blocked: destructive command (rm -rf)" },
   { regex: /\brm\s+-rf\s+\.git\b/, reason: "Blocked: would delete .git directory" },
   { regex: /\bprintenv\b/, reason: "Blocked: would expose environment variables" },
-  { regex: /\b(?:env|set|declare)\b/, reason: "Blocked: would expose environment variables" },
+  { regex: /(?<!-)\b(?:env|set|declare)\b/, reason: "Blocked: would expose environment variables" },
   { regex: /(?:^|\|)\s*env\s*$/, reason: "Blocked: would expose environment variables" },
   { regex: /\bcat\s+\.env\b/, reason: "Blocked: would read .env secrets" },
   {
