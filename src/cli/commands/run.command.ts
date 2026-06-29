@@ -33,6 +33,7 @@ export async function runCommand(
     debug?: boolean;
     template?: string;
     approvalMode?: string;
+    skipValidation?: boolean;
   },
 ): Promise<void> {
   const out = createOutputOptions(options);
@@ -131,6 +132,7 @@ export async function runCommand(
       plannerMode: plannerMode,
       defaultExecutor: options.executor,
       approvalMode: options.approvalMode,
+      skipValidation: options.skipValidation,
     });
 
     if (!result.success) {

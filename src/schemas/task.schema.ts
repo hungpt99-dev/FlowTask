@@ -41,6 +41,7 @@ export const TaskSchema = z.object({
   outputPlan: OutputPlanSchema.optional(),
   retryCount: z.number().int().min(0).default(0),
   maxRetries: z.number().int().min(0).default(2),
+  skipValidation: z.boolean().optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
   metadata: z.record(z.unknown()).optional(),

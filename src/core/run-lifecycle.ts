@@ -66,6 +66,8 @@ export class RunLifecycle {
   private hookManager: HookManager;
   private databaseManager: DatabaseManager | null = null;
 
+  private skipValidation = false;
+
   // Gate state tracking per runId
   private pendingGateApprovals: Map<
     string,
@@ -133,10 +135,12 @@ export class RunLifecycle {
       quality?: boolean;
       defaultExecutor?: string;
       approvalMode?: string;
+      skipValidation?: boolean;
     },
   ): Promise<{ run: Run; success: boolean }> {
     const mode = options?.mode ?? "auto";
     const debug = options?.debug ?? false;
+    this.skipValidation = options?.skipValidation ?? false;
 
     const run = await this.runManager.createRun(this.projectId, prompt, mode);
     await this.eventStore.appendToRun(run.runId, {
@@ -1925,17 +1929,51 @@ export class RunLifecycle {
         };
         await this.hookManager.runBeforeValidate(validateCtx);
 
-        await this.eventStore.appendToRun(run.runId, {
-          type: "validation_started",
-          runId: run.runId,
-          taskId: task.id,
-        });
+        const shouldSkipValidation = this.skipValidation || task.skipValidation === true;
 
-        validationResult = await this.validationEngine.validateTask({
-          projectRoot: this.rootPath,
-          task,
-          executorResult,
-        });
+        if (shouldSkipValidation) {
+          const skipReason = this.skipValidation ? "Skipped by CLI flag" : "Skipped by task config";
+
+          validationResult = {
+            taskId: task.id,
+            status: "passed",
+            checks: [
+              {
+                type: "process",
+                status: "skipped",
+                message: `Validation skipped: ${skipReason}`,
+              },
+            ],
+            createdAt: now(),
+          };
+
+          console.log(
+            picocolors.yellow(`  Validation skipped for task: ${task.title} (${skipReason})`),
+          );
+          await this.logManager.writeTaskLog(
+            run.runId,
+            task.id,
+            `Validation skipped: ${skipReason}`,
+          );
+          await this.eventStore.appendToRun(run.runId, {
+            type: "validation_skipped",
+            runId: run.runId,
+            taskId: task.id,
+            details: { reason: skipReason },
+          });
+        } else {
+          await this.eventStore.appendToRun(run.runId, {
+            type: "validation_started",
+            runId: run.runId,
+            taskId: task.id,
+          });
+
+          validationResult = await this.validationEngine.validateTask({
+            projectRoot: this.rootPath,
+            task,
+            executorResult,
+          });
+        }
 
         await this.hookManager.runAfterValidate({
           ...validateCtx,

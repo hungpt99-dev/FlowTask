@@ -137,6 +137,7 @@ program
   .option("--quiet", "Show only important status and errors")
   .option("--verbose", "Show more detailed output")
   .option("--quality", "Run quality checks after completion")
+  .option("--skip-validation", "Skip validation after each task execution")
   .option("--plan-only", "Only generate the plan, do not execute")
   .option("--dry-run", "Show what would happen without executing")
   .option("--debug", "Show detailed debug information")

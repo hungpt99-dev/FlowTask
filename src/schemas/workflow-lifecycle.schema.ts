@@ -51,6 +51,7 @@ export const WorkflowLifecycleEventTypeSchema = z.enum([
   "validation_started",
   "validation_passed",
   "validation_failed",
+  "validation_skipped",
   "workflow_paused",
   "workflow_resumed",
   "workflow_completed",

@@ -554,6 +554,7 @@ export class EventStore {
       validation_started: "validation_started",
       validation_passed: "validation_passed",
       validation_failed: "validation_failed",
+      validation_skipped: "validation_skipped",
       task_completed: "task_completed",
       task_failed: "task_failed",
       run_completed: "run_completed",

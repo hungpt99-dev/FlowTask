@@ -69,6 +69,43 @@ describe("Schema validation", () => {
     expect(result.success).toBe(true);
   });
 
+  it("should validate a task with skipValidation set to true", () => {
+    const result = TaskSchema.safeParse({
+      id: "task_001",
+      runId: "run_001",
+      title: "Skip validation task",
+      status: "pending",
+      executor: "shell",
+      dependsOn: [],
+      acceptanceCriteria: [],
+      retryCount: 0,
+      maxRetries: 2,
+      skipValidation: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    expect(result.success).toBe(true);
+    expect(result.data!.skipValidation).toBe(true);
+  });
+
+  it("should accept skipValidation as undefined by default", () => {
+    const result = TaskSchema.safeParse({
+      id: "task_002",
+      runId: "run_001",
+      title: "Normal task",
+      status: "pending",
+      executor: "shell",
+      dependsOn: [],
+      acceptanceCriteria: [],
+      retryCount: 0,
+      maxRetries: 2,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    expect(result.success).toBe(true);
+    expect(result.data!.skipValidation).toBeUndefined();
+  });
+
   it("should validate a task with validation config", () => {
     const result = ValidationConfigSchema.safeParse({
       commands: ["pnpm test"],

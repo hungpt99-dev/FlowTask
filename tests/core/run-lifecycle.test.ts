@@ -98,4 +98,36 @@ describe("RunLifecycle", () => {
       expect(result.success).toBe(true);
     });
   });
+
+  describe("skip validation", () => {
+    it("should accept --skip-validation flag in plan-only mode", async () => {
+      const config = await new ProjectManager().loadConfig(projectDir);
+      const lifecycle = new RunLifecycle(projectDir, projectId, config);
+      const result = await lifecycle.executeRun("Skip validation test", {
+        mode: "plan-only",
+        skipValidation: true,
+      });
+      expect(result.success).toBe(true);
+      expect(result.run.status).toBe("planning");
+    });
+
+    it("should default to validation enabled when not specified", async () => {
+      const config = await new ProjectManager().loadConfig(projectDir);
+      const lifecycle = new RunLifecycle(projectDir, projectId, config);
+      const result = await lifecycle.executeRun("Default validation test", {
+        mode: "plan-only",
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("should work with dry-run and skipValidation", async () => {
+      const config = await new ProjectManager().loadConfig(projectDir);
+      const lifecycle = new RunLifecycle(projectDir, projectId, config);
+      const result = await lifecycle.executeRun("Dry run skip validation", {
+        mode: "dry-run",
+        skipValidation: true,
+      });
+      expect(result.success).toBe(true);
+    });
+  });
 });

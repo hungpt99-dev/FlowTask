@@ -39,6 +39,7 @@ export type UiEvent =
   | { type: "validation_started"; taskId: string }
   | { type: "validation_passed"; taskId: string }
   | { type: "validation_failed"; taskId: string; reason: string }
+  | { type: "validation_skipped"; taskId: string; reason: string }
   | { type: "task_completed"; taskId: string; title: string }
   | { type: "task_failed"; taskId: string; title: string; reason: string }
   | { type: "run_completed"; success: boolean; reason?: string; details?: string }
@@ -218,6 +219,7 @@ export class EventBus {
       "validation_started",
       "validation_passed",
       "validation_failed",
+      "validation_skipped",
       "run_completed",
       "run_failed",
       "info",

@@ -32,6 +32,7 @@ const EventTypeBase = [
   "validation_started",
   "validation_passed",
   "validation_failed",
+  "validation_skipped",
   "approval_requested",
   "approval_approved",
   "approval_rejected",
