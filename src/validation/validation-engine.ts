@@ -3,10 +3,8 @@ import type { ExecutorResult } from "../executor/executor.js";
 import type { Task } from "../schemas/task.schema.js";
 import type { FlowTaskConfig } from "../schemas/config.schema.js";
 import { ProcessValidator } from "./process-validator.js";
-import { FileValidator } from "./file-validator.js";
 import { CommandValidator } from "./command-validator.js";
 import { AcceptanceCriteriaValidator } from "./acceptance-criteria-validator.js";
-import { ContentValidator } from "./content-validator.js";
 import { OutcomeComparisonValidator } from "./outcome-comparison-validator.js";
 import { OutputPlanValidator } from "./output-plan-validator.js";
 import { now } from "../utils/time.js";
@@ -19,20 +17,16 @@ export interface ValidateTaskInput {
 
 export class ValidationEngine {
   private processValidator: ProcessValidator;
-  private fileValidator: FileValidator;
   private commandValidator: CommandValidator;
   private acceptanceCriteriaValidator: AcceptanceCriteriaValidator;
-  private contentValidator: ContentValidator;
   private outcomeComparisonValidator: OutcomeComparisonValidator;
   private outputPlanValidator: OutputPlanValidator;
   private adaptiveValidation: boolean;
 
   constructor(config?: FlowTaskConfig) {
     this.processValidator = new ProcessValidator();
-    this.fileValidator = new FileValidator();
     this.commandValidator = new CommandValidator(config);
     this.acceptanceCriteriaValidator = new AcceptanceCriteriaValidator();
-    this.contentValidator = new ContentValidator();
     this.outcomeComparisonValidator = new OutcomeComparisonValidator();
     this.outputPlanValidator = new OutputPlanValidator();
     this.adaptiveValidation = config?.validation?.adaptiveValidation ?? true;
@@ -43,25 +37,6 @@ export class ValidationEngine {
 
     const processCheck = await this.processValidator.validate(input.executorResult);
     checks.push(processCheck);
-
-    if (input.task.validation?.requiredFiles && input.task.validation.requiredFiles.length > 0) {
-      const fileChecks = await this.fileValidator.validateFiles(
-        input.projectRoot,
-        input.task.validation.requiredFiles,
-      );
-      checks.push(...fileChecks);
-    }
-
-    if (
-      input.task.validation?.requiredContent &&
-      input.task.validation.requiredContent.length > 0
-    ) {
-      const contentChecks = await this.contentValidator.validateContent(
-        input.projectRoot,
-        input.task.validation.requiredContent,
-      );
-      checks.push(...contentChecks);
-    }
 
     if (input.task.validation?.commands && input.task.validation.commands.length > 0) {
       const commandChecks = await this.commandValidator.validateCommands(

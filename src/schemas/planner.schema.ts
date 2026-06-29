@@ -12,7 +12,6 @@ export const PlannerRiskLevelSchema = z.enum([
 
 export const PlannerTaskValidationSchema = z.object({
   commands: z.array(z.string()).optional().default([]),
-  requiredFiles: z.array(z.string()).optional().default([]),
   requiredArtifacts: z.array(z.string()).optional().default([]),
   requireGitDiff: z.boolean().optional().default(false),
 });

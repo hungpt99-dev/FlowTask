@@ -12,7 +12,6 @@ export async function tasksEditCommand(
     executor?: string;
     "acceptance-criteria"?: string;
     "validation-commands"?: string;
-    "required-files"?: string;
   },
 ): Promise<void> {
   const rootPath = process.cwd();
@@ -73,17 +72,11 @@ export async function tasksEditCommand(
       .map((s) => s.trim())
       .filter(Boolean);
   }
-  if (options["validation-commands"] !== undefined || options["required-files"] !== undefined) {
+  if (options["validation-commands"] !== undefined) {
     const existingValidation = task.validation ?? {};
     const newValidation: Record<string, unknown> = { ...existingValidation };
     if (options["validation-commands"] !== undefined) {
       newValidation.commands = options["validation-commands"]
-        .split("|")
-        .map((s) => s.trim())
-        .filter(Boolean);
-    }
-    if (options["required-files"] !== undefined) {
-      newValidation.requiredFiles = options["required-files"]
         .split("|")
         .map((s) => s.trim())
         .filter(Boolean);
@@ -100,7 +93,7 @@ export async function tasksEditCommand(
   if (Object.keys(updates).length === 0) {
     console.log(
       picocolors.yellow(
-        "No changes specified. Use --title, --description, --executor, --acceptance-criteria, --validation-commands, or --required-files.",
+        "No changes specified. Use --title, --description, --executor, --acceptance-criteria, or --validation-commands.",
       ),
     );
     process.exit(0);

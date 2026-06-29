@@ -10,8 +10,6 @@ export const WorkflowValidationConfigSchema = z.object({
     .refine((cmds) => !cmds || cmds.every((c) => !INJECTION_PATTERNS.test(c)), {
       message: "Validation commands must not contain shell injection patterns",
     }),
-  requiredFiles: z.array(z.string()).optional(),
-  requiredContent: z.array(z.string()).optional(),
   requiredArtifacts: z.array(z.string()).optional(),
   requireGitDiff: z.boolean().optional(),
 });

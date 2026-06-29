@@ -156,10 +156,6 @@ program
     "--validation-commands <commands>",
     'Pipe-separated validation commands (e.g., "pnpm test|pnpm lint")',
   )
-  .option(
-    "--required-files <files>",
-    'Pipe-separated required files (e.g., "src/file1.ts|src/file2.ts")',
-  )
   .action(tasksEditCommand);
 
 program
