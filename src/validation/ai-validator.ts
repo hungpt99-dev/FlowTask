@@ -85,6 +85,9 @@ export interface AiValidatorParams {
   outputPlanResults?: OutputPlanEvidence[];
   validationMode?: AiValidationMode;
   outputPlan?: string[];
+  workflowType?: string;
+  previousValidationResults?: string;
+  logs?: string;
 }
 
 const MAX_OUTPUT_LENGTH = 15000;
@@ -116,7 +119,7 @@ export class AiValidator {
     }
 
     const mode = params.validationMode ?? "fallback";
-    const systemPrompt = this.buildSystemPrompt(mode);
+    const systemPrompt = this.buildSystemPrompt(mode, params.workflowType);
     const userPrompt = this.buildUserPrompt(params);
 
     try {
@@ -190,16 +193,19 @@ export class AiValidator {
     return text.slice(0, maxLen) + `\n\n[... truncated, original length: ${text.length} chars]`;
   }
 
-  private buildSystemPrompt(mode: AiValidationMode): string {
+  private buildSystemPrompt(mode: AiValidationMode, workflowType?: string): string {
     const modeGuidance = this.getModeGuidance(mode);
+    const workflowGuidance = this.getWorkflowTypeGuidance(workflowType);
 
     return `You are an AI validation agent for FlowTask. Your job is to review task execution evidence and determine if the task was completed successfully.
 
-You will receive: task description, expected result, acceptance criteria, executor output/errors, executor exit code, changed files, created artifacts, command/test/build/lint results, and output plan results.
+You will receive: task description, workflow type, expected result, acceptance criteria, executor output/errors, executor exit code, changed files, created artifacts, command/test/build/lint results, output plan results, previous validation results, and logs.
 
 ## Validation Mode: ${mode}
 
 ${modeGuidance}
+
+${workflowGuidance}
 
 ## Evidence Evaluation Rules
 
@@ -212,6 +218,7 @@ Evaluate evidence in this priority order:
 5. **Changed files and artifacts** — Do the created/modified files satisfy the task description? Check if file names, paths, and implied content match requirements.
 6. **Output plan results** — Were all planned outputs produced successfully?
 7. **Executor output** — Does the stdout/stderr show the task completed the intended work? Look for specific confirmation messages.
+8. **Previous validation results** — Were previous validation checks (deterministic, acceptance criteria, output plan) passed or failed? Use these as additional evidence signals.
 
 ## Evidence Sufficiency Thresholds
 
@@ -305,8 +312,100 @@ Return ONLY valid JSON. No markdown. No code fences. No explanation.`;
     }
   }
 
+  private getWorkflowTypeGuidance(workflowType?: string): string {
+    switch (workflowType) {
+      case "code":
+        return `## Workflow Type: Code Task
+
+This is a code implementation task. Key validation criteria:
+- Created/modified files MUST exist on disk with meaningful content
+- Executor output alone is NEVER sufficient — require actual file evidence
+- Test/build/lint results are strong evidence when available
+- Check that file content matches the task description
+- Verify imports, exports, and API contracts are correct`;
+      case "documentation":
+        return `## Workflow Type: Documentation Task
+
+This is a documentation task. Key validation criteria:
+- Document files MUST exist with meaningful content (200+ chars)
+- Check for structured sections (headings, paragraphs, formatting)
+- Verify the document covers the required topics
+- Output alone is acceptable IF the document is in the output`;
+      case "research":
+        return `## Workflow Type: Research Task
+
+This is a research/analysis task. Key validation criteria:
+- Look for cited sources, references, or evidence of research
+- Check for analytical content (findings, conclusions, analysis)
+- Evaluate structure: headings, sections, organized content
+- Check for metrics, data points, or quantitative evidence
+- Brief outputs (<500 chars) suggest incomplete research`;
+      case "data":
+        return `## Workflow Type: Data Task
+
+This is a data processing/transformation task. Key validation criteria:
+- Verify output data files exist (CSV, JSON, etc.)
+- Check for schema changes or data transformations
+- Validate row counts, data quality indicators
+- Look for transformation logic or data pipeline evidence`;
+      case "writing":
+        return `## Workflow Type: Writing Task
+
+This is a content writing task. Key validation criteria:
+- Verify written content exists (files or substantial output)
+- Check for tone, clarity, and structure
+- Evaluate grammar and formatting quality
+- Verify the content meets the described requirements`;
+      case "design":
+        return `## Workflow Type: Design Task
+
+This is a design/UI task. Key validation criteria:
+- Look for design artifacts (screenshots, mockups, specs)
+- Check for UI-related output (rendered, displayed, components)
+- Verify visual requirements are addressed
+- Screenshot artifacts are strong evidence`;
+      case "checklist":
+        return `## Workflow Type: Checklist / QA Task
+
+This is a QA or checklist task. Key validation criteria:
+- Check for structured list items (bullets, numbers, checkboxes)
+- Look for completion status indicators (done/passed/failed counts)
+- Verify progress tracking (e.g., "3/5 items complete")
+- Evaluate coverage of required checklist items`;
+      case "business_analysis":
+        return `## Workflow Type: Business Analysis Task
+
+This is a business analysis task. Key validation criteria:
+- Look for requirement extraction and analysis
+- Check for gap analysis, stakeholder analysis, or risk assessment
+- Evaluate decision tracking and recommendations
+- Verify acceptance criteria are well-defined`;
+      case "mixed":
+        return `## Workflow Type: Mixed Workflow
+
+This is a mixed workflow involving multiple task types. Key validation criteria:
+- Evaluate evidence across all relevant dimensions
+- Consider both code and non-code artifacts
+- Check for expected outputs of each type mentioned
+- Be comprehensive — mixed workflows may have diverse evidence`;
+      default:
+        return `## Workflow Type: General
+
+This is a general task. Apply standard validation criteria:
+- Verify expected outputs were produced
+- Check acceptance criteria are met
+- Evaluate executor output for completion signals
+- Consider any files, artifacts, or command results as evidence`;
+    }
+  }
+
   private buildUserPrompt(params: AiValidatorParams): string {
     const parts: string[] = [];
+
+    if (params.workflowType) {
+      parts.push("## Workflow Type");
+      parts.push(params.workflowType);
+    }
 
     parts.push("## Task Description");
     parts.push(this.truncate(params.taskDescription, MAX_DESCRIPTION_LENGTH));
@@ -342,6 +441,11 @@ Return ONLY valid JSON. No markdown. No code fences. No explanation.`;
       parts.push(this.truncate(params.errorOutput, MAX_ERROR_LENGTH));
     }
 
+    if (params.logs) {
+      parts.push("## Log Output");
+      parts.push(this.truncate(params.logs, MAX_OUTPUT_LENGTH));
+    }
+
     if (params.changedFiles && params.changedFiles.length > 0) {
       parts.push("## Changed Files");
       parts.push(params.changedFiles.join("\n"));
@@ -371,6 +475,11 @@ Return ONLY valid JSON. No markdown. No code fences. No explanation.`;
       }
     }
 
+    if (params.previousValidationResults) {
+      parts.push("## Previous Validation Results");
+      parts.push(params.previousValidationResults);
+    }
+
     const evidenceSummary = this.buildEvidenceSummary(params);
     if (evidenceSummary) {
       parts.push("## Evidence Summary");
@@ -384,12 +493,16 @@ Return ONLY valid JSON. No markdown. No code fences. No explanation.`;
     const lines: string[] = [];
     const add = (label: string, value: string) => lines.push(`- ${label}: ${value}`);
 
+    if (params.workflowType) {
+      add("Workflow type", params.workflowType);
+    }
     add("Executor status", params.executorStatus ?? "unknown");
     if (params.exitCode !== undefined) {
       add("Exit code", String(params.exitCode));
     }
     add("Has stdout/stderr output", params.executorOutput ? "yes" : "no");
     add("Has error output", params.errorOutput ? "yes" : "no");
+    add("Has log output", params.logs ? "yes" : "no");
     add("Changed files count", String(params.changedFiles?.length ?? 0));
     add("Artifacts count", String(params.artifacts?.length ?? 0));
     add("Has command/test results", params.commandResults ? "yes" : "no");
@@ -400,6 +513,7 @@ Return ONLY valid JSON. No markdown. No code fences. No explanation.`;
       const produced = params.outputPlanResults.filter((r) => r.produced).length;
       add("Output plan items produced", `${produced}/${params.outputPlanResults.length}`);
     }
+    add("Has previous validation results", params.previousValidationResults ? "yes" : "no");
 
     const evidenceStrength = this.assessEvidenceStrength(params);
     add("Evidence strength", evidenceStrength);
@@ -417,6 +531,11 @@ Return ONLY valid JSON. No markdown. No code fences. No explanation.`;
     maxScore += 1;
 
     if (params.errorOutput) {
+      score += 1;
+    }
+    maxScore += 1;
+
+    if (params.logs) {
       score += 1;
     }
     maxScore += 1;
@@ -455,6 +574,11 @@ Return ONLY valid JSON. No markdown. No code fences. No explanation.`;
       }
     }
     maxScore += 2;
+
+    if (params.previousValidationResults) {
+      score += 1;
+    }
+    maxScore += 1;
 
     const ratio = score / maxScore;
     if (ratio >= 0.7) return "strong";
