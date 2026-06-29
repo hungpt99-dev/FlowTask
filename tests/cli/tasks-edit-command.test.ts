@@ -135,17 +135,6 @@ describe("tasksEditCommand", () => {
     expect(task!.validation?.commands).toEqual(["pnpm test", "pnpm lint"]);
   });
 
-  it("should update required files from pipe-separated string", async () => {
-    await tasksEditCommand("task_edit_001", {
-      run: runId,
-      "required-files": "dist/index.js|dist/types.d.ts",
-    });
-
-    const tasks = await runManager.loadTasks(runId);
-    const task = tasks.find((t) => t.id === "task_edit_001");
-    expect(task!.validation?.requiredFiles).toEqual(["dist/index.js", "dist/types.d.ts"]);
-  });
-
   it("should fail when editing a done task", async () => {
     try {
       await tasksEditCommand("task_done_001", { run: runId, title: "New title" });
@@ -184,7 +173,6 @@ describe("tasksEditCommand", () => {
       executor: "manual",
       "acceptance-criteria": "AC1|AC2",
       "validation-commands": "npm test",
-      "required-files": "dist/index.js",
     });
 
     const tasks = await runManager.loadTasks(runId);
@@ -194,7 +182,6 @@ describe("tasksEditCommand", () => {
     expect(task!.executor).toBe("manual");
     expect(task!.acceptanceCriteria).toEqual(["AC1", "AC2"]);
     expect(task!.validation?.commands).toEqual(["npm test"]);
-    expect(task!.validation?.requiredFiles).toEqual(["dist/index.js"]);
   });
 
   it("should persist edits to disk", async () => {

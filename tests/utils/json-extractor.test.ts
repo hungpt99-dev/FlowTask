@@ -78,7 +78,7 @@ describe("extractJsonObject", () => {
 
   it("extracts nested JSON with multiple braces", () => {
     const output =
-      '{\n  "title": "Deep",\n  "summary": "nesting",\n  "tasks": [\n    {\n      "title": "Task 1",\n      "description": "desc",\n      "executor": "shell",\n      "acceptanceCriteria": ["done"],\n      "validation": {\n        "commands": ["echo {{hello}}"],\n        "requiredFiles": []\n      }\n    }\n  ]\n}';
+      '{\n  "title": "Deep",\n  "summary": "nesting",\n  "tasks": [\n    {\n      "title": "Task 1",\n      "description": "desc",\n      "executor": "shell",\n      "acceptanceCriteria": ["done"],\n      "validation": {\n        "commands": ["echo {{hello}}"]\n      }\n    }\n  ]\n}';
     const result = extractJsonObject(output);
     expect(result.source).toBe("full_output");
     const parsed = JSON.parse(result.jsonText);

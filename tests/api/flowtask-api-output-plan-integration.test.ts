@@ -36,7 +36,7 @@ interface TaskOverrides {
       | "manual";
     acceptanceCriteria?: string[];
   }>;
-  validation?: { commands?: string[]; requiredFiles?: string[] };
+  validation?: { commands?: string[] };
   expectedResult?: string;
 }
 

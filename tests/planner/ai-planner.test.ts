@@ -173,7 +173,6 @@ describe("AI Planner Schema Validation", () => {
           acceptanceCriteria: ["Task done"],
           validation: {
             commands: ["pnpm test"],
-            requiredFiles: ["src/output.ts"],
             requiredArtifacts: ["docs/report.md"],
             requireGitDiff: true,
           },

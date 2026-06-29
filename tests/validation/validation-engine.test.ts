@@ -183,33 +183,6 @@ describe("ValidationEngine", () => {
       expect(result.status).toBe("passed");
     });
 
-    it("should warn when outcome passes but other checks fail", async () => {
-      const result = await engine.validateTask({
-        projectRoot: testDir,
-        task: {
-          ...baseTask,
-          id: "task_adaptive_02",
-          runId: "run_001",
-          title: "Outcome passes but files missing",
-          acceptanceCriteria: [],
-          expectedResult: "task completed successfully",
-          validation: { requiredFiles: ["nonexistent-file.txt"] },
-        },
-        executorResult: {
-          status: "done",
-          exitCode: 0,
-          output: "task completed successfully",
-          startedAt: now(),
-          finishedAt: now(),
-        },
-      });
-      const outcomeCheck = result.checks.find((c) => c.type === "outcome_comparison");
-      expect(outcomeCheck?.status).toBe("passed");
-      const failedCheck = result.checks.find((c) => c.type === "file");
-      expect(failedCheck?.status).toBe("failed");
-      expect(result.status).toBe("warning");
-    });
-
     it("should warn when outcome warns and other checks pass", async () => {
       const result = await engine.validateTask({
         projectRoot: testDir,
@@ -230,33 +203,6 @@ describe("ValidationEngine", () => {
         },
       });
       expect(result.status).toBe("warning");
-    });
-
-    it("should fail when outcome warns and other checks fail", async () => {
-      const result = await engine.validateTask({
-        projectRoot: testDir,
-        task: {
-          ...baseTask,
-          id: "task_adaptive_04",
-          runId: "run_001",
-          title: "Outcome warns others fail",
-          acceptanceCriteria: [],
-          expectedResult: "Very specific phrase that is not in output at all for this task",
-          validation: { requiredFiles: ["nonexistent-file.txt"] },
-        },
-        executorResult: {
-          status: "done",
-          exitCode: 0,
-          output: "something completely unrelated",
-          startedAt: now(),
-          finishedAt: now(),
-        },
-      });
-      const outcomeCheck = result.checks.find((c) => c.type === "outcome_comparison");
-      expect(outcomeCheck?.status).toBe("warning");
-      const failedCheck = result.checks.find((c) => c.type === "file");
-      expect(failedCheck?.status).toBe("failed");
-      expect(result.status).toBe("failed");
     });
 
     it("should always fail when outcome fails regardless of other checks", async () => {
@@ -343,7 +289,7 @@ describe("ValidationEngine", () => {
       rmSync(tempDir, { recursive: true, force: true });
     });
 
-    it("should pass when all validators pass", async () => {
+    it("should pass when all outcome-based checks pass", async () => {
       const result = await engine.validateTask({
         projectRoot: tempDir,
         task: {
@@ -353,10 +299,6 @@ describe("ValidationEngine", () => {
           title: "All validators",
           acceptanceCriteria: ["output.txt contains task results"],
           expectedResult: "Generate output.txt with task data",
-          validation: {
-            requiredFiles: ["output.txt"],
-            requiredContent: ["output.txt"],
-          },
         },
         executorResult: {
           status: "done",
@@ -367,10 +309,10 @@ describe("ValidationEngine", () => {
         },
       });
       expect(result.status).toBe("passed");
-      expect(result.checks.length).toBeGreaterThanOrEqual(4);
+      expect(result.checks.length).toBeGreaterThanOrEqual(3);
     });
 
-    it("should warn when outcome passes but some file validators fail", async () => {
+    it("should warn when process fails despite outcome passing", async () => {
       const result = await engine.validateTask({
         projectRoot: tempDir,
         task: {
@@ -380,14 +322,10 @@ describe("ValidationEngine", () => {
           title: "Partial validation",
           acceptanceCriteria: [],
           expectedResult: "output.txt created with results from task",
-          validation: {
-            requiredFiles: ["output.txt", "missing.txt"],
-            requiredContent: ["output.txt"],
-          },
         },
         executorResult: {
-          status: "done",
-          exitCode: 0,
+          status: "failed",
+          exitCode: 1,
           output: "output.txt created with results from task",
           startedAt: now(),
           finishedAt: now(),
@@ -395,70 +333,7 @@ describe("ValidationEngine", () => {
       });
       const outcomeCheck = result.checks.find((c) => c.type === "outcome_comparison");
       expect(outcomeCheck?.status).toBe("passed");
-      const failedFileCheck = result.checks.find((c) => c.path === "missing.txt");
-      expect(failedFileCheck?.status).toBe("failed");
       expect(result.status).toBe("warning");
-    });
-  });
-
-  describe("with content validation", () => {
-    let tempDir: string;
-
-    beforeAll(async () => {
-      tempDir = mkdtempSync(join(tmpdir(), "engine-content-test-"));
-      await ensureDir(tempDir);
-      await writeTextFile(join(tempDir, "report.md"), "# Analysis Report\n\nFindings here.");
-    });
-
-    afterAll(() => {
-      rmSync(tempDir, { recursive: true, force: true });
-    });
-
-    it("should validate requiredContent", async () => {
-      const result = await engine.validateTask({
-        projectRoot: tempDir,
-        task: {
-          ...baseTask,
-          id: "task_004",
-          runId: "run_001",
-          title: "Content task",
-          acceptanceCriteria: [],
-          validation: { requiredContent: ["report.md"] },
-        },
-        executorResult: {
-          status: "done",
-          exitCode: 0,
-          output: "report generated",
-          startedAt: now(),
-          finishedAt: now(),
-        },
-      });
-      const contentChecks = result.checks.filter((c) => c.type === "content");
-      expect(contentChecks.length).toBeGreaterThan(0);
-      expect(contentChecks[0]?.status).toBe("passed");
-    });
-
-    it("should fail when requiredContent file is missing", async () => {
-      const result = await engine.validateTask({
-        projectRoot: tempDir,
-        task: {
-          ...baseTask,
-          id: "task_005",
-          runId: "run_001",
-          title: "Missing content task",
-          acceptanceCriteria: [],
-          validation: { requiredContent: ["missing-report.md"] },
-        },
-        executorResult: {
-          status: "done",
-          exitCode: 0,
-          output: "done",
-          startedAt: now(),
-          finishedAt: now(),
-        },
-      });
-      const contentChecks = result.checks.filter((c) => c.type === "content");
-      expect(contentChecks[0]?.status).toBe("failed");
     });
   });
 
@@ -805,5 +680,30 @@ describe("ValidationEngine", () => {
       expect(passedCheck?.path).toBe("existing.txt");
       expect(failedCheck?.path).toBe("missing-output.txt");
     });
+  });
+
+  it("should never produce file or content type checks", async () => {
+    const result = await engine.validateTask({
+      projectRoot: testDir,
+      task: {
+        ...baseTask,
+        id: "task_no_file_type",
+        runId: "run_001",
+        title: "No file type",
+        acceptanceCriteria: [],
+        expectedResult: "Task completed successfully",
+      },
+      executorResult: {
+        status: "done",
+        exitCode: 0,
+        output: "Task completed successfully with all objectives met",
+        startedAt: now(),
+        finishedAt: now(),
+      },
+    });
+
+    const checkTypes = result.checks.map((c) => c.type);
+    expect(checkTypes).not.toContain("file");
+    expect(checkTypes).not.toContain("content");
   });
 });

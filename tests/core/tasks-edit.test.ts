@@ -46,7 +46,6 @@ describe("Task Editing (updateTask)", () => {
         acceptanceCriteria: ["AC1", "AC2"],
         validation: {
           commands: ["pnpm lint"],
-          requiredFiles: ["dist/index.js"],
         },
         retryCount: 0,
         maxRetries: 2,
@@ -86,15 +85,13 @@ describe("Task Editing (updateTask)", () => {
     expect(updated.acceptanceCriteria).toEqual(["Criterion A", "Criterion B", "Criterion C"]);
   });
 
-  it("should update validation commands and required files", async () => {
+  it("should update validation commands", async () => {
     const updated = await runManager.updateTask(runId, "task_edit_001", {
       validation: {
         commands: ["pnpm typecheck", "pnpm lint"],
-        requiredFiles: ["dist/index.js", "dist/types.d.ts"],
       },
     });
     expect(updated.validation?.commands).toEqual(["pnpm typecheck", "pnpm lint"]);
-    expect(updated.validation?.requiredFiles).toEqual(["dist/index.js", "dist/types.d.ts"]);
   });
 
   it("should update all fields at once", async () => {
@@ -105,7 +102,6 @@ describe("Task Editing (updateTask)", () => {
       acceptanceCriteria: ["New AC"],
       validation: {
         commands: ["npm test"],
-        requiredFiles: ["coverage/lcov.info"],
       },
     });
     expect(updated.title).toBe("Full update title");
@@ -113,7 +109,6 @@ describe("Task Editing (updateTask)", () => {
     expect(updated.executor).toBe("manual");
     expect(updated.acceptanceCriteria).toEqual(["New AC"]);
     expect(updated.validation?.commands).toEqual(["npm test"]);
-    expect(updated.validation?.requiredFiles).toEqual(["coverage/lcov.info"]);
   });
 
   it("should preserve unmodified fields when updating", async () => {
@@ -124,7 +119,6 @@ describe("Task Editing (updateTask)", () => {
     expect(updated.description).toBe("Has validation config");
     expect(updated.acceptanceCriteria).toEqual(["AC1", "AC2"]);
     expect(updated.validation?.commands).toEqual(["pnpm lint"]);
-    expect(updated.validation?.requiredFiles).toEqual(["dist/index.js"]);
   });
 
   it("should persist edits to disk", async () => {

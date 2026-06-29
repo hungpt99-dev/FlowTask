@@ -38,7 +38,6 @@ const output = {
         "README includes known limitations",
       ],
       validation: {
-        requiredFiles: ["README.md"],
         requireGitDiff: true,
       },
     },

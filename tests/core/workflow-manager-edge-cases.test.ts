@@ -358,7 +358,6 @@ describe("WorkflowManager edge cases", () => {
           status: "pending",
           validation: {
             commands: ["npm test"],
-            requiredFiles: ["dist/index.js"],
             requireGitDiff: true,
           },
         }),
