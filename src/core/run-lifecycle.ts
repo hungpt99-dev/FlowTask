@@ -401,7 +401,7 @@ export class RunLifecycle {
         try {
           await this.eventStore.appendToRun(
             run.runId,
-            createRunEvent(event.type as EventType, {
+            createRunEvent(event.type, {
               runId: event.runId ?? run.runId,
               taskId: "taskId" in event ? event.taskId : undefined,
               details: { ...event },
@@ -557,7 +557,7 @@ export class RunLifecycle {
         try {
           await this.eventStore.appendToRun(
             runId,
-            createRunEvent(event.type as EventType, {
+            createRunEvent(event.type, {
               runId: event.runId ?? runId,
               taskId: "taskId" in event ? event.taskId : undefined,
               details: { ...event },
@@ -628,7 +628,7 @@ export class RunLifecycle {
         try {
           await this.eventStore.appendToRun(
             runId,
-            createRunEvent(event.type as EventType, {
+            createRunEvent(event.type, {
               runId: event.runId ?? runId,
               taskId: "taskId" in event ? event.taskId : undefined,
               details: { ...event },
@@ -884,7 +884,7 @@ export class RunLifecycle {
 
     const completedTasks = allTasks.filter((t) => t.status === "done" || t.status === "failed");
 
-    const contextPack = this.contextPackBuilder.build({
+    let contextPack = this.contextPackBuilder.build({
       prompt,
       rulesContext,
       run,
@@ -1084,6 +1084,18 @@ export class RunLifecycle {
           break;
         }
 
+        if (validationResult.status === "needs_review") {
+          console.log(
+            picocolors.cyan(
+              "  AI review indicates human review is needed — continuing to retry if configured",
+            ),
+          );
+        }
+
+        if (validationResult.status === "needs_retry") {
+          console.log(picocolors.yellow("  AI review suggests retrying task"));
+        }
+
         if (validationResult.status === "warning" && failedChecks.length === 0) {
           const message = hasOutcomeCheck
             ? "Status: done (outcome achieved with minor warnings)"
@@ -1138,6 +1150,15 @@ export class RunLifecycle {
           task.executor = defaultExecutor;
           retryCount = 0;
           continue;
+        }
+
+        // Append validation feedback to context pack for retry
+        const suggestion = this.extractValidationSuggestion(validationResult);
+        if (suggestion) {
+          contextPack = {
+            markdown: contextPack.markdown + `\n\n## AI Validation Feedback\n\n${suggestion}\n`,
+          };
+          await writeTextFile(contextPackPath, contextPack.markdown);
         }
 
         retryCount++;
@@ -1289,6 +1310,35 @@ export class RunLifecycle {
     console.log(picocolors.yellow(`  - flowtask inspect ${run.runId}`));
 
     return false;
+  }
+
+  private extractValidationSuggestion(validationResult: ValidationResult): string | undefined {
+    const aiReviewChecks = validationResult.checks.filter(
+      (c) =>
+        c.type === "ai_review" &&
+        (c.status === "failed" || c.status === "needs_retry" || c.status === "needs_review"),
+    );
+    if (aiReviewChecks.length > 0) {
+      const suggestions = aiReviewChecks
+        .map((c) => {
+          const verdict = c.details?.verdict;
+          return verdict && typeof verdict === "object" && "suggestion" in verdict
+            ? (verdict as { suggestion: string }).suggestion
+            : undefined;
+        })
+        .filter((s): s is string => typeof s === "string" && s.length > 0);
+      if (suggestions.length > 0) return suggestions.join("\n");
+    }
+
+    const failedChecks = validationResult.checks.filter((c) => c.status === "failed");
+    if (failedChecks.length > 0) {
+      const messages = failedChecks
+        .map((c) => c.message)
+        .filter((s): s is string => typeof s === "string" && s.length > 0);
+      if (messages.length > 0) return messages.join("\n");
+    }
+
+    return undefined;
   }
 
   async flushLogs(): Promise<void> {

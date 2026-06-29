@@ -124,12 +124,12 @@ export class ProcessManager {
   async writeEvent(
     rootPath: string,
     runId: string,
-    type: string,
+    type: EventType,
     taskId?: string,
     message?: string,
   ): Promise<void> {
     const store = new EventStore(rootPath);
-    await store.appendToRun(runId, createRunEvent(type as EventType, { runId, taskId, message }));
+    await store.appendToRun(runId, createRunEvent(type, { runId, taskId, message }));
   }
 
   private async updateStatus(
