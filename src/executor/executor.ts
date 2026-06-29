@@ -10,6 +10,8 @@ export interface ExecutorInput {
   env?: Record<string, string>;
   signal?: AbortSignal;
   allowShellMetachars?: boolean;
+  interactiveSessionId?: string;
+  interactiveInput?: string;
 }
 
 export interface OutputPlanResult {
@@ -21,14 +23,25 @@ export interface OutputPlanResult {
 }
 
 export interface ExecutorResult {
-  status: "done" | "failed" | "skipped" | "cancelled" | "timeout";
+  status:
+    | "done"
+    | "failed"
+    | "skipped"
+    | "cancelled"
+    | "timeout"
+    | "waiting_input"
+    | "waiting_approval";
   exitCode?: number;
   output?: string;
   error?: string;
+  errorEvidence?: string;
+  suggestedFix?: string;
   artifacts?: string[];
   outputPlanResults?: OutputPlanResult[];
   startedAt: string;
   finishedAt: string;
+  interactiveSessionId?: string;
+  detectedPrompt?: string;
 }
 
 export function serializeOutputPlan(outputPlan: OutputPlanItem[] | undefined): string {
