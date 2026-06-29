@@ -26,6 +26,7 @@ import { QualityGate } from "../quality/quality-gate.js";
 import type { QualityGateResult } from "../schemas/quality.schema.js";
 import { writeTextFile, ensureDir, atomicWriteJsonFile } from "../utils/fs.js";
 import { getContextDir, getOutputsDir, dbPath } from "../utils/paths.js";
+import { ProjectScanner } from "../context/project-scanner.js";
 import { now } from "../utils/time.js";
 import { commandExists } from "../utils/command-exists.js";
 import path from "node:path";
@@ -197,12 +198,36 @@ export class RunLifecycle {
         )
       ).filter((n): n is string => n !== null);
 
+      console.log(picocolors.dim("  Scanning project for relevant files..."));
+      let projectFilesContext: string | undefined;
+      try {
+        const scanner = new ProjectScanner();
+        const result = await scanner.scan(this.rootPath, prompt);
+        if (result.context) {
+          projectFilesContext = result.context;
+          console.log(picocolors.dim(`    Found ${result.matchedFiles.length} relevant file(s)`));
+          await this.logManager.writeRuntime(
+            run.runId,
+            `Project scan matched files: ${result.matchedFiles.map((f) => f.relativePath).join(", ")}`,
+          );
+        } else {
+          console.log(picocolors.dim("    No relevant files found"));
+        }
+      } catch (scanErr) {
+        console.log(
+          picocolors.dim(
+            `    Project scan skipped: ${scanErr instanceof Error ? scanErr.message : String(scanErr)}`,
+          ),
+        );
+      }
+
       try {
         planResult = await usePlanner.createPlan({
           projectRoot: this.rootPath,
           prompt,
           rulesContext,
           template: options?.template,
+          projectFilesContext,
           availableExecutors,
           runId: run.runId,
         });

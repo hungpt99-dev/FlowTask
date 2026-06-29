@@ -9,6 +9,7 @@ export interface PlannerContextInput {
   projectRoot: string;
   config: FlowTaskConfig;
   availableExecutors: string[];
+  projectFilesContext?: string;
 }
 
 export class PlannerContextBuilder {
@@ -61,6 +62,10 @@ export class PlannerContextBuilder {
     parts.push(`## Original Prompt\n\n${input.prompt}\n`);
     parts.push(`## Rules Context\n\n${input.rulesContext}\n`);
 
+    if (input.projectFilesContext) {
+      parts.push(`${input.projectFilesContext}\n`);
+    }
+
     parts.push("## Project\n");
     parts.push(`- Root: ${input.projectRoot}\n`);
 
@@ -92,7 +97,7 @@ export class PlannerContextBuilder {
   "tasks": [
     {
       "title": "Task title",
-      "description": "Detailed description of what to do",
+      "description": "Exact blueprint: create src/api/auth.ts with login() and register() functions using JWT tokens per the design spec",
       "executor": "shell",
       "dependsOn": ["Exact title of previous task"],
       "riskLevel": "safe",
@@ -142,6 +147,24 @@ export class PlannerContextBuilder {
     parts.push(
       "- Do not use `requiredFiles` or `requiredContent`. These fields do not exist in the schema.\n",
     );
+    parts.push("\n## Detailed Blueprint Requirements\n");
+    parts.push("Each task description MUST be a precise implementation blueprint:\n");
+    parts.push("- Specify the EXACT files to create or modify (with relative paths).\n");
+    parts.push("- Describe the EXACT logic, patterns, or content to produce.\n");
+    parts.push(
+      "- Reference specific function names, class names, or module names when relevant.\n",
+    );
+    parts.push("- For each file change, specify what to add, change, or remove.\n");
+    parts.push(
+      "- Do NOT write vague titles like 'Implement feature' — use e.g. 'Add UserService.login() in src/services/user-service.ts'.\n",
+    );
+    parts.push(
+      "- Task titles must be specific and actionable — they should name the exact file, module, or function being worked on.\n",
+    );
+    parts.push(
+      "- The executor follows the task description as a literal recipe — no re-analysis, no deviation.\n",
+    );
+    parts.push("- Include concrete examples of expected output where helpful.\n");
 
     parts.push("\n## Final Reminder — Read Carefully\n");
     parts.push("Return ONLY valid JSON.\n");

@@ -12,6 +12,7 @@ import { getEventBus } from "../ui/event-bus.js";
 import { UseCaseDetector } from "../usecase/usecase-detector.js";
 import type { UseCaseDetection } from "../usecase/usecase-types.js";
 import { getUseCaseName } from "../usecase/task-templates.js";
+import { ProjectScanner } from "../context/project-scanner.js";
 
 const VALID_EXECUTORS = new Set(["shell", "manual", "opencode", "claude", "codex", "aider"]);
 
@@ -63,6 +64,20 @@ export class InternalAiPlanner implements Planner {
 
     const inputWithUseCase: PlannerInput = { ...input, useCase };
 
+    if (!input.projectFilesContext) {
+      const scanner = new ProjectScanner();
+      const { context: scannedContext, matchedFiles } = await scanner.scan(
+        input.projectRoot,
+        input.prompt,
+      );
+      if (scannedContext) {
+        inputWithUseCase.projectFilesContext = scannedContext;
+        console.log(
+          picocolors.dim(`  Project scan: ${matchedFiles.length} file(s) matched prompt keywords`),
+        );
+      }
+    }
+
     console.log(
       picocolors.cyan(
         `  Calling internal AI planner (provider: ${provider.name}, model: ${plannerConfig.model})...`,
@@ -109,7 +124,7 @@ export class InternalAiPlanner implements Planner {
 
       const repairOutput = await this.executeRepairPlanner(
         provider.name,
-        input,
+        inputWithUseCase,
         runId,
         errorMessage,
         attempt1.output,
@@ -340,7 +355,8 @@ export class InternalAiPlanner implements Planner {
           tasks: [
             {
               title: "Task title",
-              description: "What to do",
+              description:
+                "Exact blueprint: create src/auth/LoginForm.tsx with email/password fields and submit handler per the design spec",
               executor: "shell | opencode | claude",
               dependsOn: ["Title of previous task"],
               riskLevel: "safe | risky | dangerous | low | medium | high",
@@ -407,6 +423,23 @@ export class InternalAiPlanner implements Planner {
       parts.push("");
     }
 
+    parts.push("## Detailed Blueprint Requirements");
+    parts.push("Each task description MUST be a precise implementation blueprint:");
+    parts.push("- Specify the EXACT files to create or modify (with relative paths).");
+    parts.push("- Describe the EXACT logic, patterns, or content to produce.");
+    parts.push("- Reference specific function names, class names, or module names when relevant.");
+    parts.push("- For each file change, specify what to add, change, or remove.");
+    parts.push(
+      "- Do NOT write vague titles like 'Implement feature' — use e.g. 'Add UserService.login() in src/services/user-service.ts'.",
+    );
+    parts.push(
+      "- Task titles must be specific and actionable — they should name the exact file, module, or function being worked on.",
+    );
+    parts.push(
+      "- The executor follows the task description as a literal recipe — no re-analysis, no deviation.",
+    );
+    parts.push("- Include concrete examples of expected output where helpful.");
+    parts.push("");
     parts.push("## Important Role Separation");
     parts.push("- Planner creates a JSON task plan only.");
     parts.push("- Planner does not implement the user request.");
@@ -550,6 +583,11 @@ export class InternalAiPlanner implements Planner {
       parts.push("");
     }
 
+    if (input.projectFilesContext) {
+      parts.push(input.projectFilesContext);
+      parts.push("");
+    }
+
     parts.push("## Task Planning Rules");
     parts.push("- Break the work into logical sequential tasks.");
     parts.push("- Each task must have at least one acceptance criterion.");
@@ -569,6 +607,23 @@ export class InternalAiPlanner implements Planner {
     parts.push(
       '- Use validationMethod "file_exists" for newly created files, "file_diff" for modified files, "file_content" when specific content must be checked.',
     );
+    parts.push("");
+    parts.push("## Detailed Blueprint Requirements");
+    parts.push("Each task description MUST be a precise implementation blueprint:");
+    parts.push("- Specify the EXACT files to create or modify (with relative paths).");
+    parts.push("- Describe the EXACT logic, patterns, or content to produce.");
+    parts.push("- Reference specific function names, class names, or module names when relevant.");
+    parts.push("- For each file change, specify what to add, change, or remove.");
+    parts.push(
+      "- Do NOT write vague titles like 'Implement feature' — use e.g. 'Add UserService.login() in src/services/user-service.ts'.",
+    );
+    parts.push(
+      "- Task titles must be specific and actionable — they should name the exact file, module, or function being worked on.",
+    );
+    parts.push(
+      "- The executor follows the task description as a literal recipe — no re-analysis, no deviation.",
+    );
+    parts.push("- Include concrete examples of expected output where helpful.");
 
     return parts.join("\n");
   }

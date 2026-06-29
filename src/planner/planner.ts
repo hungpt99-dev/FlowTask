@@ -7,6 +7,7 @@ export interface PlannerInput {
   rulesContext: string;
   template?: string;
   projectFiles?: string[];
+  projectFilesContext?: string;
   availableExecutors?: string[];
   runId?: string;
   useCase?: UseCaseDetection;

@@ -125,6 +125,7 @@ export class AiPlanner implements Planner {
       projectRoot: input.projectRoot,
       config: this.config,
       availableExecutors,
+      projectFilesContext: input.projectFilesContext,
     });
 
     console.log(picocolors.cyan(`    Calling AI planner (attempt ${attemptNumber})...`));
@@ -317,7 +318,7 @@ export class AiPlanner implements Planner {
   "tasks": [
     {
       "title": "Task title",
-      "description": "Detailed description of what to do",
+      "description": "Exact blueprint: create src/validation/email-validator.ts with isEmail() function per the spec",
       "executor": "shell",
       "dependsOn": ["Exact title of previous task"],
       "riskLevel": "safe",
