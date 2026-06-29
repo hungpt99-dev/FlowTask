@@ -24,8 +24,6 @@ describe("providers commands", () => {
     originalCwd = process.cwd();
     process.chdir(projectDir);
     process.stdin.isTTY = false as unknown as boolean;
-    process.env.FLOWTASK_SECRETS_PATH = join(projectDir, ".flowtask", "secrets.json");
-
     originalExit = process.exit;
     process.exit = ((code?: number) => {
       throw new Error(`process.exit(${code})`);
@@ -44,7 +42,6 @@ describe("providers commands", () => {
     process.chdir(originalCwd);
     process.exit = originalExit;
     process.stdin.isTTY = true as unknown as boolean;
-    delete process.env.FLOWTASK_SECRETS_PATH;
     resetSecretStore();
   });
 

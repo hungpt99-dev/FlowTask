@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { ApiKeyValidator } from "../../src/ai/api-key-validator.js";
 import type { FlowTaskConfig } from "../../src/schemas/config.schema.js";
 
@@ -57,10 +57,6 @@ function createConfig(overrides?: Partial<FlowTaskConfig>): FlowTaskConfig {
 }
 
 describe("ApiKeyValidator", () => {
-  beforeAll(() => {
-    process.env.FLOWTASK_SECRETS_PATH = "/tmp/flowtask-test-secrets-nonexistent.json";
-  });
-
   beforeEach(() => {
     TEST_ENV_KEYS.clear();
   });
@@ -73,10 +69,6 @@ describe("ApiKeyValidator", () => {
         delete process.env[key];
       }
     }
-  });
-
-  afterAll(() => {
-    delete process.env.FLOWTASK_SECRETS_PATH;
   });
 
   function clearEnv(key: string): void {

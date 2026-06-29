@@ -17,15 +17,12 @@ describe("setupAiCommand", () => {
     mkdirSync(projectDir, { recursive: true });
     originalCwd = process.cwd();
     process.chdir(projectDir);
-    process.env.FLOWTASK_SECRETS_PATH = join(projectDir, ".flowtask", "secrets.json");
-
     const manager = new ProjectManager();
     await manager.init(projectDir, "Test Project");
   });
 
   afterEach(() => {
     process.chdir(originalCwd);
-    delete process.env.FLOWTASK_SECRETS_PATH;
     resetSecretStore();
   });
 
