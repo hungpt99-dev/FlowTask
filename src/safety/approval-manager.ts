@@ -1,5 +1,6 @@
 import Enquirer from "enquirer";
 import picocolors from "picocolors";
+import type { RiskLevel } from "./approval-gate.js";
 
 export interface ApprovalRequest {
   taskId: string;
@@ -7,6 +8,18 @@ export interface ApprovalRequest {
   reason: string;
   stepId?: string;
   stepTitle?: string;
+}
+
+export interface GateApprovalRequest {
+  taskId: string;
+  actionType: string;
+  riskLevel: RiskLevel;
+  reason: string;
+  details: string;
+  stepId?: string;
+  stepTitle?: string;
+  estimatedCost?: number;
+  failureCount?: number;
 }
 
 export interface RetryApprovalRequest {
@@ -32,6 +45,8 @@ export interface ApprovalConfig {
   mode: ApprovalMode;
 }
 
+export type GateDecision = "approved" | "rejected" | "override" | "skip";
+
 export class ApprovalManager {
   private config: ApprovalConfig;
 
@@ -43,12 +58,20 @@ export class ApprovalManager {
     };
   }
 
+  shouldAutoApprove(): boolean {
+    return this.config.mode === "auto" || this.config.autoApprove;
+  }
+
+  shouldSkip(): boolean {
+    return this.config.mode === "skip" || !this.config.enabled;
+  }
+
   async requestApproval(request: ApprovalRequest): Promise<boolean> {
-    if (!this.config.enabled || this.config.mode === "skip") {
+    if (this.shouldSkip()) {
       return true;
     }
 
-    if (this.config.autoApprove || this.config.mode === "auto") {
+    if (this.shouldAutoApprove()) {
       return true;
     }
 
@@ -69,6 +92,50 @@ export class ApprovalManager {
     } catch {
       return false;
     }
+  }
+
+  async requestGateApproval(request: GateApprovalRequest): Promise<GateDecision> {
+    if (this.shouldSkip()) {
+      return "approved";
+    }
+
+    if (this.shouldAutoApprove()) {
+      return "approved";
+    }
+
+    if (!process.stdin.isTTY) {
+      return "approved";
+    }
+
+    const riskColor = this.getRiskColor(request.riskLevel);
+    const enquirer = new Enquirer();
+    try {
+      const label = request.stepTitle ?? request.taskId;
+      const response = await enquirer.prompt({
+        type: "select" as const,
+        name: "decision",
+        message: `Approval Gate: ${picocolors.cyan(request.actionType)}\n  Step: ${picocolors.cyan(label)}\n  Risk: ${riskColor(request.riskLevel)}\n  ${request.details}\n\n  Decision?`,
+        choices: ["approve", "reject", "override"],
+      });
+      const decision = (response as Record<string, string>).decision;
+      if (decision === "approve") return "approved";
+      if (decision === "override") return "override";
+      return "rejected";
+    } catch {
+      return "rejected";
+    }
+  }
+
+  async requestGateApprovalNonInteractive(request: GateApprovalRequest): Promise<GateDecision> {
+    if (this.shouldSkip()) {
+      return "approved";
+    }
+
+    if (this.shouldAutoApprove()) {
+      return "approved";
+    }
+
+    return "approved";
   }
 
   async requestStepFailureResolution(request: StepFailureRequest): Promise<StepFailureAction> {
@@ -95,11 +162,11 @@ export class ApprovalManager {
   }
 
   async requestRetryApproval(request: RetryApprovalRequest): Promise<boolean> {
-    if (!this.config.enabled || this.config.mode === "skip") {
+    if (this.shouldSkip()) {
       return true;
     }
 
-    if (this.config.autoApprove || this.config.mode === "auto") {
+    if (this.shouldAutoApprove()) {
       return true;
     }
 
@@ -126,5 +193,16 @@ export class ApprovalManager {
 
   setConfig(config: Partial<ApprovalConfig>): void {
     this.config = { ...this.config, ...config };
+  }
+
+  private getRiskColor(risk: RiskLevel): (text: string) => string {
+    const map: Record<RiskLevel, (t: string) => string> = {
+      safe: picocolors.green,
+      low: picocolors.cyan,
+      medium: picocolors.yellow,
+      high: picocolors.red,
+      critical: picocolors.red,
+    };
+    return map[risk] ?? picocolors.dim;
   }
 }
