@@ -37,7 +37,7 @@ describe("DatabaseManager edge cases", () => {
   describe("migration", () => {
     it("should handle schema version correctly", () => {
       const status = db.status();
-      expect(status.version).toBe(1);
+      expect(status.version).toBe(2);
     });
 
     it("should handle multiple table creation", () => {
