@@ -89,8 +89,7 @@ export class WorkflowReplanner {
         validation: t.validation
           ? {
               commands: t.validation.commands,
-              requiredFiles: t.validation.requiredFiles,
-              requiredContent: t.validation.requiredContent,
+
               requiredArtifacts: t.validation.requiredArtifacts,
               requireGitDiff: t.validation.requireGitDiff,
             }
@@ -235,8 +234,6 @@ export class WorkflowReplanner {
           validation: nt.validation
             ? {
                 commands: nt.validation.commands,
-                requiredFiles: nt.validation.requiredFiles,
-                requiredContent: nt.validation.requiredContent,
                 requiredArtifacts: nt.validation.requiredArtifacts,
                 requireGitDiff: nt.validation.requireGitDiff,
               }
@@ -296,8 +293,6 @@ export class WorkflowReplanner {
           validation: nt.validation
             ? {
                 commands: nt.validation.commands,
-                requiredFiles: nt.validation.requiredFiles,
-                requiredContent: nt.validation.requiredContent,
                 requiredArtifacts: nt.validation.requiredArtifacts,
                 requireGitDiff: nt.validation.requireGitDiff,
               }
@@ -384,8 +379,7 @@ export class WorkflowReplanner {
           validation: matchingNew.validation
             ? {
                 commands: matchingNew.validation.commands,
-                requiredFiles: matchingNew.validation.requiredFiles,
-                requiredContent: matchingNew.validation.requiredContent,
+
                 requiredArtifacts: matchingNew.validation.requiredArtifacts,
                 requireGitDiff: matchingNew.validation.requireGitDiff,
               }
@@ -421,8 +415,7 @@ export class WorkflowReplanner {
           validation: matchingNew.validation
             ? {
                 commands: matchingNew.validation.commands,
-                requiredFiles: matchingNew.validation.requiredFiles,
-                requiredContent: matchingNew.validation.requiredContent,
+
                 requiredArtifacts: matchingNew.validation.requiredArtifacts,
                 requireGitDiff: matchingNew.validation.requireGitDiff,
               }
@@ -460,8 +453,7 @@ export class WorkflowReplanner {
         validation: nt.validation
           ? {
               commands: nt.validation.commands,
-              requiredFiles: nt.validation.requiredFiles,
-              requiredContent: nt.validation.requiredContent,
+
               requiredArtifacts: nt.validation.requiredArtifacts,
               requireGitDiff: nt.validation.requireGitDiff,
             }

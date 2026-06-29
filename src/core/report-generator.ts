@@ -45,12 +45,6 @@ export class ReportGenerator {
       if (task.validation?.commands) {
         commandsExecuted.push(...task.validation.commands);
       }
-      if (task.validation?.requiredFiles) {
-        changedFiles.push(...task.validation.requiredFiles);
-      }
-      if (task.validation?.requiredContent) {
-        artifacts.push(...task.validation.requiredContent);
-      }
     }
 
     if (rootPath) {

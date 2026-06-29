@@ -79,8 +79,6 @@ export class WorkflowManager {
       validation: t.validation
         ? {
             commands: t.validation.commands,
-            requiredFiles: t.validation.requiredFiles,
-            requiredContent: t.validation.requiredContent,
             requiredArtifacts: t.validation.requiredArtifacts,
             requireGitDiff: t.validation.requireGitDiff,
           }
@@ -182,8 +180,6 @@ export class WorkflowManager {
           validation: wt.validation
             ? {
                 commands: wt.validation.commands,
-                requiredFiles: wt.validation.requiredFiles,
-                requiredContent: wt.validation.requiredContent,
                 requiredArtifacts: wt.validation.requiredArtifacts,
                 requireGitDiff: wt.validation.requireGitDiff,
               }
@@ -542,8 +538,7 @@ export class WorkflowManager {
       validation: wt.validation
         ? {
             commands: wt.validation.commands,
-            requiredFiles: wt.validation.requiredFiles,
-            requiredContent: wt.validation.requiredContent,
+
             requiredArtifacts: wt.validation.requiredArtifacts,
             requireGitDiff: wt.validation.requireGitDiff,
           }

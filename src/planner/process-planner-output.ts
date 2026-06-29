@@ -79,7 +79,6 @@ export async function processPlannerOutput(
       acceptanceCriteria: aiTask.acceptanceCriteria,
       validation: {
         commands: aiTask.validation?.commands ?? [],
-        requiredFiles: aiTask.validation?.requiredFiles ?? [],
         requiredArtifacts: aiTask.validation?.requiredArtifacts ?? [],
         requireGitDiff: aiTask.validation?.requireGitDiff ?? false,
       },

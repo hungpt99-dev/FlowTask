@@ -1,7 +1,7 @@
 import path from "node:path";
 import picocolors from "picocolors";
 import { type Planner, type PlannerInput, type PlannerResult } from "./planner.js";
-import { type AiPlannerOutput, validateArtifactPaths } from "../schemas/planner.schema.js";
+import { type AiPlannerOutput } from "../schemas/planner.schema.js";
 import { generateRunId } from "../utils/ids.js";
 import type { FlowTaskConfig } from "../schemas/config.schema.js";
 import { writeTextFile, ensureDir } from "../utils/fs.js";
@@ -348,8 +348,6 @@ export class InternalAiPlanner implements Planner {
               commands: ["shell command (only if executor=shell)"],
               validation: {
                 commands: ["pnpm test"],
-                requiredFiles: ["src/file.ts"],
-                requiredArtifacts: ["artifacts/task_001/report.md"],
                 requireGitDiff: false,
               },
               expectedResult: "Describe what the expected outcome of this task looks like",
@@ -376,9 +374,6 @@ export class InternalAiPlanner implements Planner {
     parts.push(
       '- Use executor "ai" or the configured default executor for analysis, writing, editing, coding, and refactoring.',
     );
-    parts.push(
-      "- requiredArtifacts must be relative file paths with a file extension like .md, .json, .txt, .log, .csv, .html, .svg.",
-    );
     parts.push("- dependsOn may use previous task titles. FlowTask will normalize them.");
     parts.push(
       "- Each task should include expectedResult describing what the concrete outcome or evidence of completion will be.",
@@ -395,6 +390,9 @@ export class InternalAiPlanner implements Planner {
     );
     parts.push(
       "- For tasks that produce no files (e.g., running validation), set outputPlan to an empty array.",
+    );
+    parts.push(
+      "- Do not use `requiredFiles` or `requiredContent`. These fields do not exist in the schema.",
     );
 
     if (useCase && useCase.type !== "general") {
@@ -472,6 +470,9 @@ export class InternalAiPlanner implements Planner {
     parts.push("Do not include any prose before or after JSON.");
     parts.push("The first character must be `{`.");
     parts.push("The last character must be `}`.");
+    parts.push(
+      "Do not use `requiredFiles` or `requiredContent`. These fields do not exist in the schema.",
+    );
     parts.push("");
     parts.push("## JSON Schema");
     parts.push("```json");
@@ -491,8 +492,6 @@ export class InternalAiPlanner implements Planner {
               commands: ["string"],
               validation: {
                 commands: ["string"],
-                requiredFiles: ["string"],
-                requiredArtifacts: ["string"],
                 requireGitDiff: true,
               },
               expectedResult: "string",
@@ -564,7 +563,6 @@ export class InternalAiPlanner implements Planner {
     parts.push("- Choose executor based on what the task needs.");
     parts.push('  "shell" for read-only/file operations, "opencode" or other for creative work.');
     parts.push("- Set commands only when executor is shell and the command is safe.");
-    parts.push("- requiredArtifacts must be relative file paths with file extensions.");
     parts.push(
       "- Each task should include an `outputPlan` array listing expected outputs with action type (create/modify/delete), target path, description, and validation method.",
     );
@@ -586,7 +584,6 @@ export class InternalAiPlanner implements Planner {
       runId: runId ?? generateRunId(input.prompt),
       validateExecutors: (data) => {
         this.validateShellTasks(data);
-        this.validateArtifacts(data);
         this.validateExecutors(data);
       },
       resolveExecutor: (taskExecutor) => this.resolveExecutor(taskExecutor),
@@ -605,19 +602,6 @@ export class InternalAiPlanner implements Planner {
             `Internal AI plan task "${task.title}" uses executor "shell" but has no commands defined. Shell tasks must have non-empty commands.`,
           );
         }
-      }
-    }
-  }
-
-  private validateArtifacts(data: AiPlannerOutput): void {
-    for (const task of data.tasks) {
-      const paths = task.validation?.requiredArtifacts ?? [];
-      const invalid = validateArtifactPaths(paths);
-      if (invalid.length > 0) {
-        const joined = invalid.map((p) => `"${p}"`).join(", ");
-        throw new Error(
-          `Internal AI plan task "${task.title}" has invalid requiredArtifacts: ${joined}. Artifacts must be relative file paths with file extensions (e.g., "artifacts/task_001/report.md").`,
-        );
       }
     }
   }

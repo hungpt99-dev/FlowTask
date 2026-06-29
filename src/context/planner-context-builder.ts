@@ -99,7 +99,6 @@ export class PlannerContextBuilder {
       "acceptanceCriteria": ["Criterion 1", "Criterion 2"],
       "validation": {
         "commands": ["pnpm test"],
-        "requiredFiles": ["src/generated/output.ts"],
         "requiredArtifacts": [],
         "requireGitDiff": false
       },
@@ -139,6 +138,9 @@ export class PlannerContextBuilder {
     );
     parts.push(
       '- Use validationMethod "file_exists" for newly created files, "file_diff" for modified files, and "file_content" when specific content must be checked.\n',
+    );
+    parts.push(
+      "- Do not use `requiredFiles` or `requiredContent`. These fields do not exist in the schema.\n",
     );
 
     parts.push("\n## Final Reminder — Read Carefully\n");

@@ -305,7 +305,46 @@ export class AiPlanner implements Planner {
     parts.push("Do not wrap in ```.\n");
     parts.push("Do not include any prose before or after JSON.\n");
     parts.push("The first character must be `{`.\n");
-    parts.push("The last character must be `}`.\n\n");
+    parts.push("The last character must be `}`.\n");
+    parts.push(
+      "Do not use `requiredFiles` or `requiredContent`. These fields do not exist in the schema.\n\n",
+    );
+    parts.push("## Expected JSON Output Schema\n");
+    parts.push("```json\n");
+    parts.push(`{
+  "title": "Short run title",
+  "summary": "One-line summary of the plan",
+  "tasks": [
+    {
+      "title": "Task title",
+      "description": "Detailed description of what to do",
+      "executor": "shell",
+      "dependsOn": ["Exact title of previous task"],
+      "riskLevel": "safe",
+      "acceptanceCriteria": ["Criterion 1", "Criterion 2"],
+      "validation": {
+        "commands": ["pnpm test"],
+        "requireGitDiff": false
+      },
+      "expectedResult": "Describe what the expected outcome of this task looks like",
+      "outputPlan": [
+        {
+          "action": "create",
+          "target": "src/generated/output.ts",
+          "description": "Generated output file with implementation",
+          "validationMethod": "file_exists"
+        },
+        {
+          "action": "modify",
+          "target": "src/existing-file.ts",
+          "description": "Modified existing file",
+          "validationMethod": "file_diff"
+        }
+      ]
+    }
+  ]
+}\n`);
+    parts.push("```\n\n");
     parts.push("## Original Prompt\n");
     parts.push(`${prompt}\n\n`);
 
