@@ -26,6 +26,7 @@ function makeStep(id: string, taskId: string, runId: string, overrides?: Partial
     type: "command",
     status: "pending",
     requiresApproval: false,
+    dependsOn: [],
     order: 0,
     createdAt: now,
     updatedAt: now,
@@ -136,6 +137,15 @@ describe("StepManager", () => {
       ).rejects.toThrow("Step not found");
     });
 
+    it("should reject invalid status transitions", async () => {
+      const steps: Step[] = [makeStep("s1", taskId, runId, { order: 0, status: "created" })];
+      await stepManager.saveSteps(runId, taskId, steps);
+
+      await expect(
+        stepManager.updateStep(runId, taskId, "s1", { status: "succeeded" }),
+      ).rejects.toThrow("Invalid state transition");
+    });
+
     it("should reject invalid updates via schema validation", async () => {
       const steps: Step[] = [makeStep("s1", taskId, runId, { order: 0 })];
       await stepManager.saveSteps(runId, taskId, steps);
@@ -144,33 +154,78 @@ describe("StepManager", () => {
         stepManager.updateStep(runId, taskId, "s1", { status: "invalid_status" as never }),
       ).rejects.toThrow();
     });
+
+    it("should set startedAt when transitioning to running", async () => {
+      const steps: Step[] = [makeStep("s1", taskId, runId, { order: 0, status: "created" })];
+      await stepManager.saveSteps(runId, taskId, steps);
+
+      const updated = await stepManager.updateStep(runId, taskId, "s1", { status: "pending" });
+      expect(updated.status).toBe("pending");
+      expect(updated.startedAt).toBeUndefined();
+
+      const running = await stepManager.updateStep(runId, taskId, "s1", { status: "running" });
+      expect(running.startedAt).toBeDefined();
+    });
+
+    it("should set finishedAt when transitioning to terminal state", async () => {
+      const steps: Step[] = [makeStep("s1", taskId, runId, { order: 0, status: "created" })];
+      await stepManager.saveSteps(runId, taskId, steps);
+
+      await stepManager.updateStep(runId, taskId, "s1", { status: "pending" });
+      await stepManager.updateStep(runId, taskId, "s1", { status: "running" });
+      const finished = await stepManager.updateStep(runId, taskId, "s1", { status: "succeeded" });
+      expect(finished.finishedAt).toBeDefined();
+    });
   });
 
   describe("updateStepStatus", () => {
     it("should update step status", async () => {
-      const steps: Step[] = [makeStep("s1", taskId, runId, { order: 0, status: "pending" })];
+      const steps: Step[] = [makeStep("s1", taskId, runId, { order: 0, status: "created" })];
       await stepManager.saveSteps(runId, taskId, steps);
 
-      const updated = await stepManager.updateStepStatus(runId, taskId, "s1", "running");
-      expect(updated.status).toBe("running");
+      const updated = await stepManager.updateStepStatus(runId, taskId, "s1", "pending");
+      expect(updated.status).toBe("pending");
     });
 
-    it("should transition through multiple statuses", async () => {
-      const steps: Step[] = [makeStep("s1", taskId, runId, { order: 0, status: "pending" })];
+    it("should enforce state machine transitions", async () => {
+      const steps: Step[] = [makeStep("s1", taskId, runId, { order: 0, status: "succeeded" })];
       await stepManager.saveSteps(runId, taskId, steps);
 
+      await expect(stepManager.updateStepStatus(runId, taskId, "s1", "running")).rejects.toThrow(
+        "Invalid state transition",
+      );
+    });
+
+    it("should transition through multiple valid statuses", async () => {
+      const steps: Step[] = [makeStep("s1", taskId, runId, { order: 0, status: "created" })];
+      await stepManager.saveSteps(runId, taskId, steps);
+
+      await stepManager.updateStepStatus(runId, taskId, "s1", "pending");
       await stepManager.updateStepStatus(runId, taskId, "s1", "running");
-      await stepManager.updateStepStatus(runId, taskId, "s1", "done");
+      await stepManager.updateStepStatus(runId, taskId, "s1", "succeeded");
 
       const step = await stepManager.getStep(runId, taskId, "s1");
-      expect(step!.status).toBe("done");
+      expect(step!.status).toBe("succeeded");
+    });
+
+    it("should allow retry transition from failed", async () => {
+      const steps: Step[] = [makeStep("s1", taskId, runId, { order: 0, status: "running" })];
+      await stepManager.saveSteps(runId, taskId, steps);
+
+      await stepManager.updateStepStatus(runId, taskId, "s1", "failed");
+      await stepManager.updateStepStatus(runId, taskId, "s1", "retrying");
+      await stepManager.updateStepStatus(runId, taskId, "s1", "running");
+
+      const step = await stepManager.getStep(runId, taskId, "s1");
+      expect(step!.status).toBe("running");
     });
   });
 
   describe("approveStep / denyStep", () => {
-    it("should approve a step", async () => {
+    it("should approve a pending_approval step", async () => {
       const steps: Step[] = [
         makeStep("s1", taskId, runId, {
+          dependsOn: [],
           order: 0,
           status: "pending_approval",
           requiresApproval: true,
@@ -183,9 +238,25 @@ describe("StepManager", () => {
       expect(approved.status).toBe("approved");
     });
 
-    it("should deny a step", async () => {
+    it("should approve a waiting_approval step by transitioning to running", async () => {
       const steps: Step[] = [
         makeStep("s1", taskId, runId, {
+          dependsOn: [],
+          order: 0,
+          status: "waiting_approval",
+          requiresApproval: true,
+        }),
+      ];
+      await stepManager.saveSteps(runId, taskId, steps);
+
+      const approved = await stepManager.approveStep(runId, taskId, "s1");
+      expect(approved.status).toBe("running");
+    });
+
+    it("should deny a pending_approval step", async () => {
+      const steps: Step[] = [
+        makeStep("s1", taskId, runId, {
+          dependsOn: [],
           order: 0,
           status: "pending_approval",
           requiresApproval: true,
@@ -196,17 +267,34 @@ describe("StepManager", () => {
       const denied = await stepManager.denyStep(runId, taskId, "s1");
       expect(denied.status).toBe("denied");
     });
+
+    it("should cancel a waiting_approval step when denied", async () => {
+      const steps: Step[] = [
+        makeStep("s1", taskId, runId, {
+          dependsOn: [],
+          order: 0,
+          status: "waiting_approval",
+          requiresApproval: true,
+        }),
+      ];
+      await stepManager.saveSteps(runId, taskId, steps);
+
+      const denied = await stepManager.denyStep(runId, taskId, "s1");
+      expect(denied.status).toBe("cancelled");
+    });
   });
 
   describe("approveAllPending", () => {
     it("should approve all pending_approval steps for a task", async () => {
       const steps: Step[] = [
         makeStep("s1", taskId, runId, {
+          dependsOn: [],
           order: 0,
           status: "pending_approval",
           requiresApproval: true,
         }),
         makeStep("s2", taskId, runId, {
+          dependsOn: [],
           order: 1,
           status: "pending_approval",
           requiresApproval: true,
@@ -225,7 +313,7 @@ describe("StepManager", () => {
     });
 
     it("should return empty array when no pending_approval steps", async () => {
-      const steps: Step[] = [makeStep("s1", taskId, runId, { order: 0, status: "done" })];
+      const steps: Step[] = [makeStep("s1", taskId, runId, { order: 0, status: "succeeded" })];
       await stepManager.saveSteps(runId, taskId, steps);
 
       const approved = await stepManager.approveAllPending(runId, taskId);
@@ -239,6 +327,7 @@ describe("StepManager", () => {
 
       const steps1: Step[] = [
         makeStep("s1", taskId, runId, {
+          dependsOn: [],
           order: 0,
           status: "pending_approval",
           requiresApproval: true,
@@ -246,11 +335,12 @@ describe("StepManager", () => {
       ];
       const steps2: Step[] = [
         makeStep("s2", taskId2, runId, {
+          dependsOn: [],
           order: 0,
           status: "pending_approval",
           requiresApproval: true,
         }),
-        makeStep("s3", taskId2, runId, { order: 1, status: "done" }),
+        makeStep("s3", taskId2, runId, { order: 1, status: "succeeded" }),
       ];
 
       await stepManager.saveSteps(runId, taskId, steps1);
@@ -264,15 +354,339 @@ describe("StepManager", () => {
 
       const loaded2 = await stepManager.loadSteps(runId, taskId2);
       expect(loaded2[0]!.status).toBe("approved");
-      expect(loaded2[1]!.status).toBe("done");
+      expect(loaded2[1]!.status).toBe("succeeded");
     });
+  });
 
-    it("should return empty array when no pending_approval steps in run", async () => {
-      const steps: Step[] = [makeStep("s1", taskId, runId, { order: 0, status: "done" })];
+  describe("pause / resume / cancel / skip", () => {
+    it("should pause a running step", async () => {
+      const steps: Step[] = [makeStep("s1", taskId, runId, { order: 0, status: "running" })];
       await stepManager.saveSteps(runId, taskId, steps);
 
-      const approved = await stepManager.approveAllPendingForRun(runId);
-      expect(approved).toEqual([]);
+      const paused = await stepManager.pauseStep(runId, taskId, "s1");
+      expect(paused.status).toBe("paused");
+    });
+
+    it("should resume a paused step", async () => {
+      const steps: Step[] = [makeStep("s1", taskId, runId, { order: 0, status: "paused" })];
+      await stepManager.saveSteps(runId, taskId, steps);
+
+      const resumed = await stepManager.resumeStep(runId, taskId, "s1");
+      expect(resumed.status).toBe("running");
+    });
+
+    it("should cancel a pending step", async () => {
+      const steps: Step[] = [makeStep("s1", taskId, runId, { order: 0, status: "pending" })];
+      await stepManager.saveSteps(runId, taskId, steps);
+
+      const cancelled = await stepManager.cancelStep(runId, taskId, "s1");
+      expect(cancelled.status).toBe("cancelled");
+    });
+
+    it("should skip a pending step", async () => {
+      const steps: Step[] = [makeStep("s1", taskId, runId, { order: 0, status: "pending" })];
+      await stepManager.saveSteps(runId, taskId, steps);
+
+      const skipped = await stepManager.skipStep(runId, taskId, "s1");
+      expect(skipped.status).toBe("skipped");
+    });
+
+    it("should enforce valid transitions for pause", async () => {
+      const steps: Step[] = [makeStep("s1", taskId, runId, { order: 0, status: "succeeded" })];
+      await stepManager.saveSteps(runId, taskId, steps);
+
+      await expect(stepManager.pauseStep(runId, taskId, "s1")).rejects.toThrow(
+        "Invalid state transition",
+      );
+    });
+  });
+
+  describe("retryStep", () => {
+    it("should retry a failed step", async () => {
+      const steps: Step[] = [
+        makeStep("s1", taskId, runId, {
+          dependsOn: [],
+          order: 0,
+          status: "failed",
+          retryPolicy: { maxRetries: 3, retryDelayMs: 1000, retryBackoff: "linear" },
+        }),
+      ];
+      await stepManager.saveSteps(runId, taskId, steps);
+
+      const retried = await stepManager.retryStep(runId, taskId, "s1");
+      expect(retried.status).toBe("pending");
+    });
+
+    it("should throw when max retries exhausted", async () => {
+      const steps: Step[] = [
+        makeStep("s1", taskId, runId, {
+          dependsOn: [],
+          order: 0,
+          status: "failed",
+          retryPolicy: { maxRetries: 1, retryDelayMs: 1000, retryBackoff: "fixed" },
+          errors: [
+            {
+              message: "Failed attempt 1",
+              timestamp: makeTimestamp(),
+              retryCount: 0,
+            },
+          ],
+        }),
+      ];
+      await stepManager.saveSteps(runId, taskId, steps);
+
+      await expect(stepManager.retryStep(runId, taskId, "s1")).rejects.toThrow(
+        "exhausted max retries",
+      );
+    });
+  });
+
+  describe("step dependencies", () => {
+    it("should report dependency status", async () => {
+      const steps: Step[] = [
+        makeStep("s1", taskId, runId, { order: 0, status: "succeeded" }),
+        makeStep("s2", taskId, runId, { order: 1, status: "pending", dependsOn: ["s1"] }),
+      ];
+      await stepManager.saveSteps(runId, taskId, steps);
+
+      const depStatus = await stepManager.getDependencyStatus(runId, taskId, "s2");
+      expect(depStatus.satisfied).toBe(true);
+      expect(depStatus.blocked).toBe(false);
+      expect(depStatus.satisfiedStepIds).toContain("s1");
+    });
+
+    it("should report blocked when dependency not met", async () => {
+      const steps: Step[] = [
+        makeStep("s1", taskId, runId, { order: 0, status: "pending" }),
+        makeStep("s2", taskId, runId, { order: 1, status: "pending", dependsOn: ["s1"] }),
+      ];
+      await stepManager.saveSteps(runId, taskId, steps);
+
+      const depStatus = await stepManager.getDependencyStatus(runId, taskId, "s2");
+      expect(depStatus.satisfied).toBe(false);
+      expect(depStatus.blocked).toBe(true);
+      expect(depStatus.pendingStepIds).toContain("s1");
+    });
+
+    it("should check canExecute", async () => {
+      const steps: Step[] = [
+        makeStep("s1", taskId, runId, { order: 0, status: "succeeded" }),
+        makeStep("s2", taskId, runId, { order: 1, status: "pending", dependsOn: ["s1"] }),
+      ];
+      await stepManager.saveSteps(runId, taskId, steps);
+
+      expect(await stepManager.canExecute(runId, taskId, "s2")).toBe(true);
+    });
+
+    it("should report blocked when canExecute false", async () => {
+      const steps: Step[] = [
+        makeStep("s1", taskId, runId, { order: 0, status: "running" }),
+        makeStep("s2", taskId, runId, { order: 1, status: "pending", dependsOn: ["s1"] }),
+      ];
+      await stepManager.saveSteps(runId, taskId, steps);
+
+      expect(await stepManager.canExecute(runId, taskId, "s2")).toBe(false);
+    });
+
+    it("should return all ready steps", async () => {
+      const steps: Step[] = [
+        makeStep("s1", taskId, runId, { order: 0, status: "succeeded" }),
+        makeStep("s2", taskId, runId, { order: 1, status: "pending", dependsOn: ["s1"] }),
+        makeStep("s3", taskId, runId, { order: 2, status: "pending", dependsOn: ["s1"] }),
+      ];
+      await stepManager.saveSteps(runId, taskId, steps);
+
+      const ready = await stepManager.getReadySteps(runId, taskId);
+      expect(ready).toHaveLength(2);
+      expect(ready.map((s) => s.id)).toContain("s2");
+      expect(ready.map((s) => s.id)).toContain("s3");
+    });
+  });
+
+  describe("input / output handling", () => {
+    it("should mark step as waiting for input", async () => {
+      const steps: Step[] = [makeStep("s1", taskId, runId, { order: 0, status: "running" })];
+      await stepManager.saveSteps(runId, taskId, steps);
+
+      const waiting = await stepManager.markStepInputRequired(runId, taskId, "s1");
+      expect(waiting.status).toBe("waiting_input");
+    });
+
+    it("should provide input and resume step", async () => {
+      const steps: Step[] = [makeStep("s1", taskId, runId, { order: 0, status: "waiting_input" })];
+      await stepManager.saveSteps(runId, taskId, steps);
+
+      const resumed = await stepManager.provideStepInput(runId, taskId, "s1", {
+        answer: "yes",
+      });
+      expect(resumed.status).toBe("running");
+      expect(resumed.input!.answer).toBe("yes");
+    });
+  });
+
+  describe("stuck and recovery", () => {
+    it("should mark step as stuck", async () => {
+      const steps: Step[] = [makeStep("s1", taskId, runId, { order: 0, status: "running" })];
+      await stepManager.saveSteps(runId, taskId, steps);
+
+      const stuck = await stepManager.markStepStuck(runId, taskId, "s1");
+      expect(stuck.status).toBe("stuck");
+    });
+
+    it("should recover a stuck step", async () => {
+      const steps: Step[] = [makeStep("s1", taskId, runId, { order: 0, status: "stuck" })];
+      await stepManager.saveSteps(runId, taskId, steps);
+
+      const recovered = await stepManager.recoverStep(runId, taskId, "s1");
+      expect(recovered.status).toBe("running");
+    });
+  });
+
+  describe("addStep / removeStep", () => {
+    it("should add a new step", async () => {
+      const step = await stepManager.addStep(runId, taskId, {
+        title: "New step",
+        command: "echo hello",
+      });
+
+      expect(step.id).toBeDefined();
+      expect(step.title).toBe("New step");
+      expect(step.status).toBe("created");
+      expect(step.dependsOn).toEqual([]);
+    });
+
+    it("should add a step with dependencies", async () => {
+      const step = await stepManager.addStep(runId, taskId, {
+        title: "Dep step",
+        dependsOn: ["step_prev"],
+      });
+
+      expect(step.dependsOn).toEqual(["step_prev"]);
+    });
+
+    it("should remove a step", async () => {
+      const step = await stepManager.addStep(runId, taskId, { title: "To remove" });
+      await stepManager.removeStep(runId, taskId, step.id);
+
+      const loaded = await stepManager.loadSteps(runId, taskId);
+      expect(loaded.find((s) => s.id === step.id)).toBeUndefined();
+    });
+
+    it("should throw when removing a step that has dependents", async () => {
+      const step1 = await stepManager.addStep(runId, taskId, { title: "Parent" });
+      await stepManager.addStep(runId, taskId, {
+        title: "Child",
+        dependsOn: [step1.id],
+      });
+
+      await expect(stepManager.removeStep(runId, taskId, step1.id)).rejects.toThrow(
+        "step(s) depend on it",
+      );
+    });
+  });
+
+  describe("markStepFailed / markStepSucceeded", () => {
+    it("should mark step as failed with error info", async () => {
+      const steps: Step[] = [makeStep("s1", taskId, runId, { order: 0, status: "running" })];
+      await stepManager.saveSteps(runId, taskId, steps);
+
+      const failed = await stepManager.markStepFailed(runId, taskId, "s1", {
+        message: "Command exited with code 1",
+        evidence: "exit code 1",
+        suggestedFix: "Check the command syntax",
+      });
+
+      expect(failed.status).toBe("failed");
+      expect(failed.errors).toHaveLength(1);
+      expect(failed.errors![0]!.message).toBe("Command exited with code 1");
+    });
+
+    it("should mark step as succeeded with output", async () => {
+      const steps: Step[] = [makeStep("s1", taskId, runId, { order: 0, status: "validating" })];
+      await stepManager.saveSteps(runId, taskId, steps);
+
+      const succeeded = await stepManager.markStepSucceeded(runId, taskId, "s1", {
+        filesCreated: ["output.txt"],
+      });
+
+      expect(succeeded.status).toBe("succeeded");
+      expect(succeeded.output!.filesCreated).toEqual(["output.txt"]);
+    });
+  });
+
+  describe("needs user review", () => {
+    it("should mark step as needs user review", async () => {
+      const steps: Step[] = [makeStep("s1", taskId, runId, { order: 0, status: "validating" })];
+      await stepManager.saveSteps(runId, taskId, steps);
+
+      const needsReview = await stepManager.setStepAsNeedsReview(runId, taskId, "s1");
+      expect(needsReview.status).toBe("needs_user_review");
+    });
+  });
+
+  describe("step counting and filtering", () => {
+    it("should count steps by status", async () => {
+      const steps: Step[] = [
+        makeStep("s1", taskId, runId, { order: 0, status: "succeeded" }),
+        makeStep("s2", taskId, runId, { order: 1, status: "running" }),
+        makeStep("s3", taskId, runId, { order: 2, status: "pending" }),
+      ];
+      await stepManager.saveSteps(runId, taskId, steps);
+
+      const counts = await stepManager.countStepsByStatus(runId, taskId);
+      expect(counts.succeeded).toBe(1);
+      expect(counts.running).toBe(1);
+      expect(counts.pending).toBe(1);
+    });
+
+    it("should get steps by status", async () => {
+      const steps: Step[] = [
+        makeStep("s1", taskId, runId, { order: 0, status: "failed" }),
+        makeStep("s2", taskId, runId, { order: 1, status: "failed" }),
+        makeStep("s3", taskId, runId, { order: 2, status: "succeeded" }),
+      ];
+      await stepManager.saveSteps(runId, taskId, steps);
+
+      const failed = await stepManager.getStepsByStatus(runId, taskId, "failed");
+      expect(failed).toHaveLength(2);
+    });
+  });
+
+  describe("duplicate steps", () => {
+    it("should duplicate steps to another task", async () => {
+      const steps: Step[] = [
+        makeStep("s1", taskId, runId, { order: 0, command: "echo 1" }),
+        makeStep("s2", taskId, runId, { order: 1, command: "echo 2" }),
+      ];
+      await stepManager.saveSteps(runId, taskId, steps);
+
+      const targetTask = "target-task";
+      const duplicated = await stepManager.duplicateSteps(runId, taskId, targetTask);
+
+      expect(duplicated).toHaveLength(2);
+      expect(duplicated[0]!.id).not.toBe("s1");
+      expect(duplicated[0]!.taskId).toBe(targetTask);
+      expect(duplicated[0]!.status).toBe("created");
+    });
+  });
+
+  describe("reset step", () => {
+    it("should reset a failed step back to pending", async () => {
+      const step = makeStep("s1", taskId, runId, {
+        dependsOn: [],
+        order: 0,
+        status: "failed",
+        exitCode: 1,
+        errors: [{ message: "Error", timestamp: makeTimestamp(), retryCount: 0 }],
+        startedAt: makeTimestamp(),
+        finishedAt: makeTimestamp(),
+      });
+      await stepManager.saveSteps(runId, taskId, [step]);
+
+      const reset = await stepManager.resetStep(runId, taskId, "s1");
+      expect(reset.status).toBe("pending");
+      expect(reset.exitCode).toBeUndefined();
+      expect(reset.errors).toEqual([]);
     });
   });
 
@@ -299,6 +713,7 @@ describe("StepManager", () => {
     it("should handle steps with approvalReason", async () => {
       const steps: Step[] = [
         makeStep("s1", taskId, runId, {
+          dependsOn: [],
           order: 0,
           status: "pending_approval",
           requiresApproval: true,
@@ -314,8 +729,9 @@ describe("StepManager", () => {
     it("should handle steps with exit code and output", async () => {
       const steps: Step[] = [
         makeStep("s1", taskId, runId, {
+          dependsOn: [],
           order: 0,
-          status: "done",
+          status: "succeeded",
           exitCode: 0,
           command: "echo hello",
         }),
@@ -331,9 +747,7 @@ describe("StepManager", () => {
       const taskId2 = "test-task-002";
 
       await stepManager.saveSteps(runId, taskId, [makeStep("s1", taskId, runId, { order: 0 })]);
-      await stepManager.saveSteps(runId, taskId2, [
-        makeStep("s1", taskId2, runId, { order: 0 }), // same ID, different task
-      ]);
+      await stepManager.saveSteps(runId, taskId2, [makeStep("s1", taskId2, runId, { order: 0 })]);
 
       const steps1 = await stepManager.loadSteps(runId, taskId);
       const steps2 = await stepManager.loadSteps(runId, taskId2);

@@ -442,4 +442,357 @@ tasks:
       await expect(workflowManager.loadWorkflowFromFile(filePath)).rejects.toThrow();
     });
   });
+
+  describe("approval gates", () => {
+    describe("checkStepRequiresApproval", () => {
+      it("should require approval for delete step", () => {
+        const result = workflowManager.checkStepRequiresApproval(
+          "Delete temporary files",
+          "rm -rf temp",
+        );
+        expect(result.requiresApproval).toBe(true);
+        expect(result.riskLevel).toBe("high");
+        expect(result.actionType).toBe("delete_file");
+      });
+
+      it("should require approval for install dependency step", () => {
+        const result = workflowManager.checkStepRequiresApproval(
+          "Install dependencies",
+          "pnpm install",
+        );
+        expect(result.requiresApproval).toBe(true);
+        expect(result.riskLevel).toBe("medium");
+        expect(result.actionType).toBe("install_dependency");
+      });
+
+      it("should require approval for git push step", () => {
+        const result = workflowManager.checkStepRequiresApproval(
+          "Push to remote",
+          "git push origin main",
+        );
+        expect(result.requiresApproval).toBe(true);
+        expect(result.actionType).toBe("git_push");
+      });
+
+      it("should require approval for git commit step", () => {
+        const result = workflowManager.checkStepRequiresApproval(
+          "Commit changes",
+          "git commit -m 'feat: add'",
+        );
+        expect(result.requiresApproval).toBe(true);
+        expect(result.actionType).toBe("git_commit");
+      });
+
+      it("should require approval for deploy step with critical risk", () => {
+        const result = workflowManager.checkStepRequiresApproval("Deploy to production");
+        expect(result.requiresApproval).toBe(true);
+        expect(result.riskLevel).toBe("critical");
+        expect(result.actionType).toBe("deploy");
+      });
+
+      it("should require approval for database migration step", () => {
+        const result = workflowManager.checkStepRequiresApproval("Run database migration");
+        expect(result.requiresApproval).toBe(true);
+        expect(result.riskLevel).toBe("critical");
+        expect(result.actionType).toBe("database_migration");
+      });
+
+      it("should require approval for env config change step", () => {
+        const result = workflowManager.checkStepRequiresApproval("Change environment config");
+        expect(result.requiresApproval).toBe(true);
+        expect(result.riskLevel).toBe("high");
+        expect(result.actionType).toBe("env_config_change");
+      });
+
+      it("should require approval for external API call step", () => {
+        const result = workflowManager.checkStepRequiresApproval("Call external API");
+        expect(result.requiresApproval).toBe(true);
+        expect(result.riskLevel).toBe("medium");
+        expect(result.actionType).toBe("external_api_call");
+      });
+
+      it("should require approval for network operation step", () => {
+        const result = workflowManager.checkStepRequiresApproval("Establish network connection");
+        expect(result.requiresApproval).toBe(true);
+        expect(result.riskLevel).toBe("medium");
+        expect(result.actionType).toBe("network_operation");
+      });
+
+      it("should require approval for plan execution step", () => {
+        const result = workflowManager.checkStepRequiresApproval("Plan execution approval");
+        expect(result.requiresApproval).toBe(true);
+        expect(result.riskLevel).toBe("medium");
+        expect(result.actionType).toBe("plan_execution");
+      });
+
+      it("should require approval for high cost AI usage step", () => {
+        const result = workflowManager.checkStepRequiresApproval("High cost AI call");
+        expect(result.requiresApproval).toBe(true);
+        expect(result.riskLevel).toBe("high");
+        expect(result.actionType).toBe("high_cost_ai_usage");
+      });
+
+      it("should require approval for override validation step", () => {
+        const result = workflowManager.checkStepRequiresApproval("Override validation failure");
+        expect(result.requiresApproval).toBe(true);
+        expect(result.riskLevel).toBe("critical");
+        expect(result.actionType).toBe("override_validation_failure");
+      });
+
+      it("should require approval for skip validation step", () => {
+        const result = workflowManager.checkStepRequiresApproval("Skip failed validation");
+        expect(result.requiresApproval).toBe(true);
+        expect(result.riskLevel).toBe("critical");
+        expect(result.actionType).toBe("override_validation_failure");
+      });
+
+      it("should require approval for continue after repeated failure step", () => {
+        const result = workflowManager.checkStepRequiresApproval("Continue after failure");
+        expect(result.requiresApproval).toBe(true);
+        expect(result.riskLevel).toBe("medium");
+        expect(result.actionType).toBe("continue_after_repeated_failure");
+      });
+
+      it("should require approval for read sensitive file step", () => {
+        const result = workflowManager.checkStepRequiresApproval("Read sensitive config");
+        expect(result.requiresApproval).toBe(true);
+        expect(result.riskLevel).toBe("high");
+        expect(result.actionType).toBe("read_sensitive_file");
+      });
+
+      it("should auto-run safe steps without approval", () => {
+        const safeSteps = [
+          { title: "Run tests", command: "pnpm test" },
+          { title: "Build project", command: "pnpm build" },
+          { title: "Lint codebase", command: "pnpm lint" },
+          { title: "Generate documentation", command: "npx typedoc" },
+        ];
+        for (const step of safeSteps) {
+          const result = workflowManager.checkStepRequiresApproval(step.title, step.command);
+          expect(result.requiresApproval).toBe(false);
+        }
+      });
+
+      it("should auto-run command_execution as safe", () => {
+        const result = workflowManager.checkStepRequiresApproval("Run custom script", "./build.sh");
+        expect(result.requiresApproval).toBe(false);
+        expect(result.actionType).toBe("command_execution");
+        expect(result.autoApprove).toBe(true);
+      });
+
+      it("should auto-run file_write as safe", () => {
+        const result = workflowManager.checkStepRequiresApproval("Write output file");
+        expect(result.requiresApproval).toBe(false);
+        expect(result.actionType).toBe("command_execution");
+        expect(result.autoApprove).toBe(true);
+      });
+
+      it("should handle high cost threshold context", () => {
+        const under = workflowManager.checkStepRequiresApproval(
+          "Expensive model inference",
+          undefined,
+          { estimatedCost: 0.1 },
+        );
+        expect(under.requiresApproval).toBe(false);
+
+        const over = workflowManager.checkStepRequiresApproval(
+          "Expensive model inference",
+          undefined,
+          { estimatedCost: 1.0 },
+        );
+        expect(over.requiresApproval).toBe(true);
+      });
+
+      it("should handle failure count context", () => {
+        const low = workflowManager.checkStepRequiresApproval("Continue after failure", undefined, {
+          failureCount: 0,
+        });
+        expect(low.requiresApproval).toBe(false);
+
+        const high = workflowManager.checkStepRequiresApproval(
+          "Continue after failure",
+          undefined,
+          { failureCount: 3 },
+        );
+        expect(high.requiresApproval).toBe(true);
+      });
+    });
+
+    describe("requireGateApproval and resolveGateApproval", () => {
+      let gateTestRunId: string;
+
+      beforeAll(async () => {
+        const run = await runManager.createRun("test-project", "Gate test run", "auto");
+        gateTestRunId = run.runId;
+        await workflowManager.initWorkflowState(gateTestRunId);
+      });
+
+      it("should register a pending gate approval", async () => {
+        const gateId = await workflowManager.requireGateApproval(
+          gateTestRunId,
+          "task_001",
+          "delete_file",
+          "high",
+          "Deleting sensitive files requires approval",
+          "rm -rf /tmp/test",
+        );
+
+        expect(gateId).toBeDefined();
+        expect(gateId.startsWith("gate_")).toBe(true);
+
+        const state = await workflowManager.loadWorkflowState(gateTestRunId);
+        expect(state).not.toBeNull();
+        expect(state!.pendingGates).toHaveLength(1);
+        expect(state!.pendingGates![0]!.id).toBe(gateId);
+        expect(state!.pendingGates![0]!.status).toBe("pending");
+        expect(state!.pendingGates![0]!.actionType).toBe("delete_file");
+        expect(state!.pendingGates![0]!.riskLevel).toBe("high");
+        expect(state!.status).toBe("waiting_approval");
+      });
+
+      it("should list pending gates", async () => {
+        const pending = await workflowManager.getPendingGates(gateTestRunId);
+        expect(pending).toHaveLength(1);
+        expect(pending[0]!.actionType).toBe("delete_file");
+      });
+
+      it("should resolve a pending gate as approved", async () => {
+        const pending = await workflowManager.getPendingGates(gateTestRunId);
+        expect(pending).toHaveLength(1);
+
+        const resolved = await workflowManager.resolveGateApproval(
+          gateTestRunId,
+          pending[0]!.id,
+          "approved",
+          "test-user",
+        );
+        expect(resolved).toBe(true);
+
+        const state = await workflowManager.loadWorkflowState(gateTestRunId);
+        expect(state!.pendingGates![0]!.status).toBe("approved");
+        expect(state!.pendingGates![0]!.resolvedBy).toBe("test-user");
+        expect(state!.status).toBe("running");
+      });
+
+      it("should record gate decision in approval history", async () => {
+        const state = await workflowManager.loadWorkflowState(gateTestRunId);
+        expect(state!.approvalHistory).toHaveLength(1);
+        expect(state!.approvalHistory![0]!.actionType).toBe("delete_file");
+        expect(state!.approvalHistory![0]!.decision).toBe("approved");
+      });
+
+      it("should have no pending gates after resolution", async () => {
+        const pending = await workflowManager.getPendingGates(gateTestRunId);
+        expect(pending).toHaveLength(0);
+      });
+    });
+
+    describe("requireGateApproval with override decision", () => {
+      let overrideTestRunId: string;
+
+      beforeAll(async () => {
+        const run = await runManager.createRun("test-project", "Override test run", "auto");
+        overrideTestRunId = run.runId;
+        await workflowManager.initWorkflowState(overrideTestRunId);
+      });
+
+      it("should resolve gate with override", async () => {
+        const gateId = await workflowManager.requireGateApproval(
+          overrideTestRunId,
+          "task_002",
+          "database_migration",
+          "critical",
+          "Database migration requires approval",
+        );
+
+        const resolved = await workflowManager.resolveGateApproval(
+          overrideTestRunId,
+          gateId,
+          "override",
+          "admin",
+        );
+        expect(resolved).toBe(true);
+
+        const state = await workflowManager.loadWorkflowState(overrideTestRunId);
+        expect(state!.pendingGates![0]!.status).toBe("overridden");
+        expect(state!.approvalHistory![0]!.decision).toBe("override");
+      });
+    });
+
+    describe("requireGateApproval with rejection", () => {
+      let rejectTestRunId: string;
+
+      beforeAll(async () => {
+        const run = await runManager.createRun("test-project", "Reject test run", "auto");
+        rejectTestRunId = run.runId;
+        await workflowManager.initWorkflowState(rejectTestRunId);
+      });
+
+      it("should resolve gate as rejected", async () => {
+        const gateId = await workflowManager.requireGateApproval(
+          rejectTestRunId,
+          "task_003",
+          "git_push",
+          "high",
+          "Git push requires approval",
+          "git push origin main",
+        );
+
+        const resolved = await workflowManager.resolveGateApproval(
+          rejectTestRunId,
+          gateId,
+          "rejected",
+          "reviewer",
+        );
+        expect(resolved).toBe(true);
+
+        const state = await workflowManager.loadWorkflowState(rejectTestRunId);
+        expect(state!.pendingGates![0]!.status).toBe("rejected");
+        expect(state!.approvalHistory![0]!.decision).toBe("rejected");
+      });
+    });
+
+    describe("recordGateDecision", () => {
+      let recordTestRunId: string;
+
+      beforeAll(async () => {
+        const run = await runManager.createRun("test-project", "Record test run", "auto");
+        recordTestRunId = run.runId;
+        await workflowManager.initWorkflowState(recordTestRunId);
+      });
+
+      it("should record an auto-approved decision", async () => {
+        await workflowManager.recordGateDecision(
+          recordTestRunId,
+          "command_execution",
+          "safe",
+          "skip",
+          "Auto-approved: safe action",
+          true,
+        );
+
+        const state = await workflowManager.loadWorkflowState(recordTestRunId);
+        expect(state!.approvalHistory).toHaveLength(1);
+        expect(state!.approvalHistory![0]!.actionType).toBe("command_execution");
+        expect(state!.approvalHistory![0]!.decision).toBe("skip");
+        expect(state!.approvalHistory![0]!.autoApproved).toBe(true);
+        expect(state!.approvalHistory![0]!.taskId).toBeUndefined();
+      });
+    });
+
+    describe("getPendingGates", () => {
+      it("should return empty array when no workflow state exists", async () => {
+        const pending = await workflowManager.getPendingGates("nonexistent-run");
+        expect(pending).toEqual([]);
+      });
+
+      it("should return empty array when no pending gates", async () => {
+        const run = await runManager.createRun("test-project", "No gates run", "auto");
+        await workflowManager.initWorkflowState(run.runId);
+
+        const pending = await workflowManager.getPendingGates(run.runId);
+        expect(pending).toEqual([]);
+      });
+    });
+  });
 });

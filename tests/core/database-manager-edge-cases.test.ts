@@ -37,7 +37,7 @@ describe("DatabaseManager edge cases", () => {
   describe("migration", () => {
     it("should handle schema version correctly", () => {
       const status = db.status();
-      expect(status.version).toBe(2);
+      expect(status.version).toBe(3);
     });
 
     it("should handle multiple table creation", () => {
@@ -238,6 +238,7 @@ describe("DatabaseManager edge cases", () => {
         command: "rm -rf tmp",
         status: "pending_approval",
         requiresApproval: true,
+        dependsOn: [],
         order: 0,
         createdAt: now,
         updatedAt: now,
@@ -297,6 +298,7 @@ describe("DatabaseManager edge cases", () => {
         command: "echo a1",
         status: "done",
         requiresApproval: false,
+        dependsOn: [],
         order: 0,
         createdAt: now,
         updatedAt: now,
@@ -310,6 +312,7 @@ describe("DatabaseManager edge cases", () => {
         command: "echo b1",
         status: "pending",
         requiresApproval: false,
+        dependsOn: [],
         order: 0,
         createdAt: now,
         updatedAt: now,
@@ -354,6 +357,7 @@ describe("DatabaseManager edge cases", () => {
         command: "echo test",
         status: "pending_approval",
         requiresApproval: true,
+        dependsOn: [],
         order: 0,
         createdAt: now,
         updatedAt: now,
@@ -387,8 +391,11 @@ describe("DatabaseManager edge cases", () => {
         runId: "run_art_no_task",
         title: "run-report.md",
         type: "markdown",
+        path: "artifacts/run-report.md",
         filePath: "artifacts/run-report.md",
         fileSize: 500,
+        origin: "expected",
+        validationStatus: "pending",
         createdAt: now,
       };
 
@@ -431,8 +438,11 @@ describe("DatabaseManager edge cases", () => {
         taskId: "task_art_list",
         title: "file1.json",
         type: "json",
+        path: "artifacts/file1.json",
         filePath: "artifacts/file1.json",
         fileSize: 100,
+        origin: "expected",
+        validationStatus: "pending",
         createdAt: now,
       });
       db.insertArtifact({
@@ -441,10 +451,13 @@ describe("DatabaseManager edge cases", () => {
         taskId: "task_art_list",
         title: "file2.txt",
         type: "text",
+        path: "artifacts/file2.txt",
         filePath: "artifacts/file2.txt",
         fileSize: 200,
         mimeType: "text/plain",
         hashSha256: "abc123",
+        origin: "expected",
+        validationStatus: "pending",
         createdAt: now,
       });
 

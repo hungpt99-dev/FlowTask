@@ -29,7 +29,7 @@ describe("SimplePlanner", () => {
     expect(result.tasks[0]!.title).toContain("Read project rules");
   });
 
-  it("should route to coding template for implementation prompts", async () => {
+  it("should route to code-feature template for implementation prompts", async () => {
     const planner = new SimplePlanner();
     const result = await planner.createPlan({
       projectRoot: testDir,
@@ -42,7 +42,7 @@ describe("SimplePlanner", () => {
     expect(result.tasks[5]!.title).toContain("Add tests");
   });
 
-  it("should route to debugging template for bug fix prompts", async () => {
+  it("should route to bug-fix template for bug fix prompts", async () => {
     const planner = new SimplePlanner();
     const result = await planner.createPlan({
       projectRoot: testDir,
@@ -68,7 +68,7 @@ describe("SimplePlanner", () => {
     expect(result.tasks[4]!.title).toContain("Write documentation");
   });
 
-  it("should route to testing template for test prompts", async () => {
+  it("should route to test-generation template for test prompts", async () => {
     const planner = new SimplePlanner();
     const result = await planner.createPlan({
       projectRoot: testDir,
@@ -90,10 +90,11 @@ describe("SimplePlanner", () => {
     });
 
     expect(result.tasks.length).toBe(6);
-    expect(result.tasks[1]!.title).toContain("Define research questions");
+    expect(result.tasks[0]!.title).toContain("Define research questions");
+    expect(result.tasks[2]!.title).toContain("Gather information");
   });
 
-  it("should route to planning template for planning prompts", async () => {
+  it("should use general-task template for planning prompts", async () => {
     const planner = new SimplePlanner();
     const result = await planner.createPlan({
       projectRoot: testDir,
@@ -101,11 +102,11 @@ describe("SimplePlanner", () => {
       rulesContext: "",
     });
 
-    expect(result.tasks.length).toBe(5);
-    expect(result.tasks[3]!.title).toContain("Create detailed plan");
+    expect(result.tasks.length).toBe(7);
+    expect(result.tasks[2]!.title).toContain("Create execution plan");
   });
 
-  it("should route to devops template for deployment prompts", async () => {
+  it("should route to release-checklist template for deployment prompts", async () => {
     const planner = new SimplePlanner();
     const result = await planner.createPlan({
       projectRoot: testDir,
@@ -113,12 +114,11 @@ describe("SimplePlanner", () => {
       rulesContext: "",
     });
 
-    expect(result.tasks.length).toBe(6);
-    expect(result.tasks[2]!.title).toContain("Create or update configuration");
-    expect(result.tasks[3]!.title).toContain("DevOps changes");
+    expect(result.tasks.length).toBe(7);
+    expect(result.tasks[2]!.title).toContain("Run pre-release validation");
   });
 
-  it("should route to data-analysis template for data prompts", async () => {
+  it("should route to report-generation template for data analysis prompts with report keyword", async () => {
     const planner = new SimplePlanner();
     const result = await planner.createPlan({
       projectRoot: testDir,
@@ -127,11 +127,11 @@ describe("SimplePlanner", () => {
     });
 
     expect(result.tasks.length).toBe(6);
-    expect(result.tasks[1]!.title).toContain("data requirements");
-    expect(result.tasks[3]!.title).toContain("Analyze and process data");
+    expect(result.tasks[0]!.title).toContain("Understand report requirements");
+    expect(result.tasks[3]!.title).toContain("Write report content");
   });
 
-  it("should route to ui-design template for UI prompts", async () => {
+  it("should route to design template for UI prompts", async () => {
     const planner = new SimplePlanner();
     const result = await planner.createPlan({
       projectRoot: testDir,
@@ -140,24 +140,24 @@ describe("SimplePlanner", () => {
     });
 
     expect(result.tasks.length).toBe(7);
-    expect(result.tasks[3]!.title).toContain("Design UI components");
-    expect(result.tasks[5]!.title).toContain("Verify UI quality");
+    expect(result.tasks[2]!.title).toContain("Plan design solution");
+    expect(result.tasks[5]!.title).toContain("Verify design quality");
   });
 
   it("should route to writing template for content creation prompts", async () => {
     const planner = new SimplePlanner();
     const result = await planner.createPlan({
       projectRoot: testDir,
-      prompt: "Write a blog post about our new feature release for the company blog",
+      prompt: "Write a blog post about our new feature for the company blog",
       rulesContext: "",
     });
 
-    expect(result.tasks.length).toBe(5);
-    expect(result.tasks[1]!.title).toContain("writing requirements");
-    expect(result.tasks[3]!.title).toContain("Write content");
+    expect(result.tasks.length).toBe(6);
+    expect(result.tasks[0]!.title).toContain("Understand writing requirements");
+    expect(result.tasks[2]!.title).toContain("Write first draft");
   });
 
-  it("should route to project-setup template for setup prompts", async () => {
+  it("should use general-task template for setup prompts", async () => {
     const planner = new SimplePlanner();
     const result = await planner.createPlan({
       projectRoot: testDir,
@@ -165,12 +165,11 @@ describe("SimplePlanner", () => {
       rulesContext: "",
     });
 
-    expect(result.tasks.length).toBe(6);
-    expect(result.tasks[2]!.title).toContain("Create project structure");
-    expect(result.tasks[3]!.title).toContain("Configure tools and dependencies");
+    expect(result.tasks.length).toBe(7);
+    expect(result.tasks[2]!.title).toContain("Create execution plan");
   });
 
-  it("should use general template for ambiguous prompts", async () => {
+  it("should use general-task template for ambiguous prompts", async () => {
     const planner = new SimplePlanner();
     const result = await planner.createPlan({
       projectRoot: testDir,
@@ -179,16 +178,16 @@ describe("SimplePlanner", () => {
     });
 
     expect(result.tasks.length).toBe(7);
-    expect(result.tasks[4]!.title).toContain("Execute implementation");
+    expect(result.tasks[3]!.title).toContain("Execute implementation");
   });
 
-  it("should accept explicit use case detection override", async () => {
+  it("should accept explicit template override via template parameter", async () => {
     const planner = new SimplePlanner();
     const result = await planner.createPlan({
       projectRoot: testDir,
       prompt: "Do some work",
       rulesContext: "",
-      useCase: { type: "coding", confidence: 0.9, matchedPatterns: [] },
+      template: "code-feature",
     });
 
     expect(result.tasks.length).toBe(8);
@@ -233,7 +232,7 @@ describe("SimplePlanner", () => {
     expect(result.title.length).toBeLessThanOrEqual(80);
   });
 
-  it("should include use case info in plan markdown", async () => {
+  it("should include template info in plan markdown", async () => {
     const planner = new SimplePlanner();
     const result = await planner.createPlan({
       projectRoot: testDir,
@@ -242,6 +241,7 @@ describe("SimplePlanner", () => {
     });
 
     expect(result.planMarkdown).toContain("Use Case");
-    expect(result.planMarkdown).toContain("Debugging");
+    expect(result.planMarkdown).toContain("Template");
+    expect(result.planMarkdown).toContain("Bug Fix");
   });
 });

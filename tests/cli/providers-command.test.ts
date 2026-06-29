@@ -73,8 +73,8 @@ describe("providers commands", () => {
       await currentProviderCommand();
 
       expect(output).toContain("Current AI Provider");
-      expect(output).toContain("Provider: openai");
-      expect(output).toContain("available");
+      expect(output).toContain("No provider configured");
+      expect(output).toContain("setup ai");
     });
 
     it("should show provider details when configured", async () => {

@@ -46,6 +46,7 @@ function makeStep(
     status,
     requiresApproval,
     approvalReason: requiresApproval ? "Requires review" : undefined,
+    dependsOn: [] as string[],
     order,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),

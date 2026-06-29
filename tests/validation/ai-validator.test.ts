@@ -872,13 +872,17 @@ describe("AiValidator", () => {
       await validator.validate({
         taskDescription: "Implement feature X",
         executorOutput: "Feature X implemented",
+        errorOutput: "no errors",
+        logs: "[INFO] completed",
         changedFiles: ["src/feature-x.ts"],
+        artifacts: ["dist/output.js"],
         commandResults: "Tests passed",
         acceptanceCriteria: ["Criterion 1"],
         expectedResult: "Feature X works",
         outputPlanResults: [
           { action: "create", target: "src/feature-x.ts", produced: true, evidence: "file exists" },
         ],
+        previousValidationResults: "[✓] process: passed",
         validationMode: "always",
       });
       expect(capturedUserPrompt).toContain("Evidence Summary");
@@ -965,6 +969,7 @@ describe("AiValidator", () => {
         taskDescription: "Partial evidence task",
         executorOutput: "some output",
         changedFiles: ["file.ts"],
+        commandResults: "some test results",
         acceptanceCriteria: ["criterion"],
         expectedResult: "expected outcome",
         validationMode: "always",
@@ -1437,6 +1442,594 @@ describe("AiValidator", () => {
       });
       expect(result.status).toBe("needs_review");
       expect(result.evidenceGaps).toContain("executor output");
+    });
+  });
+
+  describe("workflow type awareness", () => {
+    it("should include workflow type in user prompt", async () => {
+      let capturedUserPrompt = "";
+      const provider: AiProvider = {
+        name: "mock-provider",
+        type: "test",
+        supportsJsonObject: true,
+        supportsStreaming: false,
+        async generate(request: AiProviderRequest): Promise<AiProviderResponse> {
+          capturedUserPrompt = request.userPrompt ?? "";
+          return {
+            text: JSON.stringify({
+              status: "passed",
+              suggestion: "",
+              explanation: "ok",
+              confidence: "high",
+              evidenceSummary: "ok",
+              evidenceGaps: [],
+            }),
+            model: "mock-model",
+            provider: "mock-provider",
+          };
+        },
+      };
+      const registry = createMockRegistry(provider);
+      const validator = new AiValidator(registry);
+      await validator.validate({
+        taskDescription: "Implement feature X",
+        executorOutput: "done",
+        workflowType: "code",
+        validationMode: "always",
+      });
+      expect(capturedUserPrompt).toContain("## Workflow Type");
+      expect(capturedUserPrompt).toContain("code");
+    });
+
+    it("should include code-specific guidance in system prompt for code tasks", async () => {
+      let capturedSystemPrompt = "";
+      const provider: AiProvider = {
+        name: "mock-provider",
+        type: "test",
+        supportsJsonObject: true,
+        supportsStreaming: false,
+        async generate(request: AiProviderRequest): Promise<AiProviderResponse> {
+          capturedSystemPrompt = request.systemPrompt ?? "";
+          return {
+            text: JSON.stringify({
+              status: "passed",
+              suggestion: "",
+              explanation: "ok",
+              confidence: "high",
+              evidenceSummary: "ok",
+              evidenceGaps: [],
+            }),
+            model: "mock-model",
+            provider: "mock-provider",
+          };
+        },
+      };
+      const registry = createMockRegistry(provider);
+      const validator = new AiValidator(registry);
+      await validator.validate({
+        taskDescription: "Implement feature X",
+        executorOutput: "done",
+        workflowType: "code",
+        validationMode: "always",
+      });
+      expect(capturedSystemPrompt).toContain("Workflow Type: Code Task");
+      expect(capturedSystemPrompt).toContain("file evidence");
+    });
+
+    it("should include documentation-specific guidance in system prompt", async () => {
+      let capturedSystemPrompt = "";
+      const provider: AiProvider = {
+        name: "mock-provider",
+        type: "test",
+        supportsJsonObject: true,
+        supportsStreaming: false,
+        async generate(request: AiProviderRequest): Promise<AiProviderResponse> {
+          capturedSystemPrompt = request.systemPrompt ?? "";
+          return {
+            text: JSON.stringify({
+              status: "passed",
+              suggestion: "",
+              explanation: "ok",
+              confidence: "high",
+              evidenceSummary: "ok",
+              evidenceGaps: [],
+            }),
+            model: "mock-model",
+            provider: "mock-provider",
+          };
+        },
+      };
+      const registry = createMockRegistry(provider);
+      const validator = new AiValidator(registry);
+      await validator.validate({
+        taskDescription: "Write API documentation",
+        executorOutput: "done",
+        workflowType: "documentation",
+        validationMode: "always",
+      });
+      expect(capturedSystemPrompt).toContain("Workflow Type: Documentation Task");
+      expect(capturedSystemPrompt).toContain("structured sections");
+    });
+
+    it("should include research-specific guidance in system prompt", async () => {
+      let capturedSystemPrompt = "";
+      const provider: AiProvider = {
+        name: "mock-provider",
+        type: "test",
+        supportsJsonObject: true,
+        supportsStreaming: false,
+        async generate(request: AiProviderRequest): Promise<AiProviderResponse> {
+          capturedSystemPrompt = request.systemPrompt ?? "";
+          return {
+            text: JSON.stringify({
+              status: "passed",
+              suggestion: "",
+              explanation: "ok",
+              confidence: "high",
+              evidenceSummary: "ok",
+              evidenceGaps: [],
+            }),
+            model: "mock-model",
+            provider: "mock-provider",
+          };
+        },
+      };
+      const registry = createMockRegistry(provider);
+      const validator = new AiValidator(registry);
+      await validator.validate({
+        taskDescription: "Research market trends",
+        executorOutput: "done",
+        workflowType: "research",
+        validationMode: "always",
+      });
+      expect(capturedSystemPrompt).toContain("Workflow Type: Research Task");
+      expect(capturedSystemPrompt).toContain("cited sources");
+    });
+
+    it("should include data-specific guidance in system prompt", async () => {
+      let capturedSystemPrompt = "";
+      const provider: AiProvider = {
+        name: "mock-provider",
+        type: "test",
+        supportsJsonObject: true,
+        supportsStreaming: false,
+        async generate(request: AiProviderRequest): Promise<AiProviderResponse> {
+          capturedSystemPrompt = request.systemPrompt ?? "";
+          return {
+            text: JSON.stringify({
+              status: "passed",
+              suggestion: "",
+              explanation: "ok",
+              confidence: "high",
+              evidenceSummary: "ok",
+              evidenceGaps: [],
+            }),
+            model: "mock-model",
+            provider: "mock-provider",
+          };
+        },
+      };
+      const registry = createMockRegistry(provider);
+      const validator = new AiValidator(registry);
+      await validator.validate({
+        taskDescription: "Transform CSV data",
+        executorOutput: "done",
+        workflowType: "data",
+        validationMode: "always",
+      });
+      expect(capturedSystemPrompt).toContain("Workflow Type: Data Task");
+      expect(capturedSystemPrompt).toContain("data files exist");
+    });
+
+    it("should include writing-specific guidance in system prompt", async () => {
+      let capturedSystemPrompt = "";
+      const provider: AiProvider = {
+        name: "mock-provider",
+        type: "test",
+        supportsJsonObject: true,
+        supportsStreaming: false,
+        async generate(request: AiProviderRequest): Promise<AiProviderResponse> {
+          capturedSystemPrompt = request.systemPrompt ?? "";
+          return {
+            text: JSON.stringify({
+              status: "passed",
+              suggestion: "",
+              explanation: "ok",
+              confidence: "high",
+              evidenceSummary: "ok",
+              evidenceGaps: [],
+            }),
+            model: "mock-model",
+            provider: "mock-provider",
+          };
+        },
+      };
+      const registry = createMockRegistry(provider);
+      const validator = new AiValidator(registry);
+      await validator.validate({
+        taskDescription: "Write blog post",
+        executorOutput: "done",
+        workflowType: "writing",
+        validationMode: "always",
+      });
+      expect(capturedSystemPrompt).toContain("Workflow Type: Writing Task");
+      expect(capturedSystemPrompt).toContain("grammar and formatting");
+    });
+
+    it("should include design-specific guidance in system prompt", async () => {
+      let capturedSystemPrompt = "";
+      const provider: AiProvider = {
+        name: "mock-provider",
+        type: "test",
+        supportsJsonObject: true,
+        supportsStreaming: false,
+        async generate(request: AiProviderRequest): Promise<AiProviderResponse> {
+          capturedSystemPrompt = request.systemPrompt ?? "";
+          return {
+            text: JSON.stringify({
+              status: "passed",
+              suggestion: "",
+              explanation: "ok",
+              confidence: "high",
+              evidenceSummary: "ok",
+              evidenceGaps: [],
+            }),
+            model: "mock-model",
+            provider: "mock-provider",
+          };
+        },
+      };
+      const registry = createMockRegistry(provider);
+      const validator = new AiValidator(registry);
+      await validator.validate({
+        taskDescription: "Design landing page",
+        executorOutput: "done",
+        workflowType: "design",
+        validationMode: "always",
+      });
+      expect(capturedSystemPrompt).toContain("Workflow Type: Design Task");
+      expect(capturedSystemPrompt).toContain("design artifacts");
+    });
+
+    it("should include checklist-specific guidance in system prompt", async () => {
+      let capturedSystemPrompt = "";
+      const provider: AiProvider = {
+        name: "mock-provider",
+        type: "test",
+        supportsJsonObject: true,
+        supportsStreaming: false,
+        async generate(request: AiProviderRequest): Promise<AiProviderResponse> {
+          capturedSystemPrompt = request.systemPrompt ?? "";
+          return {
+            text: JSON.stringify({
+              status: "passed",
+              suggestion: "",
+              explanation: "ok",
+              confidence: "high",
+              evidenceSummary: "ok",
+              evidenceGaps: [],
+            }),
+            model: "mock-model",
+            provider: "mock-provider",
+          };
+        },
+      };
+      const registry = createMockRegistry(provider);
+      const validator = new AiValidator(registry);
+      await validator.validate({
+        taskDescription: "QA checklist",
+        executorOutput: "done",
+        workflowType: "checklist",
+        validationMode: "always",
+      });
+      expect(capturedSystemPrompt).toContain("Workflow Type: Checklist / QA Task");
+      expect(capturedSystemPrompt).toContain("completion status");
+    });
+
+    it("should include business analysis guidance in system prompt", async () => {
+      let capturedSystemPrompt = "";
+      const provider: AiProvider = {
+        name: "mock-provider",
+        type: "test",
+        supportsJsonObject: true,
+        supportsStreaming: false,
+        async generate(request: AiProviderRequest): Promise<AiProviderResponse> {
+          capturedSystemPrompt = request.systemPrompt ?? "";
+          return {
+            text: JSON.stringify({
+              status: "passed",
+              suggestion: "",
+              explanation: "ok",
+              confidence: "high",
+              evidenceSummary: "ok",
+              evidenceGaps: [],
+            }),
+            model: "mock-model",
+            provider: "mock-provider",
+          };
+        },
+      };
+      const registry = createMockRegistry(provider);
+      const validator = new AiValidator(registry);
+      await validator.validate({
+        taskDescription: "Analyze business requirements",
+        executorOutput: "done",
+        workflowType: "business_analysis",
+        validationMode: "always",
+      });
+      expect(capturedSystemPrompt).toContain("Workflow Type: Business Analysis Task");
+      expect(capturedSystemPrompt).toContain("requirement extraction");
+    });
+
+    it("should include mixed workflow guidance in system prompt", async () => {
+      let capturedSystemPrompt = "";
+      const provider: AiProvider = {
+        name: "mock-provider",
+        type: "test",
+        supportsJsonObject: true,
+        supportsStreaming: false,
+        async generate(request: AiProviderRequest): Promise<AiProviderResponse> {
+          capturedSystemPrompt = request.systemPrompt ?? "";
+          return {
+            text: JSON.stringify({
+              status: "passed",
+              suggestion: "",
+              explanation: "ok",
+              confidence: "high",
+              evidenceSummary: "ok",
+              evidenceGaps: [],
+            }),
+            model: "mock-model",
+            provider: "mock-provider",
+          };
+        },
+      };
+      const registry = createMockRegistry(provider);
+      const validator = new AiValidator(registry);
+      await validator.validate({
+        taskDescription: "Mixed code and docs task",
+        executorOutput: "done",
+        workflowType: "mixed",
+        validationMode: "always",
+      });
+      expect(capturedSystemPrompt).toContain("Workflow Type: Mixed Workflow");
+      expect(capturedSystemPrompt).toContain("diverse evidence");
+    });
+
+    it("should include general guidance for unknown workflow type", async () => {
+      let capturedSystemPrompt = "";
+      const provider: AiProvider = {
+        name: "mock-provider",
+        type: "test",
+        supportsJsonObject: true,
+        supportsStreaming: false,
+        async generate(request: AiProviderRequest): Promise<AiProviderResponse> {
+          capturedSystemPrompt = request.systemPrompt ?? "";
+          return {
+            text: JSON.stringify({
+              status: "passed",
+              suggestion: "",
+              explanation: "ok",
+              confidence: "high",
+              evidenceSummary: "ok",
+              evidenceGaps: [],
+            }),
+            model: "mock-model",
+            provider: "mock-provider",
+          };
+        },
+      };
+      const registry = createMockRegistry(provider);
+      const validator = new AiValidator(registry);
+      await validator.validate({
+        taskDescription: "General task",
+        executorOutput: "done",
+        validationMode: "always",
+      });
+      expect(capturedSystemPrompt).toContain("Workflow Type: General");
+      expect(capturedSystemPrompt).toContain("standard validation criteria");
+    });
+  });
+
+  describe("previous validation results in prompt", () => {
+    it("should include previous validation results in user prompt", async () => {
+      let capturedUserPrompt = "";
+      const provider: AiProvider = {
+        name: "mock-provider",
+        type: "test",
+        supportsJsonObject: true,
+        supportsStreaming: false,
+        async generate(request: AiProviderRequest): Promise<AiProviderResponse> {
+          capturedUserPrompt = request.userPrompt ?? "";
+          return {
+            text: JSON.stringify({
+              status: "passed",
+              suggestion: "",
+              explanation: "ok",
+              confidence: "high",
+              evidenceSummary: "ok",
+              evidenceGaps: [],
+            }),
+            model: "mock-model",
+            provider: "mock-provider",
+          };
+        },
+      };
+      const registry = createMockRegistry(provider);
+      const validator = new AiValidator(registry);
+      await validator.validate({
+        taskDescription: "Test task",
+        executorOutput: "done",
+        previousValidationResults:
+          "[✓] process: passed — Process exited with code 0\n  Evidence: exit code 0\n[✓] acceptance_criteria: passed — All criteria met",
+        validationMode: "always",
+      });
+      expect(capturedUserPrompt).toContain("## Previous Validation Results");
+      expect(capturedUserPrompt).toContain("Process exited with code 0");
+      expect(capturedUserPrompt).toContain("All criteria met");
+    });
+
+    it("should indicate previous validation results in evidence summary", async () => {
+      let capturedUserPrompt = "";
+      const provider: AiProvider = {
+        name: "mock-provider",
+        type: "test",
+        supportsJsonObject: true,
+        supportsStreaming: false,
+        async generate(request: AiProviderRequest): Promise<AiProviderResponse> {
+          capturedUserPrompt = request.userPrompt ?? "";
+          return {
+            text: JSON.stringify({
+              status: "passed",
+              suggestion: "",
+              explanation: "ok",
+              confidence: "high",
+              evidenceSummary: "ok",
+              evidenceGaps: [],
+            }),
+            model: "mock-model",
+            provider: "mock-provider",
+          };
+        },
+      };
+      const registry = createMockRegistry(provider);
+      const validator = new AiValidator(registry);
+      await validator.validate({
+        taskDescription: "Test task",
+        executorOutput: "done",
+        previousValidationResults: "some results here",
+        validationMode: "always",
+      });
+      expect(capturedUserPrompt).toContain("Has previous validation results: yes");
+    });
+  });
+
+  describe("log output in prompt", () => {
+    it("should include log output section in user prompt", async () => {
+      let capturedUserPrompt = "";
+      const provider: AiProvider = {
+        name: "mock-provider",
+        type: "test",
+        supportsJsonObject: true,
+        supportsStreaming: false,
+        async generate(request: AiProviderRequest): Promise<AiProviderResponse> {
+          capturedUserPrompt = request.userPrompt ?? "";
+          return {
+            text: JSON.stringify({
+              status: "passed",
+              suggestion: "",
+              explanation: "ok",
+              confidence: "high",
+              evidenceSummary: "ok",
+              evidenceGaps: [],
+            }),
+            model: "mock-model",
+            provider: "mock-provider",
+          };
+        },
+      };
+      const registry = createMockRegistry(provider);
+      const validator = new AiValidator(registry);
+      await validator.validate({
+        taskDescription: "Test task",
+        executorOutput: "stdout output",
+        logs: "[INFO] Task started\n[INFO] Task completed successfully",
+        validationMode: "always",
+      });
+      expect(capturedUserPrompt).toContain("## Log Output");
+      expect(capturedUserPrompt).toContain("Task started");
+      expect(capturedUserPrompt).toContain("Task completed successfully");
+    });
+
+    it("should indicate log output availability in evidence summary", async () => {
+      let capturedUserPrompt = "";
+      const provider: AiProvider = {
+        name: "mock-provider",
+        type: "test",
+        supportsJsonObject: true,
+        supportsStreaming: false,
+        async generate(request: AiProviderRequest): Promise<AiProviderResponse> {
+          capturedUserPrompt = request.userPrompt ?? "";
+          return {
+            text: JSON.stringify({
+              status: "passed",
+              suggestion: "",
+              explanation: "ok",
+              confidence: "high",
+              evidenceSummary: "ok",
+              evidenceGaps: [],
+            }),
+            model: "mock-model",
+            provider: "mock-provider",
+          };
+        },
+      };
+      const registry = createMockRegistry(provider);
+      const validator = new AiValidator(registry);
+      await validator.validate({
+        taskDescription: "Test task",
+        executorOutput: "output",
+        logs: "[INFO] done",
+        validationMode: "always",
+      });
+      expect(capturedUserPrompt).toContain("Has log output: yes");
+    });
+  });
+
+  describe("combined all evidence types", () => {
+    it("should include all new evidence fields for a mixed workflow task", async () => {
+      let capturedUserPrompt = "";
+      let capturedSystemPrompt = "";
+      const provider: AiProvider = {
+        name: "mock-provider",
+        type: "test",
+        supportsJsonObject: true,
+        supportsStreaming: false,
+        async generate(request: AiProviderRequest): Promise<AiProviderResponse> {
+          capturedUserPrompt = request.userPrompt ?? "";
+          capturedSystemPrompt = request.systemPrompt ?? "";
+          return {
+            text: JSON.stringify({
+              status: "passed",
+              suggestion: "",
+              explanation: "All evidence confirmed",
+              confidence: "high",
+              evidenceSummary: "Strong evidence confirms completion",
+              evidenceGaps: [],
+            }),
+            model: "mock-model",
+            provider: "mock-provider",
+          };
+        },
+      };
+      const registry = createMockRegistry(provider);
+      const validator = new AiValidator(registry);
+      await validator.validate({
+        taskDescription: "Mixed code and documentation task",
+        executorOutput: "Created src/api.ts and wrote docs/api.md",
+        errorOutput: "no errors",
+        logs: "[INFO] Task completed in 5.2s",
+        changedFiles: ["src/api.ts", "docs/api.md"],
+        artifacts: ["dist/api.js"],
+        commandResults: "Tests: 15 passed\nLint: clean",
+        acceptanceCriteria: ["API implemented", "Documentation written"],
+        expectedResult: "API and documentation complete",
+        outputPlanResults: [
+          { action: "create", target: "src/api.ts", produced: true, evidence: "file exists" },
+          { action: "create", target: "docs/api.md", produced: true, evidence: "file exists" },
+        ],
+        previousValidationResults: "[✓] process: passed\n[✓] output_plan: passed",
+        workflowType: "mixed",
+        validationMode: "always",
+      });
+      expect(capturedSystemPrompt).toContain("Workflow Type: Mixed Workflow");
+      expect(capturedUserPrompt).toContain("## Workflow Type");
+      expect(capturedUserPrompt).toContain("## Log Output");
+      expect(capturedUserPrompt).toContain("## Previous Validation Results");
+      expect(capturedUserPrompt).toContain("Has log output: yes");
+      expect(capturedUserPrompt).toContain("Has previous validation results: yes");
+      expect(capturedUserPrompt).toContain("Workflow type: mixed");
+      expect(capturedUserPrompt).toContain("Evidence strength: strong");
     });
   });
 });

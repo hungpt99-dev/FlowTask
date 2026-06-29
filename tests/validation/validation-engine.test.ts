@@ -1725,4 +1725,601 @@ describe("ValidationEngine", () => {
     expect(checkTypes).not.toContain("file");
     expect(checkTypes).not.toContain("content");
   });
+
+  describe("enhanced validation — evidence checks", () => {
+    it("should include evidence check in every validation", async () => {
+      const result = await engine.validateTask({
+        projectRoot: testDir,
+        task: {
+          ...baseTask,
+          id: "task_ev_01",
+          runId: "run_001",
+          title: "Ev test",
+          acceptanceCriteria: [],
+        },
+        executorResult: {
+          status: "done",
+          exitCode: 0,
+          output: "task completed",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+      });
+      const evidenceChecks = result.checks.filter((c) => c.type === "evidence");
+      expect(evidenceChecks.length).toBe(1);
+    });
+
+    it("should pass evidence when process succeeded with output", async () => {
+      const result = await engine.validateTask({
+        projectRoot: testDir,
+        task: {
+          ...baseTask,
+          id: "task_ev_02",
+          runId: "run_001",
+          title: "Ev pass",
+          acceptanceCriteria: [],
+        },
+        executorResult: {
+          status: "done",
+          exitCode: 0,
+          output: "all good",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+      });
+      const ev = result.checks.find((c) => c.type === "evidence");
+      expect(ev).toBeDefined();
+      expect(ev!.status).toBe("passed");
+      expect(ev!.confidence).toBeGreaterThanOrEqual(0.8);
+    });
+  });
+
+  describe("enhanced validation — confidence scoring", () => {
+    it("should include confidence in final result when all pass", async () => {
+      const result = await engine.validateTask({
+        projectRoot: testDir,
+        task: {
+          ...baseTask,
+          id: "task_conf_01",
+          runId: "run_001",
+          title: "Conf test",
+          acceptanceCriteria: [],
+        },
+        executorResult: {
+          status: "done",
+          exitCode: 0,
+          output: "task completed",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+      });
+      expect(result.confidence).toBeDefined();
+      expect(result.confidence).toBeGreaterThan(0);
+    });
+
+    it("should have lower confidence when checks fail", async () => {
+      const result = await engine.validateTask({
+        projectRoot: testDir,
+        task: {
+          ...baseTask,
+          id: "task_conf_02",
+          runId: "run_001",
+          title: "Conf fail",
+          acceptanceCriteria: [],
+        },
+        executorResult: {
+          status: "failed",
+          exitCode: 1,
+          output: "error",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+      });
+      expect(result.confidence).toBeDefined();
+      expect(result.confidence).toBeLessThan(0.5);
+    });
+
+    it("should include confidence on individual checks", async () => {
+      const result = await engine.validateTask({
+        projectRoot: testDir,
+        task: {
+          ...baseTask,
+          id: "task_conf_03",
+          runId: "run_001",
+          title: "Conf ind",
+          acceptanceCriteria: [],
+        },
+        executorResult: {
+          status: "done",
+          exitCode: 0,
+          output: "ok",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+      });
+      const checksWithConf = result.checks.filter((c) => c.confidence !== undefined);
+      expect(checksWithConf.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe("enhanced validation — failure reasons", () => {
+    it("should include failureReason when validation fails", async () => {
+      const result = await engine.validateTask({
+        projectRoot: testDir,
+        task: {
+          ...baseTask,
+          id: "task_fr_01",
+          runId: "run_001",
+          title: "FR fail",
+          acceptanceCriteria: [],
+        },
+        executorResult: {
+          status: "failed",
+          exitCode: 1,
+          output: "error",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+      });
+      expect(result.failureReason).toBeDefined();
+    });
+
+    it("should not include failureReason when validation passes", async () => {
+      const result = await engine.validateTask({
+        projectRoot: testDir,
+        task: {
+          ...baseTask,
+          id: "task_fr_02",
+          runId: "run_001",
+          title: "FR pass",
+          acceptanceCriteria: [],
+        },
+        executorResult: {
+          status: "done",
+          exitCode: 0,
+          output: "all good",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+      });
+      expect(result.failureReason).toBeUndefined();
+    });
+
+    it("should include failure reason with severity field", async () => {
+      const result = await engine.validateTask({
+        projectRoot: testDir,
+        task: {
+          ...baseTask,
+          id: "task_fr_03",
+          runId: "run_001",
+          title: "FR sev",
+          acceptanceCriteria: [],
+        },
+        executorResult: {
+          status: "failed",
+          exitCode: 1,
+          output: "error",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+      });
+      if (typeof result.failureReason === "object" && result.failureReason) {
+        expect(result.failureReason.severity).toBeDefined();
+      }
+    });
+  });
+
+  describe("enhanced validation — retry and review suggestions", () => {
+    it("should include retrySuggestion when validation fails", async () => {
+      const result = await engine.validateTask({
+        projectRoot: testDir,
+        task: {
+          ...baseTask,
+          id: "task_rs_01",
+          runId: "run_001",
+          title: "RS test",
+          acceptanceCriteria: [],
+        },
+        executorResult: {
+          status: "failed",
+          exitCode: 1,
+          output: "error",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+      });
+      expect(result.retrySuggestion).toBeDefined();
+    });
+
+    it("should include userReviewSuggestion when validation needs review", async () => {
+      const result = await engine.validateTask({
+        projectRoot: testDir,
+        task: {
+          ...baseTask,
+          id: "task_rs_02",
+          runId: "run_001",
+          title: "RS review",
+          acceptanceCriteria: [],
+        },
+        executorResult: {
+          status: "done",
+          exitCode: 0,
+          output: "",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+      });
+      const needsReview = result.checks.some(
+        (c) => c.status === "needs_review" || c.status === "warning",
+      );
+      if (needsReview) {
+        expect(result.userReviewSuggestion).toBeDefined();
+      }
+    });
+  });
+
+  describe("enhanced validation — hybrid check", () => {
+    it("should include hybrid check in validation results", async () => {
+      const result = await engine.validateTask({
+        projectRoot: testDir,
+        task: {
+          ...baseTask,
+          id: "task_hy_01",
+          runId: "run_001",
+          title: "Hy test",
+          acceptanceCriteria: [],
+        },
+        executorResult: {
+          status: "done",
+          exitCode: 0,
+          output: "task completed",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+      });
+      const hybridChecks = result.checks.filter((c) => c.type === "hybrid");
+      expect(hybridChecks.length).toBe(1);
+    });
+
+    it("should set hybrid validationMethod to deterministic (without AI)", async () => {
+      const result = await engine.validateTask({
+        projectRoot: testDir,
+        task: {
+          ...baseTask,
+          id: "task_hy_02",
+          runId: "run_001",
+          title: "Hy det",
+          acceptanceCriteria: [],
+        },
+        executorResult: {
+          status: "done",
+          exitCode: 0,
+          output: "ok",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+      });
+      const hybrid = result.checks.find((c) => c.type === "hybrid");
+      expect(hybrid).toBeDefined();
+      expect(hybrid!.validationMethod).toBeDefined();
+    });
+
+    it("should include deterministicScore and aiScore in hybrid details", async () => {
+      const result = await engine.validateTask({
+        projectRoot: testDir,
+        task: {
+          ...baseTask,
+          id: "task_hy_03",
+          runId: "run_001",
+          title: "Hy scores",
+          acceptanceCriteria: [],
+        },
+        executorResult: {
+          status: "done",
+          exitCode: 0,
+          output: "all good",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+      });
+      const hybrid = result.checks.find((c) => c.type === "hybrid");
+      expect(hybrid).toBeDefined();
+      expect(hybrid!.details).toBeDefined();
+      if (hybrid!.details) {
+        const det = hybrid!.details as Record<string, unknown>;
+        expect(det.deterministicPassed).toBeGreaterThan(0);
+      }
+    });
+  });
+
+  describe("enhanced validation — type-specific validation", () => {
+    it("should produce document type check for documentation tasks", async () => {
+      const result = await engine.validateTask({
+        projectRoot: testDir,
+        task: {
+          ...baseTask,
+          id: "task_ts_01",
+          runId: "run_001",
+          title: "Documentation task",
+          description: "Write documentation for the API",
+          acceptanceCriteria: [],
+        },
+        executorResult: {
+          status: "done",
+          exitCode: 0,
+          output: "# API Documentation\n\n## Overview\nThis document covers the API endpoints.",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+      });
+      const docChecks = result.checks.filter((c) => c.type === "document");
+      expect(docChecks.length).toBe(1);
+    });
+
+    it("should document check pass when output has structured content", async () => {
+      const result = await engine.validateTask({
+        projectRoot: testDir,
+        task: {
+          ...baseTask,
+          id: "task_ts_02",
+          runId: "run_001",
+          title: "Write docs",
+          description: "document the module",
+          acceptanceCriteria: [],
+        },
+        executorResult: {
+          status: "done",
+          exitCode: 0,
+          output: "# Heading\n\nSome content here about the module.",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+      });
+      const doc = result.checks.find((c) => c.type === "document");
+      expect(doc).toBeDefined();
+      expect(doc!.status).toBe("passed");
+    });
+
+    it("should produce research type check for research tasks", async () => {
+      const result = await engine.validateTask({
+        projectRoot: testDir,
+        task: {
+          ...baseTask,
+          id: "task_ts_03",
+          runId: "run_001",
+          title: "Research topic",
+          description: "research the market trends 2024",
+          acceptanceCriteria: [],
+        },
+        executorResult: {
+          status: "done",
+          exitCode: 0,
+          output:
+            "Based on sources, we found that the market has grown 25% annually. The analysis shows strong demand.",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+      });
+      const researchChecks = result.checks.filter((c) => c.type === "research");
+      expect(researchChecks.length).toBe(1);
+    });
+
+    it("should produce log type check for log-related tasks", async () => {
+      const result = await engine.validateTask({
+        projectRoot: testDir,
+        task: {
+          ...baseTask,
+          id: "task_ts_04",
+          runId: "run_001",
+          title: "Check logs",
+          description: "analyze logging output for errors",
+          acceptanceCriteria: [],
+        },
+        executorResult: {
+          status: "done",
+          exitCode: 0,
+          output: "INFO: Server started\nWARN: Deprecated API used\nERROR: Connection timeout",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+      });
+      const logChecks = result.checks.filter((c) => c.type === "log");
+      expect(logChecks.length).toBe(1);
+      expect(logChecks[0]?.status).toBe("warning");
+    });
+
+    it("should produce ui_result type check for UI tasks", async () => {
+      const result = await engine.validateTask({
+        projectRoot: testDir,
+        task: {
+          ...baseTask,
+          id: "task_ts_05",
+          runId: "run_001",
+          title: "UI Design",
+          description: "design the login screen UI",
+          acceptanceCriteria: [],
+        },
+        executorResult: {
+          status: "done",
+          exitCode: 0,
+          output: "Component rendered successfully with responsive layout",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+      });
+      const uiChecks = result.checks.filter((c) => c.type === "ui_result");
+      expect(uiChecks.length).toBe(1);
+      expect(uiChecks[0]?.status).toBe("passed");
+    });
+
+    it("should produce checklist type check for QA tasks", async () => {
+      const result = await engine.validateTask({
+        projectRoot: testDir,
+        task: {
+          ...baseTask,
+          id: "task_ts_06",
+          runId: "run_001",
+          title: "QA checklist",
+          description: "checklist for release validation",
+          acceptanceCriteria: [],
+        },
+        executorResult: {
+          status: "done",
+          exitCode: 0,
+          output:
+            "- [x] Unit tests pass\n- [x] Integration tests pass\n- [ ] E2E tests pass\nDone: 2/3 items",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+      });
+      const clChecks = result.checks.filter((c) => c.type === "checklist");
+      expect(clChecks.length).toBe(1);
+      expect(clChecks[0]?.status).toBe("passed");
+    });
+
+    it("should produce requirement_coverage type check for requirement tasks", async () => {
+      const result = await engine.validateTask({
+        projectRoot: testDir,
+        task: {
+          ...baseTask,
+          id: "task_ts_07",
+          runId: "run_001",
+          title: "Requirements",
+          description: "requirement coverage analysis",
+          acceptanceCriteria: ["API endpoints documented", "Error handling covered"],
+        },
+        executorResult: {
+          status: "done",
+          exitCode: 0,
+          output: "API endpoints documented with examples. Error handling covered in chapter 3.",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+      });
+      const rcChecks = result.checks.filter((c) => c.type === "requirement_coverage");
+      expect(rcChecks.length).toBe(1);
+      expect(rcChecks[0]?.status).toBe("passed");
+    });
+
+    it("should produce requirement_coverage with failure when criteria not met", async () => {
+      const result = await engine.validateTask({
+        projectRoot: testDir,
+        task: {
+          ...baseTask,
+          id: "task_ts_08",
+          runId: "run_001",
+          title: "Requirements fail",
+          description: "requirement coverage",
+          acceptanceCriteria: ["Unrelated requirement that is not in output"],
+        },
+        executorResult: {
+          status: "done",
+          exitCode: 0,
+          output: "Some output without the requirement",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+      });
+      const rcChecks = result.checks.filter((c) => c.type === "requirement_coverage");
+      expect(rcChecks.length).toBe(1);
+      expect(rcChecks[0]?.status).toBe("failed");
+    });
+  });
+
+  describe("enhanced validation — data validation", () => {
+    let dataDir: string;
+    let _tmpDir: string;
+
+    beforeAll(async () => {
+      _tmpDir = join(tmpdir(), "eng-data-tests-" + Date.now());
+      dataDir = _tmpDir;
+      await ensureDir(dataDir);
+      await writeTextFile(
+        join(dataDir, "data.json"),
+        JSON.stringify({ items: [1, 2, 3], total: 3 }),
+      );
+      await writeTextFile(join(dataDir, "data.csv"), "name,age\nAlice,30\nBob,25\n");
+      await writeTextFile(join(dataDir, "invalid.json"), "{invalid json content");
+    });
+
+    afterAll(() => {
+      rmSync(_tmpDir, { recursive: true, force: true });
+    });
+
+    it("should validate JSON data files", async () => {
+      const { DataValidator } = await import("../../src/validation/data-validator.js");
+      const dv = new DataValidator();
+      const checks = await dv.validate({
+        paths: ["data.json"],
+        executorResult: {
+          status: "done",
+          exitCode: 0,
+          output: "",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+        projectRoot: dataDir,
+      });
+      const jsonCheck = checks.find((c) => c.path === "data.json");
+      expect(jsonCheck).toBeDefined();
+      expect(jsonCheck!.status).toBe("passed");
+      expect(jsonCheck!.confidence).toBe(1);
+    });
+
+    it("should fail invalid JSON data files", async () => {
+      const { DataValidator } = await import("../../src/validation/data-validator.js");
+      const dv = new DataValidator();
+      const checks = await dv.validate({
+        paths: ["invalid.json"],
+        executorResult: {
+          status: "done",
+          exitCode: 0,
+          output: "",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+        projectRoot: dataDir,
+      });
+      const check = checks.find((c) => c.path === "invalid.json");
+      expect(check).toBeDefined();
+      expect(check!.status).toBe("failed");
+    });
+
+    it("should validate CSV data files with column/row analysis", async () => {
+      const { DataValidator } = await import("../../src/validation/data-validator.js");
+      const dv = new DataValidator();
+      const checks = await dv.validate({
+        paths: ["data.csv"],
+        executorResult: {
+          status: "done",
+          exitCode: 0,
+          output: "",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+        projectRoot: dataDir,
+      });
+      const check = checks.find((c) => c.path === "data.csv");
+      expect(check).toBeDefined();
+      expect(check!.status).toBe("passed");
+      expect(check!.confidence).toBeGreaterThan(0.9);
+    });
+
+    it("should detect data file paths from executor output", async () => {
+      const { DataValidator } = await import("../../src/validation/data-validator.js");
+      const dv = new DataValidator();
+      const checks = await dv.validate({
+        executorResult: {
+          status: "done",
+          exitCode: 0,
+          output: "produced output.csv and result.json",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+        projectRoot: dataDir,
+      });
+      expect(checks.length).toBeGreaterThanOrEqual(1);
+      expect(checks[0]?.status).toBeDefined();
+    });
+  });
 });

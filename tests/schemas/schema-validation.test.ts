@@ -141,6 +141,53 @@ describe("Schema validation", () => {
     expect((result.data as Record<string, unknown>).requiredContent).toBeUndefined();
   });
 
+  it("should validate AiPlannerTaskSchema with all structured step metadata fields", () => {
+    const result = AiPlannerTaskSchema.safeParse({
+      title: "Implement feature",
+      description: "Detailed implementation plan",
+      executor: "shell",
+      acceptanceCriteria: ["Feature works"],
+      taskType: "coding",
+      actionType: "create",
+      inputContext: "Previous step context",
+      targetFiles: ["src/main.ts"],
+      targetArtifacts: ["report.md"],
+      evidence: ["File exists", "Tests pass"],
+      verificationCommand: "pnpm test",
+      approvalRequired: true,
+      retryPolicy: { maxRetries: 3, retryDelayMs: 2000, retryBackoff: "exponential" },
+      timeout: { durationMs: 120000, action: "retry" },
+      finalOutputContribution: "Core module for the feature",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.taskType).toBe("coding");
+      expect(result.data.actionType).toBe("create");
+      expect(result.data.targetFiles).toContain("src/main.ts");
+      expect(result.data.approvalRequired).toBe(true);
+      expect(result.data.evidence).toHaveLength(2);
+      expect(result.data.retryPolicy?.maxRetries).toBe(3);
+      expect(result.data.timeout?.durationMs).toBe(120000);
+      expect(result.data.finalOutputContribution).toBe("Core module for the feature");
+    }
+  });
+
+  it("should use defaults for optional structured step metadata fields", () => {
+    const result = AiPlannerTaskSchema.safeParse({
+      title: "Minimal task",
+      description: "Minimal description",
+      executor: "shell",
+      acceptanceCriteria: ["Done"],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.taskType).toBe("general");
+      expect(result.data.actionType).toBe("execute");
+      expect(result.data.targetFiles).toEqual([]);
+      expect(result.data.approvalRequired).toBe(false);
+    }
+  });
+
   it("should strip requiredFiles from AiPlannerTaskSchema", () => {
     const result = AiPlannerTaskSchema.safeParse({
       title: "Test task",

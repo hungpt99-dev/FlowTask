@@ -77,7 +77,7 @@ describe("ArtifactManager with DB", () => {
     const artifacts = artifactManager.getArtifactsByRun(testDir, "run_art_db");
     expect(artifacts).toHaveLength(1);
     expect(artifacts[0]!.title).toBe("design.md");
-    expect(artifacts[0]!.type).toBe("md");
+    expect(artifacts[0]!.type).toBe("generated_artifact");
   });
 
   it("saves multiple artifacts and retrieves by task", async () => {

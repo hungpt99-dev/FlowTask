@@ -50,14 +50,14 @@ describe("Multi-use-case planner → validation flow", () => {
       type: "planning",
       prompt: "Plan the migration approach from monolith to microservices",
       expectedTitle: "Planning",
-      expectedTaskCount: 5,
+      expectedTaskCount: 7,
       validationOutput: "Detailed plan is created with task breakdown",
     },
     {
       type: "project-setup",
       prompt: "Set up a monorepo with Turborepo and pnpm workspaces",
       expectedTitle: "Project Setup",
-      expectedTaskCount: 6,
+      expectedTaskCount: 7,
       validationOutput: "Project structure is created and tools configured",
     },
     {
@@ -71,14 +71,14 @@ describe("Multi-use-case planner → validation flow", () => {
       type: "devops",
       prompt: "Deploy the application to Kubernetes with Helm charts",
       expectedTitle: "DevOps",
-      expectedTaskCount: 6,
+      expectedTaskCount: 7,
       validationOutput: "Deployment validation passes. Configuration files created.",
     },
     {
       type: "data-analysis",
       prompt: "Analyze user behavior data and create visualizations",
       expectedTitle: "Data Analysis",
-      expectedTaskCount: 6,
+      expectedTaskCount: 7,
       validationOutput: "Data analysis is complete. Visualizations created.",
     },
     {
@@ -92,7 +92,7 @@ describe("Multi-use-case planner → validation flow", () => {
       type: "writing",
       prompt: "Write an email newsletter for our product launch",
       expectedTitle: "Writing",
-      expectedTaskCount: 5,
+      expectedTaskCount: 6,
       validationOutput: "Content is written and finalized for the newsletter.",
     },
     {

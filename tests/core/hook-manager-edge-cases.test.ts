@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { HookManager } from "../../src/core/hook-manager.js";
+import { HookManager, HookError } from "../../src/core/hook-manager.js";
 import { join } from "node:path";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, existsSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 describe("HookManager edge cases", () => {
@@ -222,5 +222,90 @@ describe("HookManager edge cases", () => {
     expect(beforeRetry).toEqual([]);
     expect(afterRetry).toEqual([]);
     expect(onFailure).toEqual([]);
+  });
+
+  // ── New hook type tests ─────────────────────────────
+
+  it("should execute shell hook entry with object config", async () => {
+    const marker = join(hookDir, "shell-object");
+    const config = {
+      beforeRun: [{ type: "shell" as const, command: `touch ${marker}`, timeoutMs: 5000 }],
+    };
+    const manager = new HookManager(hookDir, config);
+    const results = await manager.runBeforeRun({ runId: "r" });
+    expect(existsSync(marker)).toBe(true);
+    expect(results[0]!.type).toBe("shell");
+    expect(results[0]!.success).toBe(true);
+  });
+
+  it("should execute script hook entry", async () => {
+    const scriptPath = join(hookDir, "test-script.sh");
+    const marker = join(hookDir, "script-marker");
+    writeFileSync(scriptPath, `echo "ran" > "${marker}"\n`, "utf-8");
+    chmodSync(scriptPath, 0o755);
+    const config = {
+      beforeRun: [{ type: "script" as const, path: scriptPath, args: [], timeoutMs: 5000 }],
+    };
+    const manager = new HookManager(hookDir, config);
+    const results = await manager.runBeforeRun({ runId: "r" });
+    expect(existsSync(marker)).toBe(true);
+    expect(results[0]!.type).toBe("script");
+    expect(results[0]!.success).toBe(true);
+  });
+
+  it("should fail gracefully for non-existent script", async () => {
+    const config = {
+      beforeRun: [
+        { type: "script" as const, path: "/nonexistent/script.sh", args: [], timeoutMs: 5000 },
+      ],
+    };
+    const manager = new HookManager(hookDir, config);
+    const results = await manager.runBeforeRun({ runId: "r" });
+    expect(results[0]!.success).toBe(false);
+    expect(results[0]!.type).toBe("script");
+  });
+
+  it("should throw HookError when failOnError is true and hook fails", async () => {
+    const config = {
+      beforeRun: ["exit 1"],
+      failOnError: true,
+    };
+    const manager = new HookManager(hookDir, config);
+    try {
+      await manager.runBeforeRun({ runId: "r" });
+      expect.unreachable("Should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(HookError);
+      expect((err as HookError).results).toHaveLength(1);
+      expect((err as HookError).results[0]!.success).toBe(false);
+    }
+  });
+
+  it("should time out long-running shell hooks", async () => {
+    const config = {
+      beforeRun: [{ type: "shell" as const, command: "sleep 10", timeoutMs: 100 }],
+      failOnError: false,
+    };
+    const manager = new HookManager(hookDir, config);
+    const results = await manager.runBeforeRun({ runId: "r" });
+    expect(results[0]!.success).toBe(false);
+    expect(results[0]!.exitCode).toBeNull();
+  });
+
+  it("should return HookResult with duration", async () => {
+    const config = {
+      beforeRun: ["echo fast"],
+    };
+    const manager = new HookManager(hookDir, config);
+    const results = await manager.runBeforeRun({ runId: "r" });
+    expect(results[0]!.durationMs).toBeGreaterThanOrEqual(0);
+    expect(results[0]!.entry).toBe("echo fast");
+  });
+
+  it("should handle undefined entries gracefully", async () => {
+    const config = {};
+    const manager = new HookManager(hookDir, config);
+    const r = await manager.runBeforeScan({ runId: "r" });
+    expect(r).toEqual([]);
   });
 });

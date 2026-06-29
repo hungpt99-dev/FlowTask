@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
 import { TaskContextBuilder } from "../../src/context/task-context-builder.js";
 import path from "node:path";
@@ -328,5 +329,142 @@ describe("TaskContextBuilder", () => {
     expect(ctx.projectMeta.packageManager).toBe("pnpm");
 
     rmSync(pmTestDir, { recursive: true, force: true });
+  });
+
+  it("includes userGoal in the task context", async () => {
+    mockRgResponse("", 1);
+
+    const ctx = await builder.build(testDir, "implement auth login");
+    expect(ctx.userGoal).toBe("implement auth login");
+  });
+
+  it("detects task type and workflow type from prompt", async () => {
+    mockRgResponse("", 1);
+
+    const codeCtx = await builder.build(testDir, "implement auth login");
+    expect(codeCtx.taskType).toBe("code");
+    expect(codeCtx.workflowType).toBe("code_implementation");
+
+    const docsCtx = await builder.build(testDir, "update documentation readme");
+    expect(docsCtx.taskType).toBe("documentation");
+    expect(docsCtx.workflowType).toBe("documentation");
+
+    const researchCtx = await builder.build(testDir, "research compare frameworks");
+    expect(researchCtx.taskType).toBe("research");
+    expect(researchCtx.workflowType).toBe("research");
+  });
+
+  it("includes context items from the workspace scan", async () => {
+    mockRgResponse("", 1);
+
+    const ctx = await builder.build(testDir, "implement auth login");
+    expect(ctx.contextItems).toBeDefined();
+    expect(Array.isArray(ctx.contextItems)).toBe(true);
+    if (ctx.contextItems.length > 0) {
+      expect(ctx.contextItems[0]).toHaveProperty("path");
+      expect(ctx.contextItems[0]).toHaveProperty("type");
+      expect(ctx.contextItems[0]).toHaveProperty("relevance");
+    }
+  });
+
+  it("includes risks based on workflow type", async () => {
+    mockRgResponse("", 1);
+
+    const ctx = await builder.build(testDir, "implement auth login");
+    expect(ctx.risks).toBeDefined();
+    expect(Array.isArray(ctx.risks)).toBe(true);
+    for (const risk of ctx.risks) {
+      expect(risk).toHaveProperty("description");
+      expect(risk).toHaveProperty("level");
+      expect(risk).toHaveProperty("mitigation");
+    }
+  });
+
+  it("includes constraints from project analysis", async () => {
+    mockRgResponse("", 1);
+
+    const ctx = await builder.build(testDir, "implement auth login");
+    expect(ctx.constraints).toBeDefined();
+    expect(Array.isArray(ctx.constraints)).toBe(true);
+  });
+
+  it("includes validation methods for the workflow type", async () => {
+    mockRgResponse("", 1);
+
+    const ctx = await builder.build(testDir, "implement auth login");
+    expect(ctx.validationMethods).toBeDefined();
+    expect(ctx.validationMethods.length).toBeGreaterThan(0);
+    expect(ctx.validationMethods[0]).toHaveProperty("type");
+    expect(ctx.validationMethods[0]).toHaveProperty("description");
+  });
+
+  it("includes planning hints based on task type", async () => {
+    mockRgResponse("", 1);
+
+    const ctx = await builder.build(testDir, "implement auth login");
+    expect(ctx.planningHints).toBeDefined();
+    expect(ctx.planningHints.length).toBeGreaterThan(0);
+    for (const hint of ctx.planningHints) {
+      expect(hint).toHaveProperty("description");
+      expect(hint).toHaveProperty("priority");
+    }
+  });
+
+  it("calculates confidence score", async () => {
+    mockRgResponse("", 1);
+
+    const ctx = await builder.build(testDir, "implement auth login");
+    expect(ctx.confidenceScore).toBeGreaterThan(0);
+    expect(ctx.confidenceScore).toBeLessThanOrEqual(1);
+  });
+
+  it("generates compact text for the planner", async () => {
+    mockRgResponse("", 1);
+
+    const ctx = await builder.build(testDir, "implement auth login");
+    expect(ctx.compactText).toBeDefined();
+    expect(ctx.compactText.length).toBeGreaterThan(0);
+    expect(ctx.compactText).toContain("Task Context");
+    expect(ctx.compactText).toContain("implement auth login");
+    expect(ctx.compactText).toContain("code");
+  });
+
+  it("generates expected outputs for the workflow type", async () => {
+    mockRgResponse("", 1);
+
+    const ctx = await builder.build(testDir, "implement auth login");
+    expect(ctx.expectedOutputs).toBeDefined();
+    expect(ctx.expectedOutputs.length).toBeGreaterThan(0);
+    for (const output of ctx.expectedOutputs) {
+      expect(output).toHaveProperty("type");
+      expect(output).toHaveProperty("description");
+      expect(output).toHaveProperty("validationMethod");
+    }
+  });
+
+  it("builds a summary that includes new fields", async () => {
+    mockRgResponse("", 1);
+
+    const ctx = await builder.build(testDir, "implement auth login");
+    const summary = builder.formatSummary(ctx);
+    expect(summary).toContain("Task: code");
+    expect(summary).toContain("Confidence");
+    expect(summary).toContain("Context items");
+    expect(summary).toContain("Risks");
+  });
+
+  it("sets task type to code for a code project even with general prompt", async () => {
+    mockRgResponse("", 1);
+
+    const ctx = await builder.build(testDir, "do something");
+    expect(ctx.taskType).toBe("code");
+  });
+
+  it("includes related commands from project scripts", async () => {
+    mockRgResponse("", 1);
+
+    const ctx = await builder.build(testDir, "implement auth login");
+    expect(ctx.relatedCommands).toBeDefined();
+    expect(ctx.relatedCommands.length).toBeGreaterThan(0);
   });
 });

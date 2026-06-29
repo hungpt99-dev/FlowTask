@@ -121,7 +121,7 @@ describe("HookManager", () => {
     });
     expect(results).toHaveLength(1);
     expect(results[0]!.success).toBe(true);
-    expect(results[0]!.command).toBe(`touch ${markerPath}`);
+    expect(results[0]!.entry).toBe(`touch ${markerPath}`);
   });
 
   it("should report failed hooks without throwing when failOnError is false", async () => {
@@ -190,5 +190,230 @@ describe("HookManager", () => {
     const manager = new HookManager(testDir);
     const results = await manager.runBeforeRun({ runId: "test-run" });
     expect(results).toEqual([]);
+  });
+
+  // ── New lifecycle hook tests ────────────────────────
+
+  it("should execute beforeScan hooks", async () => {
+    const marker = join(testDir, "before-scan");
+    const config = { beforeScan: [`touch ${marker}`] };
+    const manager = new HookManager(testDir, config);
+    await manager.runBeforeScan({ runId: "r" });
+    expect(existsSync(marker)).toBe(true);
+  });
+
+  it("should execute afterScan hooks", async () => {
+    const marker = join(testDir, "after-scan");
+    const config = { afterScan: [`touch ${marker}`] };
+    const manager = new HookManager(testDir, config);
+    await manager.runAfterScan({ runId: "r" });
+    expect(existsSync(marker)).toBe(true);
+  });
+
+  it("should execute beforePlan hooks", async () => {
+    const marker = join(testDir, "before-plan");
+    const config = { beforePlan: [`touch ${marker}`] };
+    const manager = new HookManager(testDir, config);
+    await manager.runBeforePlan({ runId: "r" });
+    expect(existsSync(marker)).toBe(true);
+  });
+
+  it("should execute afterPlan hooks", async () => {
+    const marker = join(testDir, "after-plan");
+    const config = { afterPlan: [`touch ${marker}`] };
+    const manager = new HookManager(testDir, config);
+    await manager.runAfterPlan({ runId: "r" });
+    expect(existsSync(marker)).toBe(true);
+  });
+
+  it("should execute beforeStep hooks", async () => {
+    const marker = join(testDir, "before-step");
+    const config = { beforeStep: [`touch ${marker}`] };
+    const manager = new HookManager(testDir, config);
+    await manager.runBeforeStep({ runId: "r", taskId: "t", taskTitle: "T" });
+    expect(existsSync(marker)).toBe(true);
+  });
+
+  it("should execute afterStep hooks", async () => {
+    const marker = join(testDir, "after-step");
+    const config = { afterStep: [`touch ${marker}`] };
+    const manager = new HookManager(testDir, config);
+    await manager.runAfterStep({ runId: "r", taskId: "t", taskTitle: "T", success: true });
+    expect(existsSync(marker)).toBe(true);
+  });
+
+  it("should execute onStepFail hooks", async () => {
+    const marker = join(testDir, "step-fail");
+    const config = { onStepFail: [`touch ${marker}`] };
+    const manager = new HookManager(testDir, config);
+    await manager.runOnStepFail({ runId: "r", taskId: "t", taskTitle: "T", error: "err" });
+    expect(existsSync(marker)).toBe(true);
+  });
+
+  it("should execute onStepRetry hooks", async () => {
+    const marker = join(testDir, "step-retry");
+    const config = { onStepRetry: [`touch ${marker}`] };
+    const manager = new HookManager(testDir, config);
+    await manager.runOnStepRetry({
+      runId: "r",
+      taskId: "t",
+      taskTitle: "T",
+      retryCount: 1,
+      maxRetries: 3,
+    });
+    expect(existsSync(marker)).toBe(true);
+  });
+
+  it("should execute onApprovalRequired hooks", async () => {
+    const marker = join(testDir, "approval");
+    const config = { onApprovalRequired: [`touch ${marker}`] };
+    const manager = new HookManager(testDir, config);
+    await manager.runOnApprovalRequired({ runId: "r", taskId: "t", taskTitle: "T", stepId: "s" });
+    expect(existsSync(marker)).toBe(true);
+  });
+
+  it("should execute beforeValidate hooks", async () => {
+    const marker = join(testDir, "before-val");
+    const config = { beforeValidate: [`touch ${marker}`] };
+    const manager = new HookManager(testDir, config);
+    await manager.runBeforeValidate({ runId: "r", taskId: "t", taskTitle: "T" });
+    expect(existsSync(marker)).toBe(true);
+  });
+
+  it("should execute afterValidate hooks", async () => {
+    const marker = join(testDir, "after-val");
+    const config = { afterValidate: [`touch ${marker}`] };
+    const manager = new HookManager(testDir, config);
+    await manager.runAfterValidate({
+      runId: "r",
+      taskId: "t",
+      taskTitle: "T",
+      validationStatus: "passed",
+    });
+    expect(existsSync(marker)).toBe(true);
+  });
+
+  it("should execute onArtifactCreated hooks", async () => {
+    const marker = join(testDir, "artifact");
+    const config = { onArtifactCreated: [`touch ${marker}`] };
+    const manager = new HookManager(testDir, config);
+    await manager.runOnArtifactCreated({
+      runId: "r",
+      taskId: "t",
+      artifactId: "a1",
+      artifactType: "report",
+      fileName: "report.md",
+    });
+    expect(existsSync(marker)).toBe(true);
+  });
+
+  it("should execute onFileChanged hooks", async () => {
+    const marker = join(testDir, "file-changed");
+    const config = { onFileChanged: [`touch ${marker}`] };
+    const manager = new HookManager(testDir, config);
+    await manager.runOnFileChanged({ runId: "r", taskId: "t", fileName: "src/main.ts" });
+    expect(existsSync(marker)).toBe(true);
+  });
+
+  it("should execute onRunComplete hooks", async () => {
+    const marker = join(testDir, "run-complete");
+    const config = { onRunComplete: [`touch ${marker}`] };
+    const manager = new HookManager(testDir, config);
+    await manager.runOnRunComplete({ runId: "r", success: true });
+    expect(existsSync(marker)).toBe(true);
+  });
+
+  it("should execute onRunFail hooks", async () => {
+    const marker = join(testDir, "run-fail");
+    const config = { onRunFail: [`touch ${marker}`] };
+    const manager = new HookManager(testDir, config);
+    await manager.runOnRunFail({ runId: "r", error: "failed" });
+    expect(existsSync(marker)).toBe(true);
+  });
+
+  it("should execute onRunCancel hooks", async () => {
+    const marker = join(testDir, "run-cancel");
+    const config = { onRunCancel: [`touch ${marker}`] };
+    const manager = new HookManager(testDir, config);
+    await manager.runOnRunCancel({ runId: "r" });
+    expect(existsSync(marker)).toBe(true);
+  });
+
+  it("should pass extended context fields as environment variables", async () => {
+    const envPath = join(testDir, "ext-env.txt");
+    const config = {
+      beforeStep: [
+        `echo "$HOOK_STEP_ID|$HOOK_STEP_TITLE|$HOOK_ARTIFACT_ID|$HOOK_ARTIFACT_TYPE|$HOOK_FILE_NAME|$HOOK_VALIDATION_STATUS" > ${envPath}`,
+      ],
+    };
+    const manager = new HookManager(testDir, config);
+    await manager.runBeforeStep({
+      runId: "r",
+      taskId: "t",
+      taskTitle: "T",
+      stepId: "s1",
+      stepTitle: "My Step",
+      artifactId: "a1",
+      artifactType: "report",
+      fileName: "output.md",
+      validationStatus: "passed",
+    });
+    const content = readFileSync(envPath, "utf-8").trim();
+    expect(content).toBe("s1|My Step|a1|report|output.md|passed");
+  });
+
+  it("should execute shell hook entry with object config", async () => {
+    const marker = join(testDir, "shell-entry");
+    const config = {
+      beforeRun: [{ type: "shell" as const, command: `touch ${marker}`, timeoutMs: 5000 }],
+    };
+    const manager = new HookManager(testDir, config);
+    const results = await manager.runBeforeRun({ runId: "r" });
+    expect(existsSync(marker)).toBe(true);
+    expect(results).toHaveLength(1);
+    expect(results[0]!.type).toBe("shell");
+    expect(results[0]!.success).toBe(true);
+  });
+
+  it("should return duration in hook results", async () => {
+    const config = {
+      beforeRun: ["echo hello"],
+    };
+    const manager = new HookManager(testDir, config);
+    const results = await manager.runBeforeRun({ runId: "r" });
+    expect(results).toHaveLength(1);
+    expect(results[0]!.durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("should return empty arrays for all new hook points with empty config", async () => {
+    const manager = new HookManager(testDir, {});
+    const hooks = [
+      manager.runBeforeScan({ runId: "r" }),
+      manager.runAfterScan({ runId: "r" }),
+      manager.runBeforePlan({ runId: "r" }),
+      manager.runAfterPlan({ runId: "r" }),
+      manager.runBeforeStep({ runId: "r", taskId: "t", taskTitle: "T" }),
+      manager.runAfterStep({ runId: "r", taskId: "t", taskTitle: "T", success: true }),
+      manager.runOnStepFail({ runId: "r", taskId: "t", taskTitle: "T", error: "e" }),
+      manager.runOnStepRetry({
+        runId: "r",
+        taskId: "t",
+        taskTitle: "T",
+        retryCount: 1,
+        maxRetries: 3,
+      }),
+      manager.runOnApprovalRequired({ runId: "r", taskId: "t", taskTitle: "T" }),
+      manager.runBeforeValidate({ runId: "r", taskId: "t", taskTitle: "T" }),
+      manager.runAfterValidate({ runId: "r", taskId: "t", taskTitle: "T", validationStatus: "ok" }),
+      manager.runOnArtifactCreated({ runId: "r", taskId: "t", artifactId: "a1" }),
+      manager.runOnFileChanged({ runId: "r", taskId: "t", fileName: "f.ts" }),
+      manager.runOnRunComplete({ runId: "r", success: true }),
+      manager.runOnRunFail({ runId: "r", error: "e" }),
+      manager.runOnRunCancel({ runId: "r" }),
+    ];
+    const results = await Promise.all(hooks);
+    for (const r of results) {
+      expect(r).toEqual([]);
+    }
   });
 });

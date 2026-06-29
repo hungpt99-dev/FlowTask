@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { ValidationEngine } from "../../src/validation/validation-engine.js";
 import { testDir } from "../setup.js";
@@ -14,6 +15,16 @@ const OUTCOME_BASED_TYPES = new Set([
   "acceptance_criteria",
   "outcome_comparison",
   "output_plan",
+  "evidence",
+  "hybrid",
+  "document",
+  "research",
+  "data",
+  "log",
+  "ui_result",
+  "checklist",
+  "requirement_coverage",
+  "ai_review",
 ]);
 
 const baseTask = {
@@ -621,9 +632,10 @@ describe("Outcome-based validation only", () => {
       });
 
       expect(result.status).toBe("passed");
-      expect(result.checks).toHaveLength(1);
-      expect(result.checks[0]?.type).toBe("process");
-      expect(result.checks[0]?.status).toBe("passed");
+      expect(result.checks.length).toBeGreaterThanOrEqual(3);
+      const processCheck = result.checks.find((c) => c.type === "process");
+      expect(processCheck?.type).toBe("process");
+      expect(processCheck?.status).toBe("passed");
     });
   });
 });
