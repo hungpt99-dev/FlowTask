@@ -172,7 +172,7 @@ export class InternalAiPlanner implements Planner {
       systemPrompt,
       userPrompt,
       temperature: plannerConfig.temperature ?? 0.1,
-      maxTokens: plannerConfig.maxTokens ?? 4096,
+      maxTokens: plannerConfig.maxTokens ?? 16384,
       responseFormat: "json_object" as const,
       timeoutMs: plannerConfig.timeoutMs,
       stream: enableStream,
@@ -299,7 +299,7 @@ export class InternalAiPlanner implements Planner {
       systemPrompt,
       userPrompt,
       temperature: 0.1,
-      maxTokens: 4096,
+      maxTokens: 16384,
       responseFormat: "json_object",
     });
 

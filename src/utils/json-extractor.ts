@@ -37,6 +37,16 @@ export function extractJsonObject(output: string): JsonExtractionResult {
     }
   }
 
+  // Detect truncated JSON: starts with { but has no balanced closing brace
+  if (trimmed.startsWith("{")) {
+    const openBraces = countBraceDepth(trimmed);
+    if (openBraces > 0) {
+      throw new JsonExtractionError(
+        `JSON output appears truncated: ${openBraces} unclosed object(s). The response was likely cut off by the token limit. Increase maxTokens or reduce plan complexity.`,
+      );
+    }
+  }
+
   throw new JsonExtractionError(
     "No valid JSON object found in output. The AI response does not contain a JSON object.",
   );
@@ -80,6 +90,36 @@ function extractBalancedBrace(text: string, startIndex: number): string | null {
   }
 
   return null;
+}
+
+function countBraceDepth(text: string): number {
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+
+  for (const char of text) {
+    if (escape) {
+      escape = false;
+      continue;
+    }
+
+    if (char === "\\" && inString) {
+      escape = true;
+      continue;
+    }
+
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+
+    if (!inString) {
+      if (char === "{") depth++;
+      else if (char === "}") depth--;
+    }
+  }
+
+  return depth;
 }
 
 function tryParse(text: string): void {
