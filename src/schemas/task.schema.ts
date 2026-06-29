@@ -10,6 +10,7 @@ export const TaskStatusSchema = z.enum([
   "blocked",
   "cancelled",
   "waiting_approval",
+  "waiting_input",
   "interrupted",
 ]);
 
@@ -42,6 +43,7 @@ export const TaskSchema = z.object({
   maxRetries: z.number().int().min(0).default(2),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
+  metadata: z.record(z.unknown()).optional(),
 });
 
 export const TaskIndexSchema = z.object({

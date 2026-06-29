@@ -10,6 +10,50 @@ export const PlannerRiskLevelSchema = z.enum([
   "high",
 ]);
 
+export const PlannerTaskTypeSchema = z.enum([
+  "general",
+  "coding",
+  "documentation",
+  "research",
+  "data",
+  "writing",
+  "design",
+  "qa",
+  "release",
+  "operations",
+  "testing",
+  "analysis",
+  "review",
+  "approval",
+  "validation",
+]);
+
+export const PlannerActionTypeSchema = z.enum([
+  "create",
+  "modify",
+  "delete",
+  "read",
+  "analyze",
+  "execute",
+  "validate",
+  "approve",
+  "review",
+  "transform",
+  "generate",
+  "investigate",
+]);
+
+export const PlannerRetryPolicySchema = z.object({
+  maxRetries: z.number().int().min(0).optional().default(2),
+  retryDelayMs: z.number().int().min(0).optional().default(1000),
+  retryBackoff: z.enum(["linear", "exponential", "fixed"]).optional().default("linear"),
+});
+
+export const PlannerTimeoutSchema = z.object({
+  durationMs: z.number().int().min(0),
+  action: z.enum(["fail", "retry", "cancel", "skip"]).optional().default("fail"),
+});
+
 export const PlannerTaskValidationSchema = z.object({
   commands: z.array(z.string()).optional().default([]),
   requiredArtifacts: z.array(z.string()).optional().default([]),
@@ -27,6 +71,18 @@ export const AiPlannerTaskSchema = z.object({
   validation: PlannerTaskValidationSchema.optional().default({}),
   expectedResult: z.string().optional(),
   outputPlan: OutputPlanSchema.optional(),
+
+  taskType: PlannerTaskTypeSchema.optional().default("general"),
+  actionType: PlannerActionTypeSchema.optional().default("execute"),
+  inputContext: z.string().optional(),
+  targetFiles: z.array(z.string()).optional().default([]),
+  targetArtifacts: z.array(z.string()).optional().default([]),
+  evidence: z.array(z.string()).optional().default([]),
+  verificationCommand: z.string().optional(),
+  approvalRequired: z.boolean().optional().default(false),
+  retryPolicy: PlannerRetryPolicySchema.optional(),
+  timeout: PlannerTimeoutSchema.optional(),
+  finalOutputContribution: z.string().optional(),
 });
 
 export const AiPlannerOutputSchema = z.object({
@@ -86,3 +142,7 @@ export function validateArtifactPaths(paths: string[]): string[] {
 export type AiPlannerOutput = z.infer<typeof AiPlannerOutputSchema>;
 export type AiPlannerTask = z.infer<typeof AiPlannerTaskSchema>;
 export type PlannerConfig = z.infer<typeof PlannerConfigSchema>;
+export type PlannerTaskType = z.infer<typeof PlannerTaskTypeSchema>;
+export type PlannerActionType = z.infer<typeof PlannerActionTypeSchema>;
+export type PlannerRetryPolicy = z.infer<typeof PlannerRetryPolicySchema>;
+export type PlannerTimeout = z.infer<typeof PlannerTimeoutSchema>;

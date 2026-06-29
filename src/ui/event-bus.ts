@@ -79,6 +79,59 @@ export type UiEvent =
       taskId?: string;
       reason: string;
       timestamp: string;
+    }
+  | {
+      type: "prompt_detected";
+      runId: string;
+      taskId: string;
+      sessionId: string;
+      executor: string;
+      promptType: string;
+      promptText: string;
+      confidence: number;
+      requiresSecureInput: boolean;
+    }
+  | {
+      type: "prompt_input_provided";
+      runId: string;
+      taskId: string;
+      sessionId: string;
+      input: string;
+    }
+  | {
+      type: "prompt_cancelled";
+      runId: string;
+      taskId: string;
+      sessionId: string;
+      reason: string;
+    }
+  | {
+      type: "prompt_timeout";
+      runId: string;
+      taskId: string;
+      sessionId: string;
+      durationMs: number;
+    }
+  | {
+      type: "interactive_waiting";
+      runId: string;
+      taskId: string;
+      sessionId: string;
+      promptType: string;
+      promptText: string;
+    }
+  | {
+      type: "interactive_resumed";
+      runId: string;
+      taskId: string;
+      sessionId: string;
+    }
+  | {
+      type: "process_waiting_input";
+      runId: string;
+      taskId: string;
+      sessionId: string;
+      detectedPattern: string;
     };
 
 export interface EventBusOptions {
@@ -168,6 +221,13 @@ export class EventBus {
       "run_completed",
       "run_failed",
       "info",
+      "prompt_detected",
+      "prompt_input_provided",
+      "prompt_cancelled",
+      "prompt_timeout",
+      "interactive_waiting",
+      "interactive_resumed",
+      "process_waiting_input",
     ];
     for (const t of types) {
       this.addListener(t, callback, opts);

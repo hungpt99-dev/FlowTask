@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const EventTypeSchema = z.enum([
+const EventTypeBase = [
   "project_initialized",
   "rules_loaded",
   "rules_missing",
@@ -93,7 +93,19 @@ export const EventTypeSchema = z.enum([
   "workflow_reordered",
   "workflow_replanned",
   "workflow_snapshot_saved",
-]);
+  "prompt_detected",
+  "prompt_input_provided",
+  "prompt_cancelled",
+  "prompt_timeout",
+  "interactive_waiting",
+  "interactive_resumed",
+  "process_waiting_input",
+  "error_occurred",
+  "error_resolved",
+  "error_recovery_attempted",
+] as const;
+
+export const EventTypeSchema = z.enum(EventTypeBase);
 
 export const FlowTaskEventSchema = z.object({
   time: z.string().datetime(),
@@ -106,3 +118,80 @@ export const FlowTaskEventSchema = z.object({
 
 export type FlowTaskEvent = z.infer<typeof FlowTaskEventSchema>;
 export type EventType = z.infer<typeof EventTypeSchema>;
+
+export const AuditActionSchema = z.enum([
+  "workflow.create",
+  "workflow.start",
+  "workflow.pause",
+  "workflow.resume",
+  "workflow.cancel",
+  "workflow.complete",
+  "workflow.fail",
+  "step.start",
+  "step.complete",
+  "step.fail",
+  "step.skip",
+  "step.retry",
+  "step.approve",
+  "step.deny",
+  "step.block",
+  "step.unblock",
+  "approval.request",
+  "approval.grant",
+  "approval.deny",
+  "approval.expire",
+  "file.create",
+  "file.modify",
+  "file.delete",
+  "file.rename",
+  "artifact.create",
+  "artifact.validate",
+  "validation.pass",
+  "validation.fail",
+  "validation.skip",
+  "config.change",
+  "hook.execute",
+  "hook.fail",
+  "plugin.event",
+  "error.occur",
+  "error.resolve",
+  "cost.limit",
+  "token.limit",
+  "user.input",
+  "user.decision",
+  "prompt.detected",
+  "prompt.responded",
+  "prompt.cancelled",
+  "prompt.timeout",
+  "process.input",
+  "process.kill",
+]);
+
+export const AuditEventSchema = z.object({
+  time: z.string().datetime(),
+  action: AuditActionSchema,
+  runId: z.string().optional(),
+  taskId: z.string().optional(),
+  stepId: z.string().optional(),
+  actor: z.string().optional(),
+  target: z.string().optional(),
+  message: z.string().optional(),
+  details: z.record(z.unknown()).optional(),
+  severity: z.enum(["info", "warn", "error", "critical"]).default("info"),
+});
+
+export type AuditAction = z.infer<typeof AuditActionSchema>;
+export type AuditEvent = z.infer<typeof AuditEventSchema>;
+
+export const TimelineEntrySchema = z.object({
+  timestamp: z.string().datetime(),
+  type: z.string(),
+  runId: z.string().optional(),
+  taskId: z.string().optional(),
+  stepId: z.string().optional(),
+  status: z.string().optional(),
+  message: z.string().optional(),
+  details: z.record(z.unknown()).optional(),
+});
+
+export type TimelineEntry = z.infer<typeof TimelineEntrySchema>;
