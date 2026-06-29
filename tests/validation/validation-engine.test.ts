@@ -461,4 +461,349 @@ describe("ValidationEngine", () => {
       expect(contentChecks[0]?.status).toBe("failed");
     });
   });
+
+  describe("action-aware validation with outputPlan", () => {
+    let tempDir: string;
+
+    beforeAll(async () => {
+      tempDir = mkdtempSync(join(tmpdir(), "engine-output-plan-"));
+      await ensureDir(tempDir);
+      await writeTextFile(join(tempDir, "existing.txt"), "existing content");
+    });
+
+    afterAll(() => {
+      rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it("should pass when a create target file exists", async () => {
+      await writeTextFile(join(tempDir, "created.txt"), "new file");
+      const result = await engine.validateTask({
+        projectRoot: tempDir,
+        task: {
+          ...baseTask,
+          id: "task_op_01",
+          runId: "run_001",
+          title: "Create file",
+          acceptanceCriteria: [],
+          outputPlan: [
+            {
+              action: "create",
+              target: "created.txt",
+              validationMethod: "file_exists",
+            },
+          ],
+        },
+        executorResult: {
+          status: "done",
+          exitCode: 0,
+          output: "file created",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+      });
+      const opChecks = result.checks.filter((c) => c.type === "output_plan");
+      expect(opChecks.length).toBe(1);
+      expect(opChecks[0]?.status).toBe("passed");
+    });
+
+    it("should fail when a create target file is missing", async () => {
+      const result = await engine.validateTask({
+        projectRoot: tempDir,
+        task: {
+          ...baseTask,
+          id: "task_op_02",
+          runId: "run_001",
+          title: "Create missing file",
+          acceptanceCriteria: [],
+          outputPlan: [
+            {
+              action: "create",
+              target: "should-exist.txt",
+              validationMethod: "file_exists",
+            },
+          ],
+        },
+        executorResult: {
+          status: "done",
+          exitCode: 0,
+          output: "done",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+      });
+      const opChecks = result.checks.filter((c) => c.type === "output_plan");
+      expect(opChecks.length).toBe(1);
+      expect(opChecks[0]?.status).toBe("failed");
+    });
+
+    it("should pass when a modify target file exists", async () => {
+      const result = await engine.validateTask({
+        projectRoot: tempDir,
+        task: {
+          ...baseTask,
+          id: "task_op_03",
+          runId: "run_001",
+          title: "Modify file",
+          acceptanceCriteria: [],
+          outputPlan: [
+            {
+              action: "modify",
+              target: "existing.txt",
+              validationMethod: "file_exists",
+            },
+          ],
+        },
+        executorResult: {
+          status: "done",
+          exitCode: 0,
+          output: "file modified",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+      });
+      const opChecks = result.checks.filter((c) => c.type === "output_plan");
+      expect(opChecks.length).toBe(1);
+      expect(opChecks[0]?.status).toBe("passed");
+    });
+
+    it("should fail when a modify target file is missing", async () => {
+      const result = await engine.validateTask({
+        projectRoot: tempDir,
+        task: {
+          ...baseTask,
+          id: "task_op_04",
+          runId: "run_001",
+          title: "Modify missing file",
+          acceptanceCriteria: [],
+          outputPlan: [
+            {
+              action: "modify",
+              target: "nonexistent.txt",
+              validationMethod: "file_exists",
+            },
+          ],
+        },
+        executorResult: {
+          status: "done",
+          exitCode: 0,
+          output: "done",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+      });
+      const opChecks = result.checks.filter((c) => c.type === "output_plan");
+      expect(opChecks.length).toBe(1);
+      expect(opChecks[0]?.status).toBe("failed");
+    });
+
+    it("should pass when a delete target file is removed", async () => {
+      const result = await engine.validateTask({
+        projectRoot: tempDir,
+        task: {
+          ...baseTask,
+          id: "task_op_05",
+          runId: "run_001",
+          title: "Delete file",
+          acceptanceCriteria: [],
+          outputPlan: [
+            {
+              action: "delete",
+              target: "ghost-file.txt",
+              validationMethod: "file_exists",
+            },
+          ],
+        },
+        executorResult: {
+          status: "done",
+          exitCode: 0,
+          output: "file deleted",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+      });
+      const opChecks = result.checks.filter((c) => c.type === "output_plan");
+      expect(opChecks.length).toBe(1);
+      expect(opChecks[0]?.status).toBe("passed");
+    });
+
+    it("should fail when a delete target file still exists", async () => {
+      const result = await engine.validateTask({
+        projectRoot: tempDir,
+        task: {
+          ...baseTask,
+          id: "task_op_06",
+          runId: "run_001",
+          title: "Delete existing file",
+          acceptanceCriteria: [],
+          outputPlan: [
+            {
+              action: "delete",
+              target: "existing.txt",
+              validationMethod: "file_exists",
+            },
+          ],
+        },
+        executorResult: {
+          status: "done",
+          exitCode: 0,
+          output: "deleted",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+      });
+      const opChecks = result.checks.filter((c) => c.type === "output_plan");
+      expect(opChecks.length).toBe(1);
+      expect(opChecks[0]?.status).toBe("failed");
+    });
+
+    it("should not add output_plan checks when outputPlan is not set", async () => {
+      const result = await engine.validateTask({
+        projectRoot: tempDir,
+        task: {
+          ...baseTask,
+          id: "task_op_07",
+          runId: "run_001",
+          title: "No output plan",
+          acceptanceCriteria: [],
+        },
+        executorResult: {
+          status: "done",
+          exitCode: 0,
+          output: "done",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+      });
+      const opChecks = result.checks.filter((c) => c.type === "output_plan");
+      expect(opChecks).toHaveLength(0);
+    });
+
+    it("should not add output_plan checks when outputPlan is empty", async () => {
+      const result = await engine.validateTask({
+        projectRoot: tempDir,
+        task: {
+          ...baseTask,
+          id: "task_op_08",
+          runId: "run_001",
+          title: "Empty output plan",
+          acceptanceCriteria: [],
+          outputPlan: [],
+        },
+        executorResult: {
+          status: "done",
+          exitCode: 0,
+          output: "done",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+      });
+      const opChecks = result.checks.filter((c) => c.type === "output_plan");
+      expect(opChecks).toHaveLength(0);
+    });
+
+    it("should validate file content method with content check", async () => {
+      await writeTextFile(join(tempDir, "content.md"), "# Heading\n\nSome body text here.");
+      const result = await engine.validateTask({
+        projectRoot: tempDir,
+        task: {
+          ...baseTask,
+          id: "task_op_09",
+          runId: "run_001",
+          title: "Content validation",
+          acceptanceCriteria: [],
+          outputPlan: [
+            {
+              action: "create",
+              target: "content.md",
+              validationMethod: "file_content",
+            },
+          ],
+        },
+        executorResult: {
+          status: "done",
+          exitCode: 0,
+          output: "file created",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+      });
+      const opChecks = result.checks.filter((c) => c.type === "output_plan");
+      expect(opChecks.length).toBe(1);
+      expect(opChecks[0]?.status).toBe("passed");
+    });
+
+    it("should validate multiple output plan items", async () => {
+      await writeTextFile(join(tempDir, "multi-a.txt"), "file a");
+      const result = await engine.validateTask({
+        projectRoot: tempDir,
+        task: {
+          ...baseTask,
+          id: "task_op_10",
+          runId: "run_001",
+          title: "Multi output plan",
+          acceptanceCriteria: [],
+          outputPlan: [
+            {
+              action: "create",
+              target: "multi-a.txt",
+              validationMethod: "file_exists",
+            },
+            {
+              action: "modify",
+              target: "existing.txt",
+              validationMethod: "file_exists",
+            },
+          ],
+        },
+        executorResult: {
+          status: "done",
+          exitCode: 0,
+          output: "both done",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+      });
+      const opChecks = result.checks.filter((c) => c.type === "output_plan");
+      expect(opChecks.length).toBe(2);
+      expect(opChecks.every((c) => c.status === "passed")).toBe(true);
+    });
+
+    it("should fail validation when one output plan item fails", async () => {
+      const result = await engine.validateTask({
+        projectRoot: tempDir,
+        task: {
+          ...baseTask,
+          id: "task_op_11",
+          runId: "run_001",
+          title: "Partial output plan",
+          acceptanceCriteria: [],
+          outputPlan: [
+            {
+              action: "create",
+              target: "existing.txt",
+              validationMethod: "file_exists",
+            },
+            {
+              action: "create",
+              target: "missing-output.txt",
+              validationMethod: "file_exists",
+            },
+          ],
+        },
+        executorResult: {
+          status: "done",
+          exitCode: 0,
+          output: "partial",
+          startedAt: now(),
+          finishedAt: now(),
+        },
+      });
+      const opChecks = result.checks.filter((c) => c.type === "output_plan");
+      expect(opChecks.length).toBe(2);
+      const passedCheck = opChecks.find((c) => c.status === "passed");
+      const failedCheck = opChecks.find((c) => c.status === "failed");
+      expect(passedCheck?.path).toBe("existing.txt");
+      expect(failedCheck?.path).toBe("missing-output.txt");
+    });
+  });
 });

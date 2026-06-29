@@ -89,6 +89,15 @@ export class ValidationEngine {
       checks.push(outcomeCheck);
     }
 
+    if (input.task.outputPlan && input.task.outputPlan.length > 0) {
+      const outputPlanChecks = await this.outputPlanValidator.validate(
+        input.task.outputPlan,
+        input.executorResult,
+        input.projectRoot,
+      );
+      checks.push(...outputPlanChecks);
+    }
+
     if (checks.length === 0) {
       return {
         taskId: input.task.id,
