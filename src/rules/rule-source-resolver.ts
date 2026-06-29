@@ -20,9 +20,9 @@ export class RuleSourceResolver {
       "AGENTS.md",
       "CLAUDE.md",
       ".github/copilot-instructions.md",
-      "docs/AI_AGENT_RULES.md",
-      "docs/CODE_QUALITY.md",
-      "docs/DEVELOPMENT.md",
+      "docs/agents/AI_AGENT_RULES.md",
+      "docs/guides/CODE_QUALITY.md",
+      "docs/guides/DEVELOPMENT.md",
       ".cursor/rules/*.mdc",
     ];
     return resolveRuleFiles(commonPatterns, cwd);

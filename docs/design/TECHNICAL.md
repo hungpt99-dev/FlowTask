@@ -1,4 +1,6 @@
-# FlowTask
+# FlowTask — Technical Design
+
+> **Status:** maintained | **Last reviewed:** 2026-06-29 | **Audience:** contributors, maintainers
 
 ## Full Technical Design Document
 
@@ -544,7 +546,7 @@ Example:
 ```json
 {
   "id": "rule_source_001",
-  "path": "docs/AI_AGENT_RULES.md",
+  "path": "docs/agents/AI_AGENT_RULES.md",
   "type": "markdown",
   "required": false
 }
@@ -716,9 +718,9 @@ Stores FlowTask configuration. The `logging.maxInMemoryLines` uses a ring buffer
       ".flowtask/rules/*.md",
       "AGENTS.md",
       "CLAUDE.md",
-      "docs/AI_AGENT_RULES.md",
-      "docs/CODE_QUALITY.md",
-      "docs/DEVELOPMENT.md",
+      "docs/agents/AI_AGENT_RULES.md",
+      "docs/guides/CODE_QUALITY.md",
+      "docs/guides/DEVELOPMENT.md",
       ".cursor/rules/*.mdc",
       ".github/copilot-instructions.md"
     ],
@@ -958,7 +960,7 @@ The run should keep the exact rule context that was used.
 
 ...
 
-## Source: docs/AI_AGENT_RULES.md
+## Source: docs/agents/AI_AGENT_RULES.md
 
 ...
 
@@ -1762,8 +1764,8 @@ and existing project rule files:
 ```text
 AGENTS.md
 CLAUDE.md
-docs/AI_AGENT_RULES.md
-docs/CODE_QUALITY.md
+docs/agents/AI_AGENT_RULES.md
+docs/guides/CODE_QUALITY.md
 .cursor/rules/*.mdc
 .github/copilot-instructions.md
 ```
@@ -1778,8 +1780,8 @@ Example config:
       ".flowtask/rules/*.md",
       "AGENTS.md",
       "CLAUDE.md",
-      "docs/AI_AGENT_RULES.md",
-      "docs/CODE_QUALITY.md",
+      "docs/agents/AI_AGENT_RULES.md",
+      "docs/guides/CODE_QUALITY.md",
       ".cursor/rules/*.mdc",
       ".github/copilot-instructions.md"
     ],

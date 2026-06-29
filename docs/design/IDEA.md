@@ -1,4 +1,6 @@
-# FlowTask
+# FlowTask — Product Concept
+
+> **Status:** maintained | **Last reviewed:** 2026-06-29 | **Audience:** contributors, maintainers
 
 ## Full Product Idea Document
 
@@ -537,10 +539,10 @@ AGENTS.md
 CLAUDE.md
 .cursor/rules/*.mdc
 .github/copilot-instructions.md
-docs/AI_AGENT_RULES.md
-docs/CODE_QUALITY.md
-docs/CONTRIBUTING.md
-docs/DEVELOPMENT.md
+docs/agents/AI_AGENT_RULES.md
+docs/guides/CODE_QUALITY.md
+docs/guides/CONTRIBUTING.md
+docs/guides/DEVELOPMENT.md
 ```
 
 FlowTask allows users to configure where to read rules from.
@@ -552,8 +554,8 @@ FlowTask reads:
 - .flowtask/rules/*.md
 - AGENTS.md
 - CLAUDE.md
-- docs/AI_AGENT_RULES.md
-- docs/CODE_QUALITY.md
+- docs/agents/AI_AGENT_RULES.md
+- docs/guides/CODE_QUALITY.md
 - .cursor/rules/*.mdc
 ```
 

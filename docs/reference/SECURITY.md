@@ -1,5 +1,7 @@
 # Security
 
+> **Status:** maintained | **Last reviewed:** 2026-06-29 | **Audience:** users
+
 ## Reporting Vulnerabilities
 
 Report security issues by opening a GitHub issue with the `security` label.

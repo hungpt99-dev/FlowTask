@@ -1,5 +1,7 @@
 # Development Guide
 
+> **Status:** maintained | **Last reviewed:** 2026-06-29 | **Audience:** contributors
+
 ## Prerequisites
 
 - Node.js 22+

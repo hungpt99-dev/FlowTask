@@ -1,5 +1,7 @@
 # AiValidator Design
 
+> **Status:** implemented | **Last reviewed:** 2026-06-29 | **Audience:** contributors
+
 ## 1. Interface
 
 ```typescript

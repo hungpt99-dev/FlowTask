@@ -7,54 +7,10 @@ globs: ["src/**/*.ts", "tests/**/*.ts"]
 
 ## Must Read First
 
-- Read `docs/IDEA.MD` and `docs/TECHNICAL.MD` before making changes.
-- Read `docs/AI_AGENT_RULES.md` for AI agent behavior guidelines.
-- Read `docs/CODE_QUALITY.md` for quality requirements.
-- Read `README.md` for current project status.
+- `README.md` — Project overview
+- `docs/agents/AI_AGENT_RULES.md` — All AI agent rules (single source of truth)
+- `docs/design/IDEA.md` — Product concept
+- `docs/design/TECHNICAL.md` — Technical architecture
+- `docs/README.md` — Documentation index
 
-## TypeScript Standards
-
-- Strict TypeScript only. No `any` types.
-- Use `zod` for schema validation.
-- Named exports only (no default exports).
-- Use `path.join` for file paths (cross-platform).
-- Use `path.isAbsolute` (not `startsWith("/")`).
-- Use `getShell()` from `src/utils/shell.ts` (not hardcoded `"sh"`).
-- Use `spawn` instead of `exec` for long-running commands.
-- Use atomic writes for state files.
-
-## Do Not
-
-- Do not implement full runtime logic in foundation setup.
-- Do not create databases.
-- Do not create web UIs.
-- Do not add unnecessary dependencies.
-- Do not skip tests.
-- Do not bypass safety/validation rules.
-- Do not mark task done without validation evidence.
-- Do not hardcode Unix paths.
-
-## Testing
-
-- Write tests for all new code.
-- Use `testDir` from `tests/setup.ts` (not hardcoded `/tmp`).
-- Tests must pass before marking work complete.
-- Run `pnpm quality` before committing.
-
-## Architecture
-
-- CLI commands must be thin — no business logic in CLI files.
-- Core logic lives in `src/core/`, `src/validation/`, `src/executor/`, etc.
-- Keep modules small and focused.
-
-## Planner Modes
-
-- `simple` — always uses fixed 7-task template, never calls AI planner
-- `ai` — uses AI planner, fails if output is invalid after retry
-- `auto` — tries AI planner, falls back to simple if invalid (default)
-
-## AI Planner Contract
-
-The AI planner must return **only JSON** — no markdown, no explanation, no code fences.
-The first character must be `{` and the last must be `}`.
-FlowTask extracts JSON from raw, fenced, or embedded formats. Invalid output triggers a single repair retry, then fallback (auto) or failure (ai).
+For code standards, planner modes, and validation rules, see `docs/agents/AI_AGENT_RULES.md`.

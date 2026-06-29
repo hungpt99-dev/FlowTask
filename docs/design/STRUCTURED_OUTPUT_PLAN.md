@@ -1,5 +1,7 @@
 # Structured Output Plan
 
+> **Status:** implemented | **Last reviewed:** 2026-06-29 | **Audience:** contributors
+
 ## 1. Overview
 
 A structured output plan defines **what a task or step should produce** — files, artifacts, configs, reports — with explicit action type (`create`, `modify`, `delete`), validation method, and acceptance criteria. This replaces free-text `expectedResult` with a machine-verifiable list of expected outputs.

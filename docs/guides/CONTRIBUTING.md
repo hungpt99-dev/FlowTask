@@ -1,5 +1,7 @@
 # Contributing
 
+> **Status:** maintained | **Last reviewed:** 2026-06-29 | **Audience:** contributors
+
 ## How to Contribute
 
 1. Fork the repository.

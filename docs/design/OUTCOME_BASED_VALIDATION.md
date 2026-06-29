@@ -1,5 +1,7 @@
 # Outcome-Based Validation Requirements
 
+> **Status:** implemented | **Last reviewed:** 2026-06-29 | **Audience:** contributors
+
 ## 1. Problem Statement
 
 Current validation is file/process-based — it checks whether the executor process exited with code 0, whether files exist on disk, and whether custom validation commands pass. It has no understanding of **what outcome was expected** for a given task.

@@ -1,5 +1,7 @@
 # Step Editing and Approval Feature Design
 
+> **Status:** implemented | **Last reviewed:** 2026-06-29 | **Audience:** contributors
+
 ## Overview
 
 Add step-level editing, approval (accept/deny), and auto-bypass modes to FlowTask. Currently, tasks are flat atomic units with no sub-steps, and the approval system (`waiting_approval` status, `ApprovalManager`, `manual` mode) exists in schema/classes but is **never wired into the execution lifecycle**.

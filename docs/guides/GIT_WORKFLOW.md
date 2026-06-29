@@ -1,5 +1,7 @@
 # Git Workflow
 
+> **Status:** maintained | **Last reviewed:** 2026-06-29 | **Audience:** contributors
+
 ## Branch Strategy
 
 - `main` — stable, release-ready

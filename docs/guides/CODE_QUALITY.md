@@ -1,5 +1,7 @@
 # Code Quality Standards
 
+> **Status:** maintained | **Last reviewed:** 2026-06-29 | **Audience:** contributors
+
 ## TypeScript
 
 - Strict mode enabled in `tsconfig.json`.

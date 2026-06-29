@@ -2,52 +2,11 @@
 
 You are working on FlowTask, a local-first AI task runtime CLI.
 
-## Before you start
+## Before You Start
 
-1. Read `docs/IDEA.MD` and `docs/TECHNICAL.MD` to understand the full product and technical design.
-2. Follow `docs/AI_AGENT_RULES.md` for AI agent behavior rules.
-3. Follow `docs/CODE_QUALITY.md` for code quality requirements.
+- Read `README.md` for project overview
+- Read `docs/agents/AI_AGENT_RULES.md` for all AI agent rules
+- Read `docs/design/IDEA.md` and `docs/design/TECHNICAL.md` for product and technical design
+- Read `docs/README.md` for the documentation index
 
-## Code Standards
-
-- Use strict TypeScript. No `any` types.
-- Use `zod` for all schema validation.
-- Use named exports (no default exports).
-- Use `path.join` for file paths (never string concatenation).
-- Use `path.isAbsolute` for path detection (not `startsWith("/")`).
-- Use `getShell()` / `getShellCommandFlag()` from `src/utils/shell.ts` for shell commands (not hardcoded `"sh"` or `"-c"`).
-- Use `fast-glob` for glob expansion.
-- Use `child_process.spawn` for long-running commands (not `exec`).
-- Use atomic writes for state files (write to `.tmp` then rename).
-
-## Architecture Rules
-
-- CLI commands must be thin — parse arguments, call services, format output.
-- Business logic lives in `src/core/`, `src/rules/`, `src/planner/`, etc.
-- Keep modules small and focused. One responsibility per module.
-- Do not implement unrelated features.
-- Do not skip tests.
-- Do not remove validation.
-- Do not bypass safety rules.
-- Do not mark tasks as done without validation evidence.
-- Support Windows, macOS, and Linux.
-- Never hardcode Unix-only paths or commands in core logic.
-
-## Planner Modes
-
-- `simple` — always uses 7-task template, never calls AI planner
-- `ai` — uses AI planner, fails if JSON output is invalid after retry
-- `auto` — tries AI planner, falls back to simple if invalid (default)
-
-## AI Planner Rules
-
-The AI planner must return **only JSON**. No markdown, no code fences. The first character must be `{` and the last must be `}`. Raw AI planner output is saved to `.flowtask/runs/<runId>/outputs/` for debugging.
-
-## Validation Rule
-
-Never trust "AI says done". Trust evidence:
-
-- Process exits successfully
-- Required files exist
-- Validation commands pass
-- No dangerous action was detected
+For code standards, planner modes, and validation rules, see `docs/agents/AI_AGENT_RULES.md`.
