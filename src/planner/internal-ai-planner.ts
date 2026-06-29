@@ -12,7 +12,7 @@ import { getEventBus } from "../ui/event-bus.js";
 import { UseCaseDetector } from "../usecase/usecase-detector.js";
 import type { UseCaseDetection } from "../usecase/usecase-types.js";
 import { getUseCaseName } from "../usecase/task-templates.js";
-import { ProjectScanner } from "../context/project-scanner.js";
+import { TaskContextBuilder } from "../context/task-context-builder.js";
 
 const VALID_EXECUTORS = new Set(["shell", "manual", "opencode", "claude", "codex", "aider"]);
 
@@ -65,17 +65,10 @@ export class InternalAiPlanner implements Planner {
     const inputWithUseCase: PlannerInput = { ...input, useCase };
 
     if (!input.projectFilesContext) {
-      const scanner = new ProjectScanner();
-      const { context: scannedContext, matchedFiles } = await scanner.scan(
-        input.projectRoot,
-        input.prompt,
-      );
-      if (scannedContext) {
-        inputWithUseCase.projectFilesContext = scannedContext;
-        console.log(
-          picocolors.dim(`  Project scan: ${matchedFiles.length} file(s) matched prompt keywords`),
-        );
-      }
+      const contextBuilder = new TaskContextBuilder();
+      const taskContext = await contextBuilder.build(input.projectRoot, input.prompt);
+      inputWithUseCase.projectFilesContext = taskContext.contextPack;
+      console.log(picocolors.dim(`  ${contextBuilder.formatSummary(taskContext)}`));
     }
 
     console.log(

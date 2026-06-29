@@ -36,6 +36,7 @@ import { ArtifactManager } from "../core/artifact-manager.js";
 import { WorkflowManager } from "../core/workflow-manager.js";
 import { WorkflowReplanner } from "../core/workflow-replanner.js";
 import { RunLifecycle } from "../core/run-lifecycle.js";
+import path from "node:path";
 import { dbPath } from "../utils/paths.js";
 
 export interface ApiOptions {
@@ -637,6 +638,30 @@ export class FlowTaskAPI {
 
   async saveRunState(runId: string, state: RunState): Promise<void> {
     return this.stateManager.saveRunState(runId, state);
+  }
+
+  // ── Scan / TaskContext ─────────────────────────────
+
+  async getTaskContext(
+    prompt: string,
+    cacheDir?: string,
+  ): Promise<{
+    context: import("../context/task-context-builder.js").TaskContext;
+    summary: string;
+  }> {
+    const { TaskContextBuilder } = await import("../context/task-context-builder.js");
+    const cache = cacheDir ?? path.join(this.rootPath, ".flowtask", "cache");
+    const builder = new TaskContextBuilder({ cacheDir: cache, useCache: true });
+
+    try {
+      const ctx = await builder.build(this.rootPath, prompt);
+      const summary = builder.formatSummary(ctx);
+      return { context: ctx, summary };
+    } catch (err) {
+      throw new Error(
+        `Failed to build TaskContext: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   // ── Info ────────────────────────────────────────────
