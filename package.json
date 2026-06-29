@@ -1,7 +1,7 @@
 {
   "name": "flowtask",
   "version": "0.1.0",
-  "description": "Local-first AI task runtime CLI — turn prompts into visible, validated, resumable AI task flows",
+  "description": "AI workflow orchestrator. Give AI a task. Watch it run.",
   "type": "module",
   "bin": {
     "flowtask": "./dist/index.js"

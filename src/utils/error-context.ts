@@ -123,12 +123,6 @@ function defaultDecisionOptions(category: ErrorCategory): UserDecisionOption[] {
     action: "continue",
     description: "Continue despite the failure",
   };
-  const ignore: UserDecisionOption = {
-    label: "Ignore",
-    action: "ignore",
-    description: "Ignore this error and proceed",
-  };
-
   switch (category) {
     case "timeout":
     case "stuck_process":
@@ -160,7 +154,7 @@ function defaultDecisionOptions(category: ErrorCategory): UserDecisionOption[] {
 
 export function classifyError(
   err: unknown,
-  taskContext?: { taskId?: string; runId?: string },
+  _taskContext?: { taskId?: string; runId?: string },
 ): ErrorContext {
   if (err instanceof Error) {
     const message = err.message;
