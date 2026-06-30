@@ -97,10 +97,58 @@ export async function logsCommand(options: {
   if (logFiles.includes("runtime.log")) {
     const runtime = await logManager.readRuntime(runId);
     if (runtime) {
-      const lines = runtime.trim().split("\n").slice(-10);
+      const lines = runtime.trim().split("\n");
+
+      const startupLines = lines.filter((l) => l.includes("FlowTask startup"));
+      const aiLines = lines.filter((l) => l.includes("AI providers"));
+      const errorLines = lines.filter((l) => l.includes("ERROR"));
+      const healthLines = lines.filter((l) => l.includes("Health check"));
+
+      if (startupLines.length > 0) {
+        console.log(picocolors.cyan("\nStartup:"));
+        console.log(picocolors.dim("─".repeat(60)));
+        for (const line of startupLines) {
+          console.log(`  ${picocolors.green("\u2713")} ${line.replace(/\[[^\]]+\]\s*/, "")}`);
+        }
+      }
+
+      if (aiLines.length > 0) {
+        console.log(picocolors.cyan("\nAI Provider Connectivity:"));
+        console.log(picocolors.dim("─".repeat(60)));
+        for (const line of aiLines) {
+          const clean = line.replace(/\[[^\]]+\]\s*/, "");
+          console.log(
+            `  ${clean.includes("0 ok") ? picocolors.yellow("!") : picocolors.green("\u2713")} ${clean}`,
+          );
+        }
+      }
+
+      if (healthLines.length > 0) {
+        console.log(picocolors.cyan("\nHealth Checks:"));
+        console.log(picocolors.dim("─".repeat(60)));
+        for (const line of healthLines) {
+          const clean = line.replace(/\[[^\]]+\]\s*/, "");
+          const icon = clean.toUpperCase().includes("FAILING")
+            ? picocolors.red("\u2717")
+            : clean.toUpperCase().includes("DEGRADED")
+              ? picocolors.yellow("!")
+              : picocolors.green("\u2713");
+          console.log(`  ${icon} ${clean}`);
+        }
+      }
+
+      if (errorLines.length > 0) {
+        console.log(picocolors.cyan("\nErrors:"));
+        console.log(picocolors.dim("─".repeat(60)));
+        for (const line of errorLines) {
+          console.log(`  ${picocolors.red("\u2717")} ${line.replace(/\[[^\]]+\]\s*/, "")}`);
+        }
+      }
+
+      const recent = lines.slice(-10);
       console.log(picocolors.cyan("\nRecent runtime log entries:"));
       console.log(picocolors.dim("─".repeat(60)));
-      for (const line of lines) {
+      for (const line of recent) {
         const match = line.match(/\[([^\]]+)\]\s*(.+)/);
         if (match) {
           console.log(`  ${picocolors.dim(match[1]!)} ${match[2]}`);
