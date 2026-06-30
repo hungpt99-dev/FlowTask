@@ -114,6 +114,20 @@ describe("Schema validation", () => {
     expect(result.success).toBe(true);
   });
 
+  it("should accept skipValidation in FlowTaskConfigSchema validation config", () => {
+    const result = FlowTaskConfigSchema.safeParse({
+      validation: { skipValidation: true },
+    });
+    expect(result.success).toBe(true);
+    expect(result.data!.validation.skipValidation).toBe(true);
+  });
+
+  it("should have skipValidation optional in FlowTaskConfigSchema", () => {
+    const result = FlowTaskConfigSchema.safeParse({});
+    expect(result.success).toBe(true);
+    expect(result.data!.validation.skipValidation).toBeUndefined();
+  });
+
   it("should validate a correct event", () => {
     const result = FlowTaskEventSchema.safeParse({
       time: new Date().toISOString(),

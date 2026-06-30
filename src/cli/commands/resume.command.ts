@@ -7,7 +7,12 @@ import { ProcessManager } from "../../core/process-manager.js";
 
 export async function resumeCommand(
   runId?: string,
-  options?: { from?: string; skipInterrupted?: boolean; dryRun?: boolean },
+  options?: {
+    from?: string;
+    skipInterrupted?: boolean;
+    dryRun?: boolean;
+    skipValidation?: boolean;
+  },
 ): Promise<void> {
   const rootPath = process.cwd();
   const manager = new ProjectManager();
@@ -92,7 +97,9 @@ export async function resumeCommand(
 
   const project = (await manager.load(rootPath))!;
   const config = await manager.loadConfig(rootPath);
-  const lifecycle = new RunLifecycle(rootPath, project.projectId, config);
+  const lifecycle = new RunLifecycle(rootPath, project.projectId, config, undefined, {
+    skipValidation: options?.skipValidation,
+  });
 
   const resumeTaskId = options?.from;
   const resumeTasks = pendingTasks.filter((t) => !resumeTaskId || t.id === resumeTaskId);

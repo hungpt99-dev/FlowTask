@@ -161,6 +161,32 @@ describe("retryCommand", () => {
     expect(output).toContain("Run not found");
   });
 
+  it("should accept instruction option in dry-run", async () => {
+    try {
+      await retryCommand("task_failed_001", {
+        run: runId,
+        dryRun: true,
+        instruction: "Use semicolons instead of &&",
+      });
+    } catch {
+      // process.exit expected
+    }
+
+    expect(output).toContain("Retry dry-run");
+    expect(output).toContain("Instruction: Use semicolons instead of &&");
+  });
+
+  it("should accept skipValidation option in dry-run", async () => {
+    try {
+      await retryCommand("task_failed_001", { run: runId, dryRun: true, skipValidation: true });
+    } catch {
+      // process.exit expected
+    }
+
+    expect(output).toContain("Retry dry-run");
+    expect(output).toContain("Failed task");
+  });
+
   it("should exit when not initialized", async () => {
     const uninitDir = join(testDir, `not-init-${Date.now()}`);
     mkdirSync(uninitDir, { recursive: true });

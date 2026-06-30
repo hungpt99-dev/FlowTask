@@ -1,5 +1,10 @@
 import { Command } from "commander";
+import picocolors from "picocolors";
+import path from "node:path";
+import { execSync } from "node:child_process";
+import { spawnWithPromise } from "../utils/process.js";
 import { initCommand } from "./commands/init.command.js";
+import { globalInstallFailedError, globalInstallSuccess } from "./errors.js";
 import { runCommand } from "./commands/run.command.js";
 import { statusCommand } from "./commands/status.command.js";
 import { runsCommand } from "./commands/runs.command.js";
@@ -78,6 +83,8 @@ import { pauseCommand } from "./commands/pause.command.js";
 import { graphCommand } from "./commands/graph.command.js";
 import { skipCommand } from "./commands/skip.command.js";
 import { reportCommand } from "./commands/report.command.js";
+import { configureAiCommand } from "./commands/configure.command.js";
+import { healthCheckCommand } from "./commands/healthcheck.js";
 
 const program = new Command();
 
@@ -240,6 +247,7 @@ program
   .argument("[runId]", "Run ID to resume")
   .option("--from <taskId>", "Continue from a specific task ID")
   .option("--skip-interrupted", "Skip interrupted tasks instead of retrying them")
+  .option("--skip-validation", "Skip validation after each task execution")
   .option("--dry-run", "Show what would resume without executing")
   .action(resumeCommand);
 
@@ -253,6 +261,8 @@ program
   .option("--dry-run", "Show retry plan without executing")
   .option("--failed-only", "Retry all failed and interrupted tasks in the run")
   .option("--from <taskId>", "Retry all tasks from this point forward")
+  .option("--skip-validation", "Skip validation after each task execution")
+  .option("--instruction <text>", "Additional instruction to guide the retry execution")
   .action(retryCommand);
 
 program
@@ -565,6 +575,15 @@ program
   });
 
 program
+  .command("healthcheck")
+  .description("Check runtime health status (node, config, providers, logs)")
+  .option("--json", "Output as JSON")
+  .option("--log", "Save results to run logs")
+  .action(async (opts: { json?: boolean; log?: boolean }) => {
+    await healthCheckCommand(opts);
+  });
+
+program
   .command("providers")
   .description("Manage AI providers")
   .addCommand(
@@ -758,7 +777,96 @@ const configCommand = new Command("config")
 
 program.addCommand(configCommand);
 
+const configureCommand = new Command("configure")
+  .description("Configure FlowTask settings interactively")
+  .addCommand(
+    new Command("ai")
+      .description("Configure AI providers interactively")
+      .action(configureAiCommand),
+  );
+
+program.addCommand(configureCommand);
+
 let rawArgs = process.argv.slice(2);
+
+// Handle --global flag for global installation
+const globalFlagIndex = rawArgs.indexOf("--global");
+if (globalFlagIndex !== -1) {
+  rawArgs.splice(globalFlagIndex, 1);
+
+  const rootPath = process.cwd();
+
+  const isGloballyInstalled = await (async () => {
+    try {
+      execSync("command -v flowtask", { stdio: "pipe" });
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+
+  if (isGloballyInstalled) {
+    console.log(picocolors.green("✓ FlowTask is already installed globally"));
+    console.log(picocolors.dim("  Run `flowtask --help` to get started"));
+    console.log(picocolors.dim("  Run `flowtask doctor` to check your environment setup"));
+  } else {
+    const { fileExists } = await import("../utils/fs.js");
+    const hasPnpm = await (async () => {
+      try {
+        execSync("command -v pnpm", { stdio: "pipe" });
+        return true;
+      } catch {
+        return false;
+      }
+    })();
+    const hasPnpmLock = await fileExists(path.join(rootPath, "pnpm-lock.yaml"));
+    const pm = hasPnpm && hasPnpmLock ? "pnpm" : "npm";
+
+    console.log(picocolors.cyan("\nInstalling FlowTask globally..."));
+    console.log(picocolors.dim(`  Package manager: ${pm}`));
+    console.log(picocolors.dim(`  Project root: ${rootPath}`));
+    console.log("");
+
+    const pmToUse = pm;
+    const pnpmCmd = `${pmToUse} add -g .`;
+    const npmCmd = "npm install -g .";
+
+    try {
+      execSync(pnpmCmd, { cwd: rootPath, stdio: "pipe", timeout: 60000 });
+      console.log(globalInstallSuccess(pmToUse));
+    } catch (pnpmErr) {
+      if (pmToUse === "pnpm") {
+        console.log(
+          picocolors.yellow(
+            `  pnpm install failed, falling back to npm (${pnpmErr instanceof Error ? pnpmErr.message : String(pnpmErr)})`,
+          ),
+        );
+        try {
+          execSync(npmCmd, { cwd: rootPath, stdio: "pipe", timeout: 60000 });
+          console.log(globalInstallSuccess("npm"));
+        } catch (npmErr) {
+          console.log(
+            globalInstallFailedError(
+              `pnpm and npm both failed. Last error: ${npmErr instanceof Error ? npmErr.message : String(npmErr)}`,
+            ),
+          );
+          process.exit(1);
+        }
+      } else {
+        console.log(
+          globalInstallFailedError(
+            `npm install failed: ${pnpmErr instanceof Error ? pnpmErr.message : String(pnpmErr)}`,
+          ),
+        );
+        process.exit(1);
+      }
+    }
+  }
+
+  if (rawArgs.length === 0) {
+    process.exit(0);
+  }
+}
 
 if (rawArgs.length === 0 && process.stdin.isTTY) {
   program.help();

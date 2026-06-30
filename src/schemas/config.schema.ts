@@ -170,6 +170,7 @@ export const ValidationProfileSchema = z.enum(["quick", "safe", "full", "custom"
 
 export const ValidationConfigSchema = z.object({
   profile: ValidationProfileSchema.default("safe"),
+  skipValidation: z.boolean().optional(),
   adaptiveValidation: z.boolean().default(true),
   concurrency: z.number().int().min(1).default(1),
   timeoutMs: z.number().int().positive().default(300000),

@@ -1,4 +1,4 @@
-const INJECTION_PATTERNS = /\$\(|`|;(?=\s)|\|\||&&/;
+const INJECTION_PATTERNS = /\$\(|`|;(?=\s)/;
 const MAX_COMMAND_LENGTH = 32_768;
 
 export interface SanitizeResult {

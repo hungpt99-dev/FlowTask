@@ -164,6 +164,34 @@ describe("resumeCommand", () => {
     expect(output).toContain("Running task");
   });
 
+  it("should accept skipValidation option in dry-run", async () => {
+    await runManager.updateRunStatus(runId, "interrupted");
+    await runManager.saveTasks(runId, [
+      {
+        id: "task_skip_001",
+        runId,
+        title: "Skip validation task",
+        status: "pending" as const,
+        executor: "shell",
+        dependsOn: [],
+        acceptanceCriteria: [],
+        retryCount: 0,
+        maxRetries: 2,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    ]);
+
+    try {
+      await resumeCommand(runId, { dryRun: true, skipValidation: true });
+    } catch {
+      // process.exit expected
+    }
+
+    expect(output).toContain("Resume dry-run");
+    expect(output).toContain("Skip validation task");
+  });
+
   it("should exit when not initialized", async () => {
     const uninitDir = join(testDir, `not-init-${Date.now()}`);
     mkdirSync(uninitDir, { recursive: true });

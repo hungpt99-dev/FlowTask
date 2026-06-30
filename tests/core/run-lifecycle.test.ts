@@ -129,5 +129,36 @@ describe("RunLifecycle", () => {
       });
       expect(result.success).toBe(true);
     });
+
+    it("should accept skipValidation via constructor option", async () => {
+      const config = await new ProjectManager().loadConfig(projectDir);
+      const lifecycle = new RunLifecycle(projectDir, projectId, config, undefined, {
+        skipValidation: true,
+      });
+      const result = await lifecycle.executeRun("Constructor skip validation", {
+        mode: "plan-only",
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("should accept skipValidation via config", async () => {
+      const config = await new ProjectManager().loadConfig(projectDir);
+      config.validation!.skipValidation = true;
+      const lifecycle = new RunLifecycle(projectDir, projectId, config);
+      const result = await lifecycle.executeRun("Config skip validation", {
+        mode: "plan-only",
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("should be overridable via setSkipValidation", async () => {
+      const config = await new ProjectManager().loadConfig(projectDir);
+      const lifecycle = new RunLifecycle(projectDir, projectId, config);
+      lifecycle.setSkipValidation(true);
+      const result = await lifecycle.executeRun("SetSkipValidation test", {
+        mode: "plan-only",
+      });
+      expect(result.success).toBe(true);
+    });
   });
 });

@@ -149,11 +149,12 @@ export class FlowTaskAPI {
 
   // ── Project ─────────────────────────────────────────
 
-  async initProject(name?: string, mode?: string): Promise<Project> {
+  async initProject(name?: string, mode?: string, force?: boolean): Promise<Project> {
     return this.projectManager.init(
       this.rootPath,
       name,
       mode as Parameters<ProjectManager["init"]>[2],
+      force,
     );
   }
 
@@ -774,6 +775,7 @@ export class FlowTaskAPI {
       quality?: boolean;
       defaultExecutor?: string;
       approvalMode?: string;
+      skipValidation?: boolean;
     },
   ): Promise<RunResult> {
     return this.withRunLifecycle((lifecycle) => lifecycle.executeRun(prompt, options));
@@ -782,15 +784,23 @@ export class FlowTaskAPI {
   async resumeRun(
     runId: string,
     quality?: boolean,
+    skipValidation?: boolean,
   ): Promise<{ success: boolean; paused: boolean }> {
-    return this.withRunLifecycle((lifecycle) => lifecycle.continueRun(runId, quality));
+    return this.withRunLifecycle((lifecycle) => {
+      if (skipValidation !== undefined) lifecycle.setSkipValidation(skipValidation);
+      return lifecycle.continueRun(runId, quality);
+    });
   }
 
   async retryTask(
     runId: string,
     taskId: string,
+    skipValidation?: boolean,
   ): Promise<boolean | "waiting" | "waiting_input" | "waiting_approval"> {
-    return this.withRunLifecycle((lifecycle) => lifecycle.executeSingleTask(runId, taskId));
+    return this.withRunLifecycle((lifecycle) => {
+      if (skipValidation !== undefined) lifecycle.setSkipValidation(skipValidation);
+      return lifecycle.executeSingleTask(runId, taskId);
+    });
   }
 
   async runQualityGate(

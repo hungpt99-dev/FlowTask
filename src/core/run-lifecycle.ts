@@ -36,6 +36,7 @@ import { getContextDir, getOutputsDir, dbPath } from "../utils/paths.js";
 import { ProjectScanner } from "../context/project-scanner.js";
 import { now } from "../utils/time.js";
 import { commandExists } from "../utils/command-exists.js";
+import { ProviderRegistry } from "../ai/provider-registry.js";
 import path from "node:path";
 import picocolors from "picocolors";
 import { getEventBus } from "../ui/event-bus.js";
@@ -78,10 +79,17 @@ export class RunLifecycle {
     }>
   > = new Map();
 
-  constructor(rootPath: string, projectId: string, config: FlowTaskConfig, planner?: Planner) {
+  constructor(
+    rootPath: string,
+    projectId: string,
+    config: FlowTaskConfig,
+    planner?: Planner,
+    options?: { skipValidation?: boolean },
+  ) {
     this.rootPath = rootPath;
     this.projectId = projectId;
     this.config = config;
+    this.skipValidation = options?.skipValidation ?? config.validation?.skipValidation ?? false;
     this.runManager = new RunManager(rootPath);
     this.stateManager = new StateManager(rootPath);
     this.eventStore = new EventStore(rootPath);
@@ -112,6 +120,10 @@ export class RunLifecycle {
     this.hookManager = new HookManager(rootPath, config.hooks);
   }
 
+  setSkipValidation(skip: boolean): void {
+    this.skipValidation = skip;
+  }
+
   async initDatabase(): Promise<DatabaseManager> {
     const db = await DatabaseManager.create(dbPath(this.rootPath));
     this.databaseManager = db;
@@ -140,7 +152,9 @@ export class RunLifecycle {
   ): Promise<{ run: Run; success: boolean }> {
     const mode = options?.mode ?? "auto";
     const debug = options?.debug ?? false;
-    this.skipValidation = options?.skipValidation ?? false;
+    if (options?.skipValidation !== undefined) {
+      this.skipValidation = options.skipValidation;
+    }
 
     const run = await this.runManager.createRun(this.projectId, prompt, mode);
     await this.eventStore.appendToRun(run.runId, {
@@ -165,6 +179,20 @@ export class RunLifecycle {
     this.eventStore.markRunActive(run.runId);
 
     await this.logManager.writeRuntime(run.runId, `Run started: ${run.title}`);
+    const providerRegistry = new ProviderRegistry(this.config);
+    const allProviders = providerRegistry.listProviders();
+
+    await this.logManager.writeStartup(run.runId, {
+      nodeVersion: process.version,
+      projectMode: this.config.projectMode,
+      configStatus: "loaded",
+      planner: this.config.planner?.provider
+        ? `${this.config.planner.type ?? "internal-ai"} (${this.config.planner.provider})`
+        : undefined,
+      executorCount: Object.keys(this.config.executors ?? {}).length,
+      validationProfile: this.config.validation?.profile ?? "safe",
+      aiProviderCount: allProviders.length,
+    });
     console.log(picocolors.cyan(`\nFlowTask Run: ${run.title}`));
     console.log(picocolors.dim(`Run ID: ${run.runId}`));
     console.log(picocolors.dim(`Mode: ${mode}\n`));
@@ -340,6 +368,9 @@ export class RunLifecycle {
     await this.runManager.savePlan(run.runId, planResult.planMarkdown);
     console.log(picocolors.green(`  Plan created: ${planResult.tasks.length} tasks`));
     await this.hookManager.runAfterPlan({ runId: run.runId, planType: options?.plannerMode });
+
+    // Log AI provider connectivity info (non-blocking)
+    this.logAiConnectivity(run.runId);
 
     if (options?.approvalMode) {
       const mode = options.approvalMode;
@@ -1932,11 +1963,16 @@ export class RunLifecycle {
         const shouldSkipValidation = this.skipValidation || task.skipValidation === true;
 
         if (shouldSkipValidation) {
-          const skipReason = this.skipValidation ? "Skipped by CLI flag" : "Skipped by task config";
+          const skipReason =
+            task.skipValidation === true
+              ? "Skipped by task config"
+              : this.config.validation?.skipValidation
+                ? "Skipped by project config"
+                : "Skipped by CLI flag";
 
           validationResult = {
             taskId: task.id,
-            status: "passed",
+            status: "skipped",
             checks: [
               {
                 type: "process",
@@ -1955,12 +1991,6 @@ export class RunLifecycle {
             task.id,
             `Validation skipped: ${skipReason}`,
           );
-          await this.eventStore.appendToRun(run.runId, {
-            type: "validation_skipped",
-            runId: run.runId,
-            taskId: task.id,
-            details: { reason: skipReason },
-          });
         } else {
           await this.eventStore.appendToRun(run.runId, {
             type: "validation_started",
@@ -1985,8 +2015,14 @@ export class RunLifecycle {
         );
         const adaptiveLabel = hasOutcomeCheck ? "Adaptive validation" : "Validation";
 
+        const eventType =
+          validationResult.status === "passed"
+            ? "validation_passed"
+            : validationResult.status === "skipped"
+              ? "validation_skipped"
+              : "validation_failed";
         await this.eventStore.appendToRun(run.runId, {
-          type: validationResult.status === "passed" ? "validation_passed" : "validation_failed",
+          type: eventType,
           runId: run.runId,
           taskId: task.id,
           details: {
@@ -2013,6 +2049,11 @@ export class RunLifecycle {
             task.id,
             `Validation warning: ${check.message}`,
           );
+        }
+
+        if (validationResult.status === "skipped") {
+          console.log(picocolors.yellow("  Status: done (validation skipped)"));
+          break;
         }
 
         if (validationResult.status === "passed") {
@@ -2408,6 +2449,61 @@ export class RunLifecycle {
 
   async flushLogs(): Promise<void> {
     await this.logManager.flush();
+  }
+
+  private async logAiConnectivity(runId: string): Promise<void> {
+    try {
+      const registry = new ProviderRegistry(this.config);
+      const providers = registry.listProviders();
+      const results: Array<{ provider: string; ok: boolean; message: string; latencyMs?: number }> =
+        [];
+
+      const keyOnly = providers.filter((p) => p.needsApiKey);
+      const noKey = providers.filter((p) => !p.needsApiKey);
+
+      for (const p of noKey) {
+        results.push({ provider: p.name, ok: true, message: "No API key needed" });
+      }
+
+      const checkResults = await Promise.all(
+        keyOnly.map(async (p) => {
+          if (!p.apiKeyAvailable) {
+            return {
+              provider: p.name,
+              ok: false,
+              message: `${p.apiKeyEnv ?? `${p.name.toUpperCase()}_API_KEY`} not set`,
+            };
+          }
+          try {
+            const provider = registry.getProvider(p.name);
+            if (provider.healthCheck) {
+              const health = await provider.healthCheck({ timeoutMs: 3000 });
+              return {
+                provider: p.name,
+                ok: health.ok,
+                message: health.message,
+                latencyMs: health.latencyMs,
+              };
+            }
+            return { provider: p.name, ok: true, message: "No health check available" };
+          } catch (err) {
+            return {
+              provider: p.name,
+              ok: false,
+              message: err instanceof Error ? err.message : String(err),
+            };
+          }
+        }),
+      );
+
+      results.push(...checkResults);
+      await this.logManager.writeAiConnectivity(runId, results);
+    } catch (err) {
+      await this.logManager.writeRuntime(
+        runId,
+        `AI connectivity check failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   async runQualityGate(
