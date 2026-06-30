@@ -11,6 +11,7 @@ export interface ServerOptions {
   rootPath?: string;
   staticDir?: string;
   allowPublicExposure?: boolean;
+  corsOrigins?: string;
 }
 
 interface SseConnection {
@@ -21,6 +22,19 @@ interface SseConnection {
 const DEFAULT_PORT = 3487;
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_STATIC_DIR = "dist/ui";
+
+const SPA_ROUTES = new Set([
+  "/",
+  "/workflow-editor",
+  "/workflow-graph",
+  "/orchestrator",
+  "/ai-providers",
+  "/run-monitor",
+  "/workflows",
+  "/runs",
+  "/config",
+  "/settings",
+]);
 
 export class LocalServer {
   private options: Required<ServerOptions>;
@@ -36,6 +50,7 @@ export class LocalServer {
       rootPath: options.rootPath ?? process.cwd(),
       staticDir: options.staticDir ?? DEFAULT_STATIC_DIR,
       allowPublicExposure: options.allowPublicExposure ?? false,
+      corsOrigins: options.corsOrigins ?? "*",
     };
     this.api = new FlowTaskAPI({ rootPath: this.options.rootPath });
     this.server = http.createServer((req, res) => this.handleRequest(req, res));
@@ -80,7 +95,54 @@ export class LocalServer {
     return this.options.host;
   }
 
+  private setCorsHeaders(res: http.ServerResponse): void {
+    res.setHeader("Access-Control-Allow-Origin", this.options.corsOrigins);
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.setHeader("Access-Control-Max-Age", "86400");
+  }
+
+  private sendJson(res: http.ServerResponse, status: number, data: unknown): void {
+    if (!res.headersSent) {
+      this.setCorsHeaders(res);
+      res.writeHead(status, { "Content-Type": "application/json" });
+    }
+    res.end(JSON.stringify(data));
+  }
+
+  private sendError(res: http.ServerResponse, status: number, message: string): void {
+    this.sendJson(res, status, { error: message });
+  }
+
+  private readBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
+    return new Promise((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      req.on("data", (chunk: Buffer) => chunks.push(chunk));
+      req.on("end", () => {
+        const raw = Buffer.concat(chunks).toString("utf-8");
+        if (!raw) {
+          resolve({});
+          return;
+        }
+        try {
+          resolve(JSON.parse(raw) as Record<string, unknown>);
+        } catch {
+          reject(new Error("Invalid JSON body"));
+        }
+      });
+      req.on("error", reject);
+    });
+  }
+
   private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    this.setCorsHeaders(res);
+
+    if (req.method === "OPTIONS") {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
     try {
       const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
       const pathname = url.pathname;
@@ -92,17 +154,49 @@ export class LocalServer {
       }
 
       if (pathname === "/health") {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ status: "ok" }));
+        this.sendJson(res, 200, { status: "ok" });
         return;
       }
 
-      await this.serveStatic(pathname === "/" ? "/index.html" : pathname, res);
-    } catch {
-      if (!res.headersSent) {
-        res.writeHead(500, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Internal server error" }));
+      const served = await this.serveStatic(pathname === "/" ? "/index.html" : pathname, res);
+      if (!served) {
+        await this.serveSpaFallback(res);
       }
+    } catch (err) {
+      if (!res.headersSent) {
+        const message = err instanceof Error ? err.message : "Internal server error";
+        this.sendError(res, 500, message);
+      }
+    }
+  }
+
+  private isSpaRoute(pathname: string): boolean {
+    if (SPA_ROUTES.has(pathname)) return true;
+    if (/^\/[a-z-]+(\/[a-z0-9-]+)?$/.test(pathname)) {
+      const ext = path.extname(pathname);
+      if (!ext || ext === ".html") return true;
+    }
+    return false;
+  }
+
+  private async serveSpaFallback(res: http.ServerResponse): Promise<void> {
+    const indexPath = path.join(this.getStaticDir(), "index.html");
+    try {
+      const stat = await fs.promises.stat(indexPath);
+      if (!stat.isFile()) throw new Error("Not a file");
+
+      res.writeHead(200, {
+        "Content-Type": "text/html",
+        "Cache-Control": "no-cache",
+      });
+      const stream = fs.createReadStream(indexPath);
+      stream.pipe(res);
+      stream.on("error", () => {
+        res.writeHead(500);
+        res.end("Internal error");
+      });
+    } catch {
+      this.sendError(res, 404, "Not found");
     }
   }
 
@@ -121,38 +215,6 @@ export class LocalServer {
     const { parts } = this.parsePath(pathname);
     const [, ...rest] = parts;
 
-    res.setHeader("Content-Type", "application/json");
-
-    const sendJson = (status: number, data: unknown) => {
-      if (!res.headersSent) {
-        res.writeHead(status);
-      }
-      res.end(JSON.stringify(data));
-    };
-
-    const sendError = (status: number, message: string) => {
-      sendJson(status, { error: message });
-    };
-
-    const readBody = (): Promise<Record<string, unknown>> =>
-      new Promise((resolve, reject) => {
-        const chunks: Buffer[] = [];
-        req.on("data", (chunk: Buffer) => chunks.push(chunk));
-        req.on("end", () => {
-          const raw = Buffer.concat(chunks).toString("utf-8");
-          if (!raw) {
-            resolve({});
-            return;
-          }
-          try {
-            resolve(JSON.parse(raw) as Record<string, unknown>);
-          } catch {
-            reject(new Error("Invalid JSON body"));
-          }
-        });
-        req.on("error", reject);
-      });
-
     try {
       // ── SSE event stream ──────────────────────────────
       if (rest.length >= 2 && rest[0] === "runs" && rest[2] === "events" && method === "GET") {
@@ -166,11 +228,11 @@ export class LocalServer {
         // GET /api/status
         case "status": {
           if (method !== "GET") {
-            sendError(405, "Method not allowed");
+            this.sendError(res, 405, "Method not allowed");
             return;
           }
           const status = await this.api.getProjectStatus();
-          sendJson(200, status);
+          this.sendJson(res, 200, status);
           return;
         }
 
@@ -179,11 +241,11 @@ export class LocalServer {
           if (rest.length === 1) {
             if (method === "GET") {
               const config = await this.api.getConfig();
-              sendJson(200, config);
+              this.sendJson(res, 200, config);
               return;
             }
             if (method === "PUT") {
-              const body = await readBody();
+              const body = await this.readBody(req);
               const { atomicWriteJsonFile, readJsonFile, fileExists } =
                 await import("../utils/fs.js");
               const { configJsonPath } = await import("../utils/paths.js");
@@ -194,44 +256,44 @@ export class LocalServer {
               }
               const merged = { ...config, ...body };
               await atomicWriteJsonFile(cPath, merged);
-              sendJson(200, { ok: true });
+              this.sendJson(res, 200, { ok: true });
               return;
             }
-            sendError(405, "Method not allowed");
+            this.sendError(res, 405, "Method not allowed");
             return;
           }
           if (rest.length === 2 && rest[1] === "keys" && method === "GET") {
             const keys = await this.api.listConfigKeys();
-            sendJson(200, keys);
+            this.sendJson(res, 200, keys);
             return;
           }
-          sendError(404, "Not found");
+          this.sendError(res, 404, "Not found");
           return;
         }
 
         // GET /api/providers
         case "providers": {
           if (method !== "GET") {
-            sendError(405, "Method not allowed");
+            this.sendError(res, 405, "Method not allowed");
             return;
           }
           const config = await this.api.getConfig();
-          sendJson(200, config.ai?.providers ?? {});
+          this.sendJson(res, 200, config.ai?.providers ?? {});
           return;
         }
 
         // /api/runs/*
         case "runs": {
-          await this.handleRunRoutes(method, rest, url, req, res, sendJson, sendError, readBody);
+          await this.handleRunRoutes(method, rest, url, req, res);
           return;
         }
 
         default:
-          sendError(404, `Unknown API endpoint: ${pathname}`);
+          this.sendError(res, 404, `Unknown API endpoint: ${pathname}`);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      sendError(500, message);
+      this.sendError(res, 500, message);
     }
   }
 
@@ -241,23 +303,20 @@ export class LocalServer {
     url: URL,
     req: http.IncomingMessage,
     res: http.ServerResponse,
-    sendJson: (status: number, data: unknown) => void,
-    sendError: (status: number, message: string) => void,
-    readBody: () => Promise<Record<string, unknown>>,
   ): Promise<void> {
     // GET /api/runs
     if (rest.length === 1 && method === "GET") {
       const runs = await this.api.listRuns();
-      sendJson(200, runs);
+      this.sendJson(res, 200, runs);
       return;
     }
 
     // POST /api/runs
     if (rest.length === 1 && method === "POST") {
-      const body = await readBody();
+      const body = await this.readBody(req);
       const project = await this.api.loadProject();
       if (!project) {
-        sendError(400, "Project not initialized");
+        this.sendError(res, 400, "Project not initialized");
         return;
       }
       const run = await this.api.createRun(
@@ -265,12 +324,12 @@ export class LocalServer {
         (body.title as string) ?? "Web UI Run",
         body.mode as RunMode | undefined,
       );
-      sendJson(201, run);
+      this.sendJson(res, 201, run);
       return;
     }
 
     if (rest.length < 2) {
-      sendError(404, "Not found");
+      this.sendError(res, 404, "Not found");
       return;
     }
 
@@ -280,37 +339,37 @@ export class LocalServer {
     if (rest.length === 2 && method === "GET") {
       const run = await this.api.loadRun(runId);
       if (!run) {
-        sendError(404, "Run not found");
+        this.sendError(res, 404, "Run not found");
         return;
       }
-      sendJson(200, run);
+      this.sendJson(res, 200, run);
       return;
     }
 
     // POST /api/runs/:id/start
     if (rest.length === 3 && rest[2] === "start" && method === "POST") {
-      const body = await readBody();
+      const body = await this.readBody(req);
       const prompt = (body.prompt as string) ?? "";
       const result = await this.api.executeRun(prompt, {
         mode: body.mode as RunMode | undefined,
         plannerMode: body.plannerMode as PlannerMode | undefined,
       });
-      sendJson(200, result);
+      this.sendJson(res, 200, result);
       return;
     }
 
     // POST /api/runs/:id/cancel
     if (rest.length === 3 && rest[2] === "cancel" && method === "POST") {
       const run = await this.api.cancelRun(runId);
-      sendJson(200, run);
+      this.sendJson(res, 200, run);
       return;
     }
 
     // POST /api/runs/:id/resume
     if (rest.length === 3 && rest[2] === "resume" && method === "POST") {
-      const body = await readBody();
+      const body = await this.readBody(req);
       const result = await this.api.resumeRun(runId, !!body.quality, !!body.skipValidation);
-      sendJson(200, { success: result.success, paused: result.paused });
+      this.sendJson(res, 200, { success: result.success, paused: result.paused });
       return;
     }
 
@@ -318,12 +377,12 @@ export class LocalServer {
     // POST /api/runs/:id/input
     if (rest.length === 3 && rest[2] === "input") {
       if (method === "POST") {
-        const body = await readBody();
+        const body = await this.readBody(req);
         const text = body.text as string | undefined;
         const taskId = body.taskId as string | undefined;
         const stepId = body.stepId as string | undefined;
         if (!text) {
-          sendError(400, "Missing text field");
+          this.sendError(res, 400, "Missing text field");
           return;
         }
         await this.api.appendEvent(runId, {
@@ -345,24 +404,24 @@ export class LocalServer {
             text,
           }) + "\n",
         );
-        sendJson(200, { ok: true });
+        this.sendJson(res, 200, { ok: true });
         return;
       }
-      sendError(405, "Method not allowed");
+      this.sendError(res, 405, "Method not allowed");
       return;
     }
 
     // GET /api/runs/:id/logs
     if (rest.length === 3 && rest[2] === "logs" && method === "GET") {
       const runLog = await this.api.readRuntimeLog(runId);
-      sendJson(200, { log: runLog });
+      this.sendJson(res, 200, { log: runLog });
       return;
     }
 
     // GET /api/runs/:id/tasks
     if (rest.length === 3 && rest[2] === "tasks" && method === "GET") {
       const tasks = await this.api.loadTasks(runId);
-      sendJson(200, tasks);
+      this.sendJson(res, 200, tasks);
       return;
     }
 
@@ -370,24 +429,24 @@ export class LocalServer {
     if (rest.length === 4 && rest[2] === "tasks" && method === "GET") {
       const task = await this.api.getTask(runId, rest[3]!);
       if (!task) {
-        sendError(404, "Task not found");
+        this.sendError(res, 404, "Task not found");
         return;
       }
-      sendJson(200, task);
+      this.sendJson(res, 200, task);
       return;
     }
 
     // GET /api/runs/:id/timeline
     if (rest.length === 3 && rest[2] === "timeline" && method === "GET") {
       const timeline = await this.api.getTimeline(runId);
-      sendJson(200, timeline);
+      this.sendJson(res, 200, timeline);
       return;
     }
 
     // GET /api/runs/:id/workflow
     if (rest.length === 3 && rest[2] === "workflow" && method === "GET") {
       const workflow = await this.api.exportWorkflow(runId);
-      sendJson(200, workflow);
+      this.sendJson(res, 200, workflow);
       return;
     }
 
@@ -396,11 +455,18 @@ export class LocalServer {
       const timeline = await this.api.getTimeline(runId);
       const run = await this.api.loadRun(runId);
       const tasks = await this.api.loadTasks(runId);
-      sendJson(200, { timeline, run, tasks });
+      this.sendJson(res, 200, { timeline, run, tasks });
       return;
     }
 
-    sendError(404, `Unknown run endpoint: /api/runs/${rest.slice(2).join("/")}`);
+    // GET /api/runs/:id/artifacts
+    if (rest.length === 3 && rest[2] === "artifacts" && method === "GET") {
+      const artifacts = await this.api.listArtifactsByRun(runId);
+      this.sendJson(res, 200, artifacts);
+      return;
+    }
+
+    this.sendError(res, 404, `Unknown run endpoint: /api/runs/${rest.slice(2).join("/")}`);
   }
 
   private handleSse(runId: string, req: http.IncomingMessage, res: http.ServerResponse): void {
@@ -445,43 +511,45 @@ export class LocalServer {
     ".map": "application/json",
   };
 
-  private async serveStatic(urlPath: string, res: http.ServerResponse): Promise<void> {
+  private async serveStatic(urlPath: string, res: http.ServerResponse): Promise<boolean> {
     const safePath = path.normalize(urlPath).replace(/^(\.\.[/\\])+/, "");
     const fullPath = path.join(this.getStaticDir(), safePath);
 
     if (!fullPath.startsWith(this.getStaticDir())) {
-      res.writeHead(403);
-      res.end("Forbidden");
-      return;
+      if (!res.headersSent) {
+        this.sendError(res, 403, "Forbidden");
+      }
+      return false;
     }
 
     try {
       const stat = await fs.promises.stat(fullPath);
       if (!stat.isFile()) {
-        throw new Error("Not a file");
+        return false;
       }
 
       const ext = path.extname(fullPath).toLowerCase();
       const mimeType = this.mimeTypes[ext] ?? "application/octet-stream";
 
-      if (ext === ".html" || ext === ".js") {
-        res.writeHead(200, {
-          "Content-Type": mimeType,
-          "Cache-Control": "no-cache",
-        });
-      } else {
-        res.writeHead(200, { "Content-Type": mimeType });
+      if (!res.headersSent) {
+        if (ext === ".html" || ext === ".js") {
+          res.writeHead(200, {
+            "Content-Type": mimeType,
+            "Cache-Control": "no-cache",
+          });
+        } else {
+          res.writeHead(200, { "Content-Type": mimeType });
+        }
       }
 
       const stream = fs.createReadStream(fullPath);
       stream.pipe(res);
       stream.on("error", () => {
-        res.writeHead(500);
-        res.end("Internal error");
+        res.destroy();
       });
+      return true;
     } catch {
-      res.writeHead(404);
-      res.end("Not found");
+      return false;
     }
   }
 }

@@ -15,6 +15,7 @@ import { RunMonitor } from "./components/RunMonitor.js";
 import type { RunIndexEntry } from "../schemas/run.schema.js";
 import { WorkflowGraph } from "./components/WorkflowGraph.js";
 import type { TaskDisplayStatus } from "./components/WorkflowGraph.js";
+import { WorkflowManager } from "./components/WorkflowManager.js";
 import type { WorkflowTask } from "../schemas/workflow.schema.js";
 
 interface OrchestratorConfigData {
@@ -202,6 +203,7 @@ const NAV_ITEMS: NavItem[] = [
   { path: "/ai-providers", label: "AI Providers" },
   { path: "/run-monitor", label: "Run Monitor" },
   { path: "/workflow-graph", label: "Workflow Graph" },
+  { path: "/workflows", label: "Workflow Manager" },
 ];
 
 const SIDEBAR_WIDTH = 200;
@@ -354,6 +356,7 @@ function AppLayout() {
           <Route path="/ai-providers" element={<AIProvidersPage />} />
           <Route path="/run-monitor" element={<RunMonitorPage />} />
           <Route path="/workflow-graph" element={<WorkflowGraphPage />} />
+          <Route path="/workflows" element={<WorkflowManagerPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
@@ -565,14 +568,80 @@ function AIProvidersPage() {
 }
 
 function RunMonitorPage() {
+  const sseUrl =
+    typeof window !== "undefined"
+      ? `${window.location.protocol}//${window.location.hostname}:${window.location.port || 3487}/api`
+      : undefined;
+
+  const handleLoadRun = useCallback(
+    async (runId: string) => {
+      try {
+        const base = sseUrl?.replace(/\/api$/, "") ?? "";
+        const [runRes, tasksRes, stepsRes, eventsRes] = await Promise.all([
+          fetch(`${base}/api/runs/${runId}`),
+          fetch(`${base}/api/runs/${runId}/tasks`),
+          fetch(`${base}/api/runs/${runId}/summary`),
+          fetch(`${base}/api/runs/${runId}/timeline`),
+        ]);
+        const run = await runRes.json();
+        const tasks = await tasksRes.json();
+        const summary = await stepsRes.json();
+        const events = await eventsRes.json();
+        return {
+          run,
+          tasks,
+          steps: summary.run?.steps ?? {},
+          events,
+        };
+      } catch {
+        throw new Error("Failed to load run details from server");
+      }
+    },
+    [sseUrl],
+  );
+
+  const handleCancelRun = useCallback(
+    async (runId: string) => {
+      const base = sseUrl?.replace(/\/api$/, "") ?? "";
+      await fetch(`${base}/api/runs/${runId}/cancel`, { method: "POST" });
+    },
+    [sseUrl],
+  );
+
+  const handleListArtifacts = useCallback(
+    async (runId: string) => {
+      const base = sseUrl?.replace(/\/api$/, "") ?? "";
+      const res = await fetch(`${base}/api/runs/${runId}/artifacts`);
+      if (!res.ok) return [];
+      return res.json();
+    },
+    [sseUrl],
+  );
+
   return (
     <div role="region" aria-label="Run monitor page" style={{ height: "calc(100vh - 100px)" }}>
       <h1 style={{ fontSize: "20px", fontWeight: 700, color: "#111827", margin: "0 0 20px" }}>
         Run Monitor
       </h1>
       <div style={{ height: "calc(100% - 40px)" }}>
-        <RunMonitor runs={[]} pollIntervalMs={3000} />
+        <RunMonitor
+          runs={[]}
+          pollIntervalMs={3000}
+          sseUrl={sseUrl}
+          onLoadRun={handleLoadRun}
+          onCancelRun={handleCancelRun}
+          onListArtifacts={handleListArtifacts}
+        />
       </div>
+    </div>
+  );
+}
+
+function WorkflowManagerPage() {
+  const { state } = useAppState();
+  return (
+    <div role="region" aria-label="Workflow manager page">
+      <WorkflowManager workflows={state.runs} currentWorkflow={state.workflow} />
     </div>
   );
 }

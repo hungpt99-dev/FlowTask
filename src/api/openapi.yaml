@@ -1,0 +1,3079 @@
+openapi: "3.0.3"
+info:
+  title: FlowTask API
+  version: "1.0.0"
+  description: |
+    FlowTask is a local-first AI workflow orchestrator. This API provides
+    programmatic access to manage projects, workflows, runs, tasks, steps,
+    artifacts, logs, events, and real-time monitoring.
+
+    Base URL: `http://localhost:3487/api/v1`
+    The legacy `/api/` prefix (without version) is also supported.
+
+    All endpoints return JSON. Authentication is not built in; bind to
+    `127.0.0.1` (default) for local-only access. Set `allowPublicExposure`
+    only behind a TLS-terminating reverse proxy with authentication.
+  contact:
+    name: FlowTask Project
+    url: https://github.com/thanhhung-98/FlowTask
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:3487/api/v1
+    description: Local development server
+  - url: http://localhost:3487/api
+    description: Legacy API prefix (no version)
+
+paths:
+  # ─── Health ─────────────────────────────────────────────────────────
+  /health:
+    get:
+      operationId: healthCheck
+      summary: Health check
+      description: Returns the server health status. Always returns 200 when the server is running.
+      tags: [Health]
+      responses:
+        "200":
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              example:
+                status: ok
+                version: 1.0.0
+                uptime: 12345
+
+  # ─── Capability Discovery ──────────────────────────────────────────
+  /:
+    get:
+      operationId: getApiInfo
+      summary: API information and capability discovery
+      description: Returns available API version, capabilities, and endpoints summary.
+      tags: [Discovery]
+      responses:
+        "200":
+          description: API capabilities
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiInfo"
+
+  # ─── Project ───────────────────────────────────────────────────────
+  /status:
+    get:
+      operationId: getProjectStatus
+      summary: Get project and server status
+      description: Returns whether the project is initialized, plus project, state, config, and DB status.
+      tags: [Project]
+      responses:
+        "200":
+          description: Project status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectStatus"
+
+  /init:
+    post:
+      operationId: initProject
+      summary: Initialize a FlowTask project
+      description: Creates `.flowtask/` directory structure with project.json, config.json, state.json, and rule defaults.
+      tags: [Project]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: Project name
+                  example: "My Project"
+                mode:
+                  type: string
+                  enum: [development, writing, research, general]
+                  description: Project mode
+                  default: development
+                force:
+                  type: boolean
+                  description: Reinitialize if already initialized
+                  default: false
+      responses:
+        "201":
+          description: Project initialized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+
+  # ─── Config Management ─────────────────────────────────────────────
+  /config:
+    get:
+      operationId: getConfig
+      summary: Get full configuration
+      tags: [Config]
+      responses:
+        "200":
+          description: Current configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlowTaskConfig"
+    put:
+      operationId: updateConfig
+      summary: Update configuration (merge)
+      description: Merges the provided fields into the existing config file.
+      tags: [Config]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Partial config fields to merge
+      responses:
+        "200":
+          description: Config updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+
+  /config/keys:
+    get:
+      operationId: listConfigKeys
+      summary: List all config key paths
+      tags: [Config]
+      responses:
+        "200":
+          description: Array of dot-notation key paths
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+                example:
+                  - approval.autoApprove
+                  - approval.enabled
+                  - approval.requireFor
+
+  /config/{key}:
+    get:
+      operationId: getConfigValue
+      summary: Get a specific config value by dot-notation key
+      tags: [Config]
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+          example: approval.enabled
+      responses:
+        "200":
+          description: Config value
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  value:
+                    description: The resolved config value
+    put:
+      operationId: setConfigValue
+      summary: Set a specific config value by dot-notation key
+      tags: [Config]
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                value:
+                  description: Value to set
+      responses:
+        "200":
+          description: Value set
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+
+  # ─── Providers ─────────────────────────────────────────────────────
+  /providers:
+    get:
+      operationId: listProviders
+      summary: List configured AI providers
+      tags: [Providers]
+      responses:
+        "200":
+          description: Provider configuration object
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                    model:
+                      type: string
+                    apiKeyEnv:
+                      type: string
+
+  /providers/{name}:
+    get:
+      operationId: getProvider
+      summary: Get provider details including API key availability
+      tags: [Providers]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Provider details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderDetail"
+        "404":
+          description: Provider not found
+
+  /providers/{name}/test:
+    post:
+      operationId: testProvider
+      summary: Test a provider connection
+      tags: [Providers]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Connection test result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  latencyMs:
+                    type: number
+
+  # ─── Runs ──────────────────────────────────────────────────────────
+  /runs:
+    get:
+      operationId: listRuns
+      summary: List all runs
+      tags: [Runs]
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/RunStatus"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
+      responses:
+        "200":
+          description: Array of run summaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RunSummary"
+    post:
+      operationId: createRun
+      summary: Create a new run
+      tags: [Runs]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title:
+                  type: string
+                  description: Run title / prompt
+                  example: "Implement OCR module"
+                mode:
+                  $ref: "#/components/schemas/RunMode"
+                  default: auto
+              example:
+                title: "Implement OCR module"
+                mode: auto
+      responses:
+        "201":
+          description: Run created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /runs/clean:
+    post:
+      operationId: cleanRuns
+      summary: Clean old runs
+      tags: [Runs]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                olderThan:
+                  type: string
+                  description: "e.g. 30d or 12h"
+                  example: 30d
+                status:
+                  $ref: "#/components/schemas/RunStatus"
+                dryRun:
+                  type: boolean
+                  default: false
+      responses:
+        "200":
+          description: Clean result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted:
+                    type: integer
+                  dryRun:
+                    type: boolean
+                  runs:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        runId:
+                          type: string
+                        title:
+                          type: string
+                        status:
+                          type: string
+                        createdAt:
+                          type: string
+                          format: date-time
+
+  /runs/{runId}:
+    get:
+      operationId: getRun
+      summary: Get a single run
+      tags: [Runs]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Run object
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: deleteRun
+      summary: Delete a run
+      tags: [Runs]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Run deleted
+
+  /runs/{runId}/inspect:
+    get:
+      operationId: inspectRun
+      summary: Get full run details (tasks, steps, events, artifacts, checkpoints)
+      tags: [Runs]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Full run inspection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunInspection"
+
+  # ─── Run Control ───────────────────────────────────────────────────
+  /runs/{runId}/start:
+    post:
+      operationId: startRun
+      summary: Start (execute) a run
+      description: Begins execution of tasks for the run. Requires a prompt.
+      tags: [Run Control]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                prompt:
+                  type: string
+                  description: The user prompt to execute
+                mode:
+                  $ref: "#/components/schemas/RunMode"
+                plannerMode:
+                  type: string
+                  enum: [auto, simple, ai]
+                template:
+                  type: string
+                quality:
+                  type: boolean
+                defaultExecutor:
+                  type: string
+                approvalMode:
+                  type: string
+                  enum: [auto, manual, skip]
+                skipValidation:
+                  type: boolean
+              example:
+                prompt: "Implement OCR module for passport scanner"
+                mode: auto
+                plannerMode: auto
+      responses:
+        "200":
+          description: Run execution started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunResult"
+
+  /runs/{runId}/cancel:
+    post:
+      operationId: cancelRun
+      summary: Cancel a running run
+      tags: [Run Control]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Run cancelled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+
+  /runs/{runId}/resume:
+    post:
+      operationId: resumeRun
+      summary: Resume an interrupted or paused run
+      tags: [Run Control]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                quality:
+                  type: boolean
+                skipValidation:
+                  type: boolean
+      responses:
+        "200":
+          description: Resume result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  paused:
+                    type: boolean
+
+  # ─── Tasks ─────────────────────────────────────────────────────────
+  /runs/{runId}/tasks:
+    get:
+      operationId: listTasks
+      summary: List all tasks for a run
+      tags: [Tasks]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/TaskStatus"
+      responses:
+        "200":
+          description: Array of tasks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Task"
+
+  /runs/{runId}/tasks/{taskId}:
+    get:
+      operationId: getTask
+      summary: Get a single task
+      tags: [Tasks]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Task object
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: updateTask
+      summary: Update task properties
+      tags: [Tasks]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                description:
+                  type: string
+                executor:
+                  type: string
+                acceptanceCriteria:
+                  type: array
+                  items:
+                    type: string
+                validation:
+                  $ref: "#/components/schemas/ValidationConfig"
+      responses:
+        "200":
+          description: Updated task
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+
+  /runs/{runId}/tasks/{taskId}/retry:
+    post:
+      operationId: retryTask
+      summary: Retry a failed task
+      tags: [Tasks]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                skipValidation:
+                  type: boolean
+      responses:
+        "200":
+          description: Retry result — boolean or status string
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: boolean
+                  - type: string
+                    enum: [waiting, waiting_input, waiting_approval]
+
+  /runs/{runId}/tasks/{taskId}/approve:
+    post:
+      operationId: approveTask
+      summary: Approve a task waiting for approval
+      tags: [Tasks]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Approved task
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+
+  /runs/{runId}/tasks/{taskId}/deny:
+    post:
+      operationId: denyTask
+      summary: Deny a task waiting for approval
+      tags: [Tasks]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Denied (skipped) task
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+
+  # ─── Steps ─────────────────────────────────────────────────────────
+  /runs/{runId}/tasks/{taskId}/steps:
+    get:
+      operationId: listSteps
+      summary: List steps for a task
+      tags: [Steps]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/StepStatus"
+      responses:
+        "200":
+          description: Array of steps
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Step"
+
+  /runs/{runId}/tasks/{taskId}/steps/{stepId}:
+    get:
+      operationId: getStep
+      summary: Get a single step
+      tags: [Steps]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: stepId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Step object
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Step"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: updateStep
+      summary: Update step properties
+      tags: [Steps]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: stepId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                command:
+                  type: string
+                status:
+                  $ref: "#/components/schemas/StepStatus"
+      responses:
+        "200":
+          description: Updated step
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Step"
+
+  /runs/{runId}/tasks/{taskId}/steps/{stepId}/approve:
+    post:
+      operationId: approveStep
+      summary: Approve a step
+      tags: [Steps]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: stepId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Approved step
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Step"
+
+  /runs/{runId}/tasks/{taskId}/steps/{stepId}/deny:
+    post:
+      operationId: denyStep
+      summary: Deny a step
+      tags: [Steps]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: stepId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Denied step
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Step"
+
+  /runs/{runId}/tasks/{taskId}/steps/approve-all:
+    post:
+      operationId: approveAllSteps
+      summary: Approve all pending steps for a task or entire run
+      tags: [Steps]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: taskId
+          in: path
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Array of approved steps
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Step"
+
+  # ─── Workflow ──────────────────────────────────────────────────────
+  /runs/{runId}/workflow:
+    get:
+      operationId: exportWorkflow
+      summary: Export workflow as YAML/JSON
+      tags: [Workflow]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: skipCompleted
+          in: query
+          required: false
+          schema:
+            type: boolean
+        - name: format
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [json, yaml]
+            default: json
+      responses:
+        "200":
+          description: Workflow export
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  workflow:
+                    $ref: "#/components/schemas/WorkflowFile"
+                  yaml:
+                    type: string
+                  json:
+                    type: string
+
+  /runs/{runId}/workflow/diff:
+    post:
+      operationId: workflowDiff
+      summary: Show diff between current workflow and a file
+      tags: [Workflow]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  description: Path to workflow YAML/JSON file
+      responses:
+        "200":
+          description: Workflow diff
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkflowDiff"
+
+  /runs/{runId}/workflow/apply:
+    post:
+      operationId: workflowApply
+      summary: Apply workflow changes from a file
+      tags: [Workflow]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                force:
+                  type: boolean
+                approved:
+                  type: boolean
+                noConfirm:
+                  type: boolean
+      responses:
+        "200":
+          description: Apply result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplyResult"
+
+  /runs/{runId}/workflow/tasks:
+    post:
+      operationId: workflowAddTask
+      summary: Add a new task to the workflow
+      tags: [Workflow]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                description:
+                  type: string
+                executor:
+                  type: string
+                dependsOn:
+                  type: array
+                  items:
+                    type: string
+                acceptanceCriteria:
+                  type: array
+                  items:
+                    type: string
+                after:
+                  type: string
+                  description: Place the new task after this task ID
+              example:
+                title: "Add unit tests"
+                description: "Write unit tests for the OCR service"
+                after: task_005
+      responses:
+        "200":
+          description: Created task
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+
+  /runs/{runId}/workflow/tasks/{taskId}:
+    delete:
+      operationId: workflowRemoveTask
+      summary: Remove a task from the workflow
+      tags: [Workflow]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: cascade
+          in: query
+          required: false
+          schema:
+            type: boolean
+            description: Also remove dependent tasks
+      responses:
+        "204":
+          description: Task removed
+
+  /runs/{runId}/workflow/reorder:
+    put:
+      operationId: workflowReorder
+      summary: Reorder workflow tasks
+      tags: [Workflow]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [orderedIds]
+              properties:
+                orderedIds:
+                  type: array
+                  items:
+                    type: string
+                  description: Task IDs in the desired order
+      responses:
+        "204":
+          description: Tasks reordered
+
+  /runs/{runId}/workflow/replan:
+    post:
+      operationId: workflowReplan
+      summary: Replan workflow with AI
+      tags: [Workflow]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                strategy:
+                  type: string
+                  enum: [merge, replace, extend]
+                provider:
+                  type: string
+                model:
+                  type: string
+      responses:
+        "200":
+          description: Replan result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReplanResult"
+
+  /runs/{runId}/workflow/validate:
+    post:
+      operationId: workflowValidate
+      summary: Validate a workflow definition
+      tags: [Workflow]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkflowFile"
+      responses:
+        "200":
+          description: Validation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkflowValidationResult"
+
+  # ─── Logs ──────────────────────────────────────────────────────────
+  /runs/{runId}/logs:
+    get:
+      operationId: getRuntimeLog
+      summary: Get runtime log for a run
+      tags: [Logs]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: tail
+          in: query
+          required: false
+          schema:
+            type: integer
+            description: Number of recent lines to return
+      responses:
+        "200":
+          description: Log content
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  log:
+                    type: string
+
+  /runs/{runId}/logs/validation:
+    get:
+      operationId: getValidationLog
+      summary: Get validation log for a run
+      tags: [Logs]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: tail
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Validation log content
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  log:
+                    type: string
+
+  /runs/{runId}/tasks/{taskId}/logs:
+    get:
+      operationId: getTaskLog
+      summary: Get task-specific log
+      tags: [Logs]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Task log content
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  log:
+                    type: string
+
+  /runs/{runId}/log-files:
+    get:
+      operationId: listLogFiles
+      summary: List available log files for a run
+      tags: [Logs]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Array of log file paths
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+
+  # ─── Events & Real-Time ───────────────────────────────────────────
+  /runs/{runId}/events:
+    get:
+      operationId: getRunEvents
+      summary: Get run events (JSONL)
+      description: |
+        When the `Accept: text/event-stream` header is sent, this endpoint
+        upgrades to Server-Sent Events (SSE) for real-time event streaming.
+        Without it, returns the stored events as JSON.
+      tags: [Events]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: type
+          in: query
+          required: false
+          schema:
+            type: string
+            description: Filter by event type
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 100
+      responses:
+        "200":
+          description: Array of events (or SSE stream)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RunEvent"
+            text/event-stream:
+              schema:
+                type: string
+                description: SSE stream of run events
+
+  # ─── Timeline ──────────────────────────────────────────────────────
+  /runs/{runId}/timeline:
+    get:
+      operationId: getTimeline
+      summary: Get run timeline
+      tags: [Timeline]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: type
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: since
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: until
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Timeline events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TimelineEvent"
+
+  /runs/{runId}/timeline/search:
+    get:
+      operationId: searchTimeline
+      summary: Search timeline events
+      tags: [Timeline]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Matching timeline events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TimelineEvent"
+
+  /runs/{runId}/timeline/summary:
+    get:
+      operationId: getTimelineSummary
+      summary: Get timeline summary statistics
+      tags: [Timeline]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Timeline summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  byType:
+                    type: object
+                    additionalProperties:
+                      type: integer
+                  firstEvent:
+                    $ref: "#/components/schemas/TimelineEvent"
+                  lastEvent:
+                    $ref: "#/components/schemas/TimelineEvent"
+
+  # ─── Audit ─────────────────────────────────────────────────────────
+  /runs/{runId}/audit:
+    get:
+      operationId: getAuditLog
+      summary: Get audit log for a run
+      tags: [Audit]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: action
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: severity
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [info, warning, error, critical]
+        - name: actor
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Audit events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditEvent"
+
+  /runs/{runId}/audit/search:
+    get:
+      operationId: searchAuditLog
+      summary: Search audit log
+      tags: [Audit]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Matching audit events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditEvent"
+
+  /runs/{runId}/audit/summary:
+    get:
+      operationId: getAuditSummary
+      summary: Get audit log summary
+      tags: [Audit]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Audit summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  byAction:
+                    type: object
+                    additionalProperties:
+                      type: integer
+                  bySeverity:
+                    type: object
+                    additionalProperties:
+                      type: integer
+                  errors:
+                    type: integer
+                  warnings:
+                    type: integer
+                  firstEvent:
+                    $ref: "#/components/schemas/AuditEvent"
+                  lastEvent:
+                    $ref: "#/components/schemas/AuditEvent"
+
+  # ─── Artifacts ─────────────────────────────────────────────────────
+  /runs/{runId}/artifacts:
+    get:
+      operationId: listArtifactsByRun
+      summary: List artifacts for a run
+      tags: [Artifacts]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Array of artifact records
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ArtifactRecord"
+
+  /runs/{runId}/tasks/{taskId}/artifacts:
+    get:
+      operationId: listArtifactsByTask
+      summary: List artifacts for a task
+      tags: [Artifacts]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Array of artifact records
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ArtifactRecord"
+    post:
+      operationId: saveArtifact
+      summary: Save an artifact for a task
+      tags: [Artifacts]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fileName, content]
+              properties:
+                fileName:
+                  type: string
+                  description: Artifact file name
+                content:
+                  type: string
+                  description: Artifact content
+      responses:
+        "201":
+          description: Created artifact
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArtifactRecord"
+
+  /artifacts/{artifactId}/content:
+    get:
+      operationId: getArtifactContent
+      summary: Read artifact file content
+      tags: [Artifacts]
+      parameters:
+        - name: artifactId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Artifact content (raw text or JSON)
+          content:
+            text/plain:
+              schema:
+                type: string
+            application/json:
+              schema:
+                type: object
+
+  # ─── Checkpoints ───────────────────────────────────────────────────
+  /runs/{runId}/checkpoints:
+    get:
+      operationId: listCheckpoints
+      summary: List checkpoints for a run
+      tags: [Checkpoints]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Array of checkpoint records
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CheckpointRecord"
+
+  /runs/{runId}/checkpoints/latest:
+    get:
+      operationId: getLatestCheckpoint
+      summary: Get the latest checkpoint for resume
+      tags: [Checkpoints]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Latest checkpoint or null
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/CheckpointResult"
+                  - type: "null"
+
+  # ─── User Input & Approval ─────────────────────────────────────────
+  /runs/{runId}/input:
+    post:
+      operationId: submitUserInput
+      summary: Submit user input for a waiting_input task
+      tags: [Input & Approval]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text:
+                  type: string
+                  description: User input text
+                taskId:
+                  type: string
+                stepId:
+                  type: string
+      responses:
+        "200":
+          description: Input submitted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+
+  /runs/{runId}/approval:
+    post:
+      operationId: submitApproval
+      summary: Submit approval decision for a waiting_approval task/step
+      tags: [Input & Approval]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision:
+                  type: string
+                  enum: [approved, rejected, override, skip]
+                taskId:
+                  type: string
+                stepId:
+                  type: string
+                reason:
+                  type: string
+      responses:
+        "200":
+          description: Approval submitted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+
+  # ─── Final Report ──────────────────────────────────────────────────
+  /runs/{runId}/report:
+    get:
+      operationId: getFinalReport
+      summary: Get final report data for a run
+      tags: [Reports]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Report data structure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportData"
+
+  /runs/{runId}/report/markdown:
+    get:
+      operationId: getFinalReportMarkdown
+      summary: Get final report as markdown
+      tags: [Reports]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Markdown report
+          content:
+            text/markdown:
+              schema:
+                type: string
+
+  # ─── Quality Gate ──────────────────────────────────────────────────
+  /runs/{runId}/quality-gate:
+    post:
+      operationId: runQualityGate
+      summary: Run quality gate for a run
+      tags: [Quality]
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                qualityEnabled:
+                  type: boolean
+                commands:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "200":
+          description: Quality gate result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QualityGateResult"
+
+  # ─── Templates ─────────────────────────────────────────────────────
+  /templates:
+    get:
+      operationId: listTemplates
+      summary: List available workflow templates
+      tags: [Templates]
+      responses:
+        "200":
+          description: Array of template summaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TemplateSummary"
+
+  /templates/infer:
+    post:
+      operationId: inferTemplate
+      summary: Infer a matching template from a prompt
+      tags: [Templates]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prompt]
+              properties:
+                prompt:
+                  type: string
+      responses:
+        "200":
+          description: Inferred template or null
+          content:
+            application/json:
+              schema:
+                type: object
+                nullable: true
+                properties:
+                  templateId:
+                    type: string
+                  templateName:
+                    type: string
+
+  /templates/{templateId}:
+    get:
+      operationId: getTemplate
+      summary: Get a full template definition
+      tags: [Templates]
+      parameters:
+        - name: templateId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Template definition
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkflowTemplate"
+
+  # ─── Plugins ───────────────────────────────────────────────────────
+  /plugins:
+    get:
+      operationId: listPlugins
+      summary: List registered plugins
+      tags: [Plugins]
+      responses:
+        "200":
+          description: Array of plugin metadata
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PluginMeta"
+    post:
+      operationId: registerPlugin
+      summary: Register a new plugin
+      tags: [Plugins]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PluginRegistration"
+      responses:
+        "200":
+          description: Plugin registered
+
+  /plugins/{pluginId}:
+    get:
+      operationId: getPlugin
+      summary: Get plugin details
+      tags: [Plugins]
+      parameters:
+        - name: pluginId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Plugin instance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Plugin"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: unregisterPlugin
+      summary: Unregister a plugin
+      tags: [Plugins]
+      parameters:
+        - name: pluginId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Plugin unregistered
+
+  # ─── Database Maintenance ──────────────────────────────────────────
+  /db/status:
+    get:
+      operationId: getDbStatus
+      summary: Get database status
+      tags: [Database]
+      responses:
+        "200":
+          description: Database status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DbStatus"
+
+  /db/backup:
+    post:
+      operationId: backupDatabase
+      summary: Back up the database to a file
+      tags: [Database]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [destPath]
+              properties:
+                destPath:
+                  type: string
+      responses:
+        "200":
+          description: Backup result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+
+  /db/vacuum:
+    post:
+      operationId: vacuumDatabase
+      summary: Vacuum (compact) the database
+      tags: [Database]
+      responses:
+        "204":
+          description: Database vacuumed
+
+  /db/integrity:
+    get:
+      operationId: integrityCheck
+      summary: Check database integrity
+      tags: [Database]
+      responses:
+        "200":
+          description: Integrity check result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid:
+                    type: boolean
+                  error:
+                    type: string
+                    nullable: true
+
+  # ─── Task Context / Scan ───────────────────────────────────────────
+  /scan:
+    post:
+      operationId: buildTaskContext
+      summary: Build task context from a prompt
+      tags: [Discovery]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prompt]
+              properties:
+                prompt:
+                  type: string
+                cacheDir:
+                  type: string
+      responses:
+        "200":
+          description: Task context
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  context:
+                    type: object
+                  summary:
+                    type: string
+
+components:
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+
+  schemas:
+    # ── Common ──────────────────────────────────────────────────────
+    ApiError:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error message
+      required: [error]
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+        version:
+          type: string
+          example: 1.0.0
+        uptime:
+          type: number
+          description: Server uptime in seconds
+
+    ApiInfo:
+      type: object
+      properties:
+        name:
+          type: string
+          example: FlowTask
+        version:
+          type: string
+          example: 1.0.0
+        description:
+          type: string
+        capabilities:
+          type: array
+          items:
+            type: string
+          example:
+            - health
+            - project
+            - config
+            - providers
+            - runs
+            - tasks
+            - steps
+            - workflow
+            - logs
+            - events
+            - timeline
+            - audit
+            - artifacts
+            - checkpoints
+            - input
+            - approval
+            - reports
+            - quality
+            - templates
+            - plugins
+            - database
+            - webhooks
+
+    # ── Project ──────────────────────────────────────────────────────
+    Project:
+      type: object
+      properties:
+        projectId:
+          type: string
+        name:
+          type: string
+        rootPath:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ProjectState:
+      type: object
+      properties:
+        projectId:
+          type: string
+        status:
+          type: string
+          enum: [idle, has_running_run, has_failed_run, has_interrupted_run]
+        activeRunId:
+          type: string
+        lastRunId:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
+
+    ProjectStatus:
+      type: object
+      properties:
+        initialized:
+          type: boolean
+        project:
+          oneOf:
+            - $ref: "#/components/schemas/Project"
+            - type: "null"
+        state:
+          oneOf:
+            - $ref: "#/components/schemas/ProjectState"
+            - type: "null"
+        config:
+          oneOf:
+            - type: object
+            - type: "null"
+        dbStatus:
+          oneOf:
+            - $ref: "#/components/schemas/DbStatus"
+            - type: "null"
+
+    # ── Config ───────────────────────────────────────────────────────
+    FlowTaskConfig:
+      type: object
+      properties:
+        version:
+          type: string
+        projectMode:
+          type: string
+          enum: [development, writing, research, general]
+        defaultExecutor:
+          type: string
+        logLevel:
+          type: string
+        autoResume:
+          type: boolean
+        rules:
+          type: object
+          properties:
+            enabled:
+              type: boolean
+            paths:
+              type: array
+              items:
+                type: string
+            required:
+              type: boolean
+            maxFileSizeKb:
+              type: integer
+        approval:
+          type: object
+          properties:
+            enabled:
+              type: boolean
+            autoApprove:
+              type: boolean
+            requireFor:
+              type: array
+              items:
+                type: string
+        limits:
+          type: object
+          properties:
+            maxRunMinutes:
+              type: integer
+            maxTaskMinutes:
+              type: integer
+            maxRetries:
+              type: integer
+            maxLogSizeMb:
+              type: integer
+        hooks:
+          type: object
+          properties:
+            beforeRun:
+              type: array
+              items:
+                type: string
+            afterRun:
+              type: array
+              items:
+                type: string
+            beforeTask:
+              type: array
+              items:
+                type: string
+            afterTask:
+              type: array
+              items:
+                type: string
+            beforeRetry:
+              type: array
+              items:
+                type: string
+            afterRetry:
+              type: array
+              items:
+                type: string
+            onFailure:
+              type: array
+              items:
+                type: string
+            failOnError:
+              type: boolean
+        planner:
+          type: object
+          properties:
+            default:
+              type: string
+              enum: [auto, simple, ai]
+            type:
+              type: string
+            executor:
+              type: string
+            provider:
+              type: string
+            model:
+              type: string
+            maxRetries:
+              type: integer
+            fallbackToSimple:
+              type: boolean
+        ai:
+          type: object
+          properties:
+            providers:
+              type: object
+              additionalProperties:
+                type: object
+        executors:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              type:
+                type: string
+              command:
+                type: string
+              args:
+                type: array
+                items:
+                  type: string
+              inputMode:
+                type: string
+                enum: [stdin, argument]
+              timeoutMs:
+                type: integer
+        validation:
+          type: object
+          properties:
+            profile:
+              type: string
+            concurrency:
+              type: integer
+            timeoutMs:
+              type: integer
+            commands:
+              type: array
+              items:
+                type: string
+        quality:
+          type: object
+          properties:
+            enabledByDefault:
+              type: boolean
+            commands:
+              type: array
+              items:
+                type: string
+
+    # ── Provider ─────────────────────────────────────────────────────
+    ProviderDetail:
+      type: object
+      properties:
+        provider:
+          type: string
+        type:
+          type: string
+        needsApiKey:
+          type: boolean
+        apiKeyAvailable:
+          type: boolean
+        apiKeyEnv:
+          type: string
+        valid:
+          type: boolean
+        message:
+          type: string
+        suggestion:
+          type: string
+
+    # ── Run ──────────────────────────────────────────────────────────
+    RunStatus:
+      type: string
+      enum:
+        - created
+        - planning
+        - running
+        - paused
+        - completed
+        - failed
+        - cancelled
+        - interrupted
+
+    RunMode:
+      type: string
+      enum:
+        - auto
+        - manual
+        - plan-only
+        - dry-run
+        - debug
+
+    RunSummary:
+      type: object
+      properties:
+        runId:
+          type: string
+        title:
+          type: string
+        status:
+          $ref: "#/components/schemas/RunStatus"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    Run:
+      type: object
+      properties:
+        runId:
+          type: string
+        projectId:
+          type: string
+        title:
+          type: string
+        status:
+          $ref: "#/components/schemas/RunStatus"
+        mode:
+          $ref: "#/components/schemas/RunMode"
+        promptPath:
+          type: string
+        planPath:
+          type: string
+        taskCount:
+          type: integer
+        completedTaskCount:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        retryCount:
+          type: integer
+        errorCount:
+          type: integer
+
+    RunResult:
+      type: object
+      properties:
+        run:
+          $ref: "#/components/schemas/Run"
+        success:
+          type: boolean
+
+    RunInspection:
+      type: object
+      properties:
+        run:
+          oneOf:
+            - $ref: "#/components/schemas/Run"
+            - type: "null"
+        tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/Task"
+        steps:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              $ref: "#/components/schemas/Step"
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/RunEvent"
+        artifacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArtifactRecord"
+        runState:
+          oneOf:
+            - $ref: "#/components/schemas/RunState"
+            - type: "null"
+        checkpoints:
+          type: array
+          items:
+            $ref: "#/components/schemas/CheckpointRecord"
+
+    RunState:
+      type: object
+      properties:
+        runId:
+          type: string
+        status:
+          type: string
+        currentTaskId:
+          type: string
+        progress:
+          type: object
+          properties:
+            total:
+              type: integer
+            done:
+              type: integer
+            running:
+              type: integer
+            failed:
+              type: integer
+            pending:
+              type: integer
+        startedAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    # ── Task ─────────────────────────────────────────────────────────
+    TaskStatus:
+      type: string
+      enum:
+        - pending
+        - running
+        - done
+        - failed
+        - skipped
+        - blocked
+        - cancelled
+        - waiting_approval
+        - waiting_input
+        - interrupted
+
+    ValidationConfig:
+      type: object
+      properties:
+        commands:
+          type: array
+          items:
+            type: string
+        requiredArtifacts:
+          type: array
+          items:
+            type: string
+        requireGitDiff:
+          type: boolean
+
+    Task:
+      type: object
+      properties:
+        id:
+          type: string
+        runId:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        status:
+          $ref: "#/components/schemas/TaskStatus"
+        executor:
+          type: string
+        dependsOn:
+          type: array
+          items:
+            type: string
+        acceptanceCriteria:
+          type: array
+          items:
+            type: string
+        validation:
+          $ref: "#/components/schemas/ValidationConfig"
+        expectedResult:
+          type: string
+        outputPlan:
+          type: object
+          properties:
+            files:
+              type: array
+              items:
+                type: object
+                properties:
+                  path:
+                    type: string
+                  description:
+                    type: string
+        retryCount:
+          type: integer
+        maxRetries:
+          type: integer
+        skipValidation:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+
+    # ── Step ─────────────────────────────────────────────────────────
+    StepStatus:
+      type: string
+      enum:
+        - pending
+        - running
+        - done
+        - failed
+        - cancelled
+        - interrupted
+        - pending_approval
+
+    Step:
+      type: object
+      properties:
+        id:
+          type: string
+        taskId:
+          type: string
+        runId:
+          type: string
+        type:
+          type: string
+          enum: [command, read, write, edit, shell, approval]
+        title:
+          type: string
+        command:
+          type: string
+        status:
+          $ref: "#/components/schemas/StepStatus"
+        exitCode:
+          type: integer
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+
+    # ── Workflow ─────────────────────────────────────────────────────
+    WorkflowTask:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        executor:
+          type: string
+        dependsOn:
+          type: array
+          items:
+            type: string
+        acceptanceCriteria:
+          type: array
+          items:
+            type: string
+        validation:
+          $ref: "#/components/schemas/ValidationConfig"
+        expectedResult:
+          type: string
+        outputPlan:
+          type: object
+        maxRetries:
+          type: integer
+
+    WorkflowFile:
+      type: object
+      properties:
+        runTitle:
+          type: string
+        tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowTask"
+          minItems: 1
+
+    WorkflowDiffEntry:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        reason:
+          type: string
+
+    WorkflowDiffModified:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: object
+          properties:
+            old:
+              type: string
+            new:
+              type: string
+        changes:
+          type: array
+          items:
+            type: string
+
+    WorkflowDiff:
+      type: object
+      properties:
+        added:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowTask"
+        removed:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowDiffEntry"
+        modified:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowDiffModified"
+        unchanged:
+          type: array
+          items:
+            type: string
+
+    ApplyResult:
+      type: object
+      properties:
+        applied:
+          type: boolean
+        added:
+          type: integer
+        removed:
+          type: integer
+        modified:
+          type: integer
+        unchanged:
+          type: integer
+        errors:
+          type: array
+          items:
+            type: string
+        warnings:
+          type: array
+          items:
+            type: string
+
+    WorkflowValidationResult:
+      type: object
+      properties:
+        valid:
+          type: boolean
+        cycles:
+          type: array
+          items:
+            type: array
+            items:
+              type: string
+        deadRefs:
+          type: array
+          items:
+            type: string
+        orphans:
+          type: array
+          items:
+            type: string
+        errors:
+          type: array
+          items:
+            type: string
+        warnings:
+          type: array
+          items:
+            type: string
+
+    ReplanResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        strategy:
+          type: string
+        planMarkdown:
+          type: string
+        tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/Task"
+        diff:
+          $ref: "#/components/schemas/WorkflowDiff"
+
+    # ── Event ────────────────────────────────────────────────────────
+    RunEvent:
+      type: object
+      properties:
+        time:
+          type: string
+          format: date-time
+        type:
+          type: string
+        runId:
+          type: string
+        taskId:
+          type: string
+        stepId:
+          type: string
+        message:
+          type: string
+
+    # ── Timeline ─────────────────────────────────────────────────────
+    TimelineEvent:
+      type: object
+      properties:
+        id:
+          type: string
+        runId:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        type:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+        taskId:
+          type: string
+        stepId:
+          type: string
+        status:
+          type: string
+
+    # ── Audit ────────────────────────────────────────────────────────
+    AuditEvent:
+      type: object
+      properties:
+        id:
+          type: string
+        runId:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        action:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+        actor:
+          type: string
+        target:
+          type: string
+        severity:
+          type: string
+          enum: [info, warning, error, critical]
+
+    # ── Artifact ─────────────────────────────────────────────────────
+    ArtifactRecord:
+      type: object
+      properties:
+        artifactId:
+          type: string
+        runId:
+          type: string
+        taskId:
+          type: string
+        type:
+          type: string
+        title:
+          type: string
+        path:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    # ── Checkpoint ───────────────────────────────────────────────────
+    CheckpointRecord:
+      type: object
+      properties:
+        checkpointId:
+          type: string
+        runId:
+          type: string
+        taskId:
+          type: string
+        stepId:
+          type: string
+        status:
+          type: string
+        context:
+          type: object
+        createdAt:
+          type: string
+          format: date-time
+
+    CheckpointResult:
+      type: object
+      properties:
+        checkpoint:
+          $ref: "#/components/schemas/CheckpointRecord"
+        runId:
+          type: string
+        taskId:
+          type: string
+        status:
+          type: string
+
+    # ── Quality ──────────────────────────────────────────────────────
+    QualityCommandResult:
+      type: object
+      properties:
+        command:
+          type: string
+        status:
+          type: string
+          enum: [passed, failed, timeout]
+        exitCode:
+          type: integer
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+        output:
+          type: string
+        error:
+          type: string
+
+    QualityGateResult:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [passed, failed]
+        commands:
+          type: array
+          items:
+            $ref: "#/components/schemas/QualityCommandResult"
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+
+    # ── Report ───────────────────────────────────────────────────────
+    ReportData:
+      type: object
+      properties:
+        runTitle:
+          type: string
+        runStatus:
+          type: string
+        summary:
+          type: string
+        tasks:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              title:
+                type: string
+              status:
+                type: string
+              validationStatus:
+                type: string
+        artifacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArtifactRecord"
+        timeline:
+          type: array
+          items:
+            $ref: "#/components/schemas/TimelineEvent"
+
+    # ── Template ─────────────────────────────────────────────────────
+    TemplateSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        workflowType:
+          type: string
+        typicalSteps:
+          type: integer
+
+    WorkflowTemplate:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        workflowType:
+          type: string
+        tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowTask"
+        variables:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              description:
+                type: string
+              required:
+                type: boolean
+              default:
+                type: string
+
+    # ── Plugin ───────────────────────────────────────────────────────
+    PluginMeta:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        version:
+          type: string
+        description:
+          type: string
+        capabilities:
+          type: array
+          items:
+            type: string
+
+    Plugin:
+      type: object
+      properties:
+        meta:
+          $ref: "#/components/schemas/PluginMeta"
+        hooks:
+          type: object
+
+    PluginRegistration:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        version:
+          type: string
+        description:
+          type: string
+
+    # ── Database ─────────────────────────────────────────────────────
+    DbStatus:
+      type: object
+      properties:
+        initialized:
+          type: boolean
+        path:
+          type: string
+        sizeBytes:
+          type: integer
+        tableCount:
+          type: integer
+        eventCount:
+          type: integer

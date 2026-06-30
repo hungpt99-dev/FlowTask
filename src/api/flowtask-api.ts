@@ -82,6 +82,8 @@ export class FlowTaskAPI {
   private runLifecyclePromise: Promise<RunLifecycle> | null = null;
   private pluginManager: PluginManager;
 
+  private startTime: number;
+
   constructor(options: ApiOptions = {}) {
     this.rootPath = options.rootPath ?? process.cwd();
     this.projectManager = new ProjectManager();
@@ -92,6 +94,7 @@ export class FlowTaskAPI {
     this.stepManager = new StepManager(this.rootPath);
     this.artifactManager = new ArtifactManager();
     this.pluginManager = new PluginManager();
+    this.startTime = Date.now();
   }
 
   getRootPath(): string {
@@ -991,6 +994,268 @@ export class FlowTaskAPI {
     }
     const dbStatus = this.db ? this.db.status() : null;
     return { initialized, project, state, config, dbStatus };
+  }
+
+  // ── API Info & Discovery ──────────────────────────
+
+  async getApiInfo(): Promise<{
+    name: string;
+    version: string;
+    description: string;
+    capabilities: string[];
+  }> {
+    return {
+      name: "FlowTask",
+      version: "0.1.0",
+      description: "Local-first AI workflow orchestrator",
+      capabilities: [
+        "health",
+        "project",
+        "config",
+        "providers",
+        "runs",
+        "tasks",
+        "steps",
+        "workflow",
+        "logs",
+        "events",
+        "timeline",
+        "audit",
+        "artifacts",
+        "checkpoints",
+        "input",
+        "approval",
+        "reports",
+        "quality",
+        "templates",
+        "plugins",
+        "database",
+        "webhooks",
+      ],
+    };
+  }
+
+  // ── Health ─────────────────────────────────────────
+
+  async healthCheck(): Promise<{ status: string; version: string; uptime: number }> {
+    return {
+      status: "ok",
+      version: "0.1.0",
+      uptime: Math.floor((Date.now() - this.startTime) / 1000),
+    };
+  }
+
+  // ── Providers ──────────────────────────────────────
+
+  async listProviders(): Promise<
+    Record<
+      string,
+      {
+        type: string;
+        model: string;
+        apiKeyEnv?: string;
+        apiKeyAvailable: boolean;
+        valid: boolean;
+        message: string;
+      }
+    >
+  > {
+    const config = await this.loadConfig();
+    const providers = config.ai?.providers ?? {};
+    const result: Record<
+      string,
+      {
+        type: string;
+        model: string;
+        apiKeyEnv?: string;
+        apiKeyAvailable: boolean;
+        valid: boolean;
+        message: string;
+      }
+    > = {};
+    const { ApiKeyValidator } = await import("../ai/api-key-validator.js");
+    const validator = new ApiKeyValidator(config);
+    for (const [name] of Object.entries(providers)) {
+      const validation = validator.validateProvider(name);
+      result[name] = {
+        type: validation.type,
+        model: config.planner?.model ?? "",
+        apiKeyEnv: validation.apiKeyEnv,
+        apiKeyAvailable: validation.apiKeyAvailable,
+        valid: validation.valid,
+        message: validation.message,
+      };
+    }
+    return result;
+  }
+
+  async getProvider(name: string): Promise<{
+    provider: string;
+    type: string;
+    needsApiKey: boolean;
+    apiKeyAvailable: boolean;
+    apiKeyEnv?: string;
+    valid: boolean;
+    message: string;
+    suggestion?: string;
+  } | null> {
+    const config = await this.loadConfig();
+    const providers = config.ai?.providers ?? {};
+    if (!providers[name]) return null;
+    const { ApiKeyValidator } = await import("../ai/api-key-validator.js");
+    const validator = new ApiKeyValidator(config);
+    return validator.validateProvider(name);
+  }
+
+  async testProvider(
+    name: string,
+  ): Promise<{ success: boolean; message: string; latencyMs?: number }> {
+    const { ConfigLoader } = await import("../config/config-loader.js");
+    const { ProviderRegistry } = await import("../ai/provider-registry.js");
+    const loader = new ConfigLoader();
+    const config = await loader.load(this.rootPath);
+    const registry = new ProviderRegistry(config);
+    try {
+      const provider = registry.getProvider(name);
+      if (provider.healthCheck) {
+        const result = await provider.healthCheck({
+          model: config.planner?.model,
+          timeoutMs: 10000,
+        });
+        return { success: result.ok, message: result.message, latencyMs: result.latencyMs };
+      }
+      return { success: true, message: "no health check available" };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { success: false, message: msg };
+    }
+  }
+
+  // ── Config Update ──────────────────────────────────
+
+  async updateConfig(body: Record<string, unknown>): Promise<void> {
+    const { atomicWriteJsonFile, readJsonFile, fileExists } = await import("../utils/fs.js");
+    const { configJsonPath } = await import("../utils/paths.js");
+    const cPath = configJsonPath(this.rootPath);
+    let config: Record<string, unknown> = {};
+    if (await fileExists(cPath)) {
+      config = await readJsonFile<Record<string, unknown>>(cPath);
+    }
+    const merged = { ...config, ...body };
+    await atomicWriteJsonFile(cPath, merged);
+  }
+
+  // ── User Input & Approval ──────────────────────────
+
+  async submitUserInput(
+    runId: string,
+    body: { text: string; taskId?: string; stepId?: string },
+  ): Promise<void> {
+    await this.eventStore.appendToRun(runId, {
+      type: "prompt_input_provided",
+      runId,
+      taskId: body.taskId,
+      message: body.text,
+    });
+    const { appendToFile } = await import("../utils/fs.js");
+    const { getRunDir } = await import("../utils/paths.js");
+    const inputPath = path.join(getRunDir(this.rootPath, runId), "user-input.jsonl");
+    await appendToFile(
+      inputPath,
+      JSON.stringify({
+        time: new Date().toISOString(),
+        runId,
+        taskId: body.taskId,
+        stepId: body.stepId,
+        text: body.text,
+      }) + "\n",
+    );
+  }
+
+  async submitApproval(
+    runId: string,
+    body: { decision: string; taskId?: string; stepId?: string; reason?: string },
+  ): Promise<void> {
+    const eventType =
+      body.decision === "approved" || body.decision === "override"
+        ? "approval_approved"
+        : "approval_rejected";
+    await this.eventStore.appendToRun(runId, {
+      type: eventType,
+      runId,
+      taskId: body.taskId,
+      message: body.reason ?? body.decision,
+    });
+    const { appendToFile } = await import("../utils/fs.js");
+    const { getRunDir } = await import("../utils/paths.js");
+    const approvalPath = path.join(getRunDir(this.rootPath, runId), "approvals.jsonl");
+    await appendToFile(
+      approvalPath,
+      JSON.stringify({
+        time: new Date().toISOString(),
+        runId,
+        taskId: body.taskId,
+        stepId: body.stepId,
+        decision: body.decision,
+        reason: body.reason,
+      }) + "\n",
+    );
+  }
+
+  // ── Webhooks ───────────────────────────────────────
+
+  private webhooks: Map<string, { url: string; events: string[]; secret?: string }> = new Map();
+
+  listWebhooks(): { id: string; url: string; events: string[] }[] {
+    return Array.from(this.webhooks.entries()).map(([id, wh]) => ({
+      id,
+      url: wh.url,
+      events: wh.events,
+    }));
+  }
+
+  registerWebhook(id: string, url: string, events: string[], secret?: string): void {
+    this.webhooks.set(id, { url, events, secret });
+  }
+
+  unregisterWebhook(id: string): boolean {
+    return this.webhooks.delete(id);
+  }
+
+  getWebhook(id: string): { url: string; events: string[]; secret?: string } | undefined {
+    return this.webhooks.get(id);
+  }
+
+  // ── Run Listing with Filters ───────────────────────
+
+  async listRunsFiltered(options?: {
+    projectId?: string;
+    status?: string;
+    limit?: number;
+  }): Promise<
+    {
+      runId: string;
+      title: string;
+      status: string;
+      createdAt: string;
+      updatedAt: string;
+    }[]
+  > {
+    const runs = await this.listRuns(options?.projectId);
+    let filtered = runs;
+    if (options?.status) {
+      filtered = filtered.filter((r) => r.status === options.status);
+    }
+    if (options?.limit && options.limit > 0) {
+      filtered = filtered.slice(0, options.limit);
+    }
+    return filtered.map((r) => ({
+      runId: r.runId,
+      title: r.title,
+      status: r.status,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+    }));
   }
 }
 

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { RunMonitor } from "../../src/ui/components/RunMonitor.js";
@@ -115,6 +115,51 @@ function makeRunDetail(overrides: Partial<RunDetail> = {}): RunDetail {
   };
 }
 
+// ── SSE mock ──
+
+interface SseHandler {
+  onopen: (() => void) | null;
+  onmessage: ((msg: { data: string }) => void) | null;
+  onerror: (() => void) | null;
+  close: () => void;
+}
+
+let sseHandlers: Map<string, SseHandler> = new Map();
+let sseCloseCallbacks: (() => void)[] = [];
+
+function createMockEventSource(url: string): SseHandler {
+  const handler: SseHandler = { onopen: null, onmessage: null, onerror: null, close: vi.fn() };
+  sseHandlers.set(url, handler);
+  return handler;
+}
+
+beforeAll(() => {
+  vi.stubGlobal(
+    "EventSource",
+    vi.fn((url: string) => createMockEventSource(url)),
+  );
+});
+
+beforeEach(() => {
+  sseHandlers.clear();
+  sseCloseCallbacks = [];
+});
+
+function triggerSseOpen(url: string): void {
+  const h = sseHandlers.get(url);
+  h?.onopen?.();
+}
+
+function triggerSseMessage(url: string, data: unknown): void {
+  const h = sseHandlers.get(url);
+  h?.onmessage?.({ data: JSON.stringify(data) });
+}
+
+function triggerSseError(url: string): void {
+  const h = sseHandlers.get(url);
+  h?.onerror?.();
+}
+
 // ── Tests ──
 
 describe("RunMonitor", () => {
@@ -123,6 +168,7 @@ describe("RunMonitor", () => {
   let onLoadLogs: ReturnType<typeof vi.fn>;
   let onCancelRun: ReturnType<typeof vi.fn>;
   let onProvideInput: ReturnType<typeof vi.fn>;
+  let onListArtifacts: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     onListRuns = vi.fn().mockResolvedValue([]);
@@ -130,10 +176,13 @@ describe("RunMonitor", () => {
     onLoadLogs = vi.fn().mockResolvedValue("");
     onCancelRun = vi.fn().mockResolvedValue(undefined);
     onProvideInput = vi.fn().mockResolvedValue(undefined);
+    onListArtifacts = vi.fn().mockResolvedValue([]);
   });
 
   afterEach(() => {
     vi.clearAllTimers();
+    sseHandlers.clear();
+    sseCloseCallbacks = [];
   });
 
   it("renders the run monitor", async () => {
@@ -292,7 +341,7 @@ describe("RunMonitor", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("Waiting for input")).toBeDefined();
+      expect(screen.getByText("Input Required")).toBeDefined();
       expect(screen.getByText(/Please enter the API endpoint/)).toBeDefined();
     });
   });
@@ -332,7 +381,7 @@ describe("RunMonitor", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("Waiting for input")).toBeDefined();
+      expect(screen.getByText("Input Required")).toBeDefined();
     });
 
     const textarea = screen.getByLabelText("Input response");
@@ -762,6 +811,376 @@ describe("RunMonitor", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Select a run to view details")).toBeDefined();
+    });
+  });
+
+  // ── SSE / Real-time tests ──
+
+  it("shows connection status badge when sseUrl is provided", async () => {
+    const detail = makeRunDetail();
+    onLoadRun.mockResolvedValue(detail);
+
+    const runs = [makeRunIndex({ runId: "run_1", title: "Detail run", status: "running" })];
+    render(
+      <RunMonitor
+        runs={runs}
+        onListRuns={onListRuns}
+        onLoadRun={onLoadRun}
+        sseUrl="http://localhost:3487/api"
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("listitem", { name: /Run: Detail run/ }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Connecting...")).toBeDefined();
+    });
+  });
+
+  it("updates connection status to Live when SSE connects", async () => {
+    const detail = makeRunDetail();
+    onLoadRun.mockResolvedValue(detail);
+
+    const runs = [makeRunIndex({ runId: "run_1", title: "Detail run", status: "running" })];
+    render(
+      <RunMonitor
+        runs={runs}
+        onListRuns={onListRuns}
+        onLoadRun={onLoadRun}
+        sseUrl="http://localhost:3487/api"
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("listitem", { name: /Run: Detail run/ }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Connecting...")).toBeDefined();
+    });
+
+    const sseUrl = "http://localhost:3487/api/runs/run_1/events";
+    const handler = sseHandlers.get(sseUrl);
+    expect(handler).toBeDefined();
+
+    await act(async () => {
+      triggerSseOpen(sseUrl);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Live")).toBeDefined();
+    });
+  });
+
+  it("receives live events via SSE and displays them in timeline view", async () => {
+    const detail = makeRunDetail();
+    onLoadRun.mockResolvedValue(detail);
+
+    const runs = [makeRunIndex({ runId: "run_1", title: "Detail run", status: "running" })];
+    render(
+      <RunMonitor
+        runs={runs}
+        onListRuns={onListRuns}
+        onLoadRun={onLoadRun}
+        sseUrl="http://localhost:3487/api"
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("listitem", { name: /Run: Detail run/ }));
+    });
+
+    const sseUrl = "http://localhost:3487/api/runs/run_1/events";
+
+    await act(async () => {
+      triggerSseOpen(sseUrl);
+    });
+
+    await act(async () => {
+      triggerSseMessage(sseUrl, {
+        time: new Date().toISOString(),
+        type: "task_started",
+        runId: "run_1",
+        taskId: "task_1",
+        message: "Building project",
+      });
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("timeline"));
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText("task_started").length).toBeGreaterThan(0);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Building project")).toBeDefined();
+    });
+  });
+
+  it("shows event count in timeline tab", async () => {
+    const detail = makeRunDetail();
+    onLoadRun.mockResolvedValue(detail);
+
+    const runs = [makeRunIndex({ runId: "run_1", title: "Detail run", status: "running" })];
+    render(
+      <RunMonitor
+        runs={runs}
+        onListRuns={onListRuns}
+        onLoadRun={onLoadRun}
+        sseUrl="http://localhost:3487/api"
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("listitem", { name: /Run: Detail run/ }));
+    });
+
+    const sseUrl = "http://localhost:3487/api/runs/run_1/events";
+
+    await act(async () => {
+      triggerSseOpen(sseUrl);
+      triggerSseMessage(sseUrl, {
+        time: new Date().toISOString(),
+        type: "task_started",
+        runId: "run_1",
+      });
+      triggerSseMessage(sseUrl, {
+        time: new Date().toISOString(),
+        type: "task_completed",
+        runId: "run_1",
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("(2)")).toBeDefined();
+    });
+  });
+
+  it("filters events by type in timeline", async () => {
+    const detail = makeRunDetail();
+    onLoadRun.mockResolvedValue(detail);
+
+    const runs = [makeRunIndex({ runId: "run_1", title: "Detail run", status: "running" })];
+    render(
+      <RunMonitor
+        runs={runs}
+        onListRuns={onListRuns}
+        onLoadRun={onLoadRun}
+        sseUrl="http://localhost:3487/api"
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("listitem", { name: /Run: Detail run/ }));
+    });
+
+    const sseUrl = "http://localhost:3487/api/runs/run_1/events";
+
+    await act(async () => {
+      triggerSseOpen(sseUrl);
+      triggerSseMessage(sseUrl, {
+        time: new Date().toISOString(),
+        type: "task_started",
+        runId: "run_1",
+      });
+      triggerSseMessage(sseUrl, {
+        time: new Date().toISOString(),
+        type: "task_completed",
+        runId: "run_1",
+      });
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("timeline"));
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText("task_started").length).toBeGreaterThan(0);
+    });
+
+    await act(async () => {
+      const select = screen.getByLabelText("Filter events by type");
+      fireEvent.change(select, { target: { value: "task_completed" } });
+    });
+
+    await waitFor(() => {
+      const timelineLog = screen.getByRole("log", { name: "Live events" });
+      expect(timelineLog.textContent).not.toContain("task_started");
+    });
+  });
+
+  it("shows view tabs and switches between them", async () => {
+    const detail = makeRunDetail();
+    onLoadRun.mockResolvedValue(detail);
+
+    const runs = [makeRunIndex({ runId: "run_1", title: "Detail run", status: "running" })];
+    render(
+      <RunMonitor
+        runs={runs}
+        onListRuns={onListRuns}
+        onLoadRun={onLoadRun}
+        onListArtifacts={onListArtifacts}
+        sseUrl="http://localhost:3487/api"
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("listitem", { name: /Run: Detail run/ }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "tasks" })).toBeDefined();
+      expect(screen.getByRole("button", { name: "timeline" })).toBeDefined();
+      expect(screen.getByRole("button", { name: "artifacts" })).toBeDefined();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("artifacts"));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Artifacts/)).toBeDefined();
+    });
+  });
+
+  it("shows empty artifact state", async () => {
+    const detail = makeRunDetail();
+    onLoadRun.mockResolvedValue(detail);
+    onListArtifacts.mockResolvedValue([]);
+
+    const runs = [makeRunIndex({ runId: "run_1", title: "Detail run", status: "running" })];
+    render(
+      <RunMonitor
+        runs={runs}
+        onListRuns={onListRuns}
+        onLoadRun={onLoadRun}
+        onListArtifacts={onListArtifacts}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("listitem", { name: /Run: Detail run/ }));
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("artifacts"));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("No artifacts for this run")).toBeDefined();
+    });
+  });
+
+  it("displays artifacts when present", async () => {
+    const detail = makeRunDetail();
+    onLoadRun.mockResolvedValue(detail);
+    onListArtifacts.mockResolvedValue([
+      {
+        artifactId: "art_1",
+        runId: "run_1",
+        taskId: "task_1",
+        type: "text",
+        title: "Build output",
+        path: "/tmp/output.log",
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+
+    const runs = [makeRunIndex({ runId: "run_1", title: "Detail run", status: "running" })];
+    render(
+      <RunMonitor
+        runs={runs}
+        onListRuns={onListRuns}
+        onLoadRun={onLoadRun}
+        onListArtifacts={onListArtifacts}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("listitem", { name: /Run: Detail run/ }));
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("artifacts"));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Build output")).toBeDefined();
+    });
+  });
+
+  it("shows Reconnecting... on SSE error", async () => {
+    const detail = makeRunDetail();
+    onLoadRun.mockResolvedValue(detail);
+
+    const runs = [makeRunIndex({ runId: "run_1", title: "Detail run", status: "running" })];
+    render(
+      <RunMonitor
+        runs={runs}
+        onListRuns={onListRuns}
+        onLoadRun={onLoadRun}
+        sseUrl="http://localhost:3487/api"
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("listitem", { name: /Run: Detail run/ }));
+    });
+
+    const sseUrl = "http://localhost:3487/api/runs/run_1/events";
+
+    await act(async () => {
+      triggerSseOpen(sseUrl);
+    });
+
+    await act(async () => {
+      triggerSseError(sseUrl);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Reconnecting...")).toBeDefined();
+    });
+  });
+
+  it("handles run_completed SSE event by updating status", async () => {
+    const detail = makeRunDetail();
+    onLoadRun.mockResolvedValue(detail);
+
+    const runs = [makeRunIndex({ runId: "run_1", title: "Detail run", status: "running" })];
+    render(
+      <RunMonitor
+        runs={runs}
+        onListRuns={onListRuns}
+        onLoadRun={onLoadRun}
+        sseUrl="http://localhost:3487/api"
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("listitem", { name: /Run: Detail run/ }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Running")).toBeDefined();
+    });
+
+    const sseUrl = "http://localhost:3487/api/runs/run_1/events";
+
+    await act(async () => {
+      triggerSseOpen(sseUrl);
+      triggerSseMessage(sseUrl, {
+        time: new Date().toISOString(),
+        type: "run_completed",
+        runId: "run_1",
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Succeeded")).toBeDefined();
     });
   });
 });
