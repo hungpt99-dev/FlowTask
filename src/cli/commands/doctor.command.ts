@@ -5,6 +5,8 @@ import { spawnWithPromise } from "../../utils/process.js";
 import { ProviderRegistry } from "../../ai/provider-registry.js";
 import { ResourceGuard } from "../../validation/resource-guard.js";
 import { readJsonFile } from "../../utils/fs.js";
+import { AiProviderError } from "../../ai/ai-provider-error.js";
+import { nodeVersionWarning, gitNotFoundError } from "../errors.js";
 import path from "node:path";
 
 export async function doctorCommand(options?: { providers?: boolean }): Promise<void> {
@@ -65,10 +67,15 @@ export async function doctorCommand(options?: { providers?: boolean }): Promise<
           const missing = required.filter((_, i) => !results[i]);
           return missing.length === 0
             ? { ok: true, message: "all files present" }
-            : { ok: false, message: `missing: ${missing.join(", ")}` };
+            : {
+                ok: false,
+                message: `missing: ${missing.join(", ")}` + " (run: flowtask init --force)",
+              };
         },
       },
     ];
+
+    const nodeMajor = parseInt(process.version.slice(1), 10);
 
     for (const check of systemChecks) {
       process.stdout.write(`  ${picocolors.blue("⋯")} ${check.name}... `);
@@ -76,8 +83,16 @@ export async function doctorCommand(options?: { providers?: boolean }): Promise<
       if (result.ok) {
         process.stdout.write(`${picocolors.green("✓")} ${picocolors.dim(result.message)}\n`);
       } else {
-        process.stdout.write(`${picocolors.red("✗")} ${picocolors.red(result.message)}\n`);
+        const extra =
+          check.name === "Git available"
+            ? `\n${gitNotFoundError().split("\n").slice(0, 3).join("\n")}`
+            : "";
+        process.stdout.write(`${picocolors.red("✗")} ${picocolors.red(result.message)}${extra}\n`);
       }
+    }
+
+    if (nodeMajor < 22) {
+      console.log(nodeVersionWarning(process.version));
     }
 
     const loader = new ConfigLoader();
@@ -101,6 +116,9 @@ export async function doctorCommand(options?: { providers?: boolean }): Promise<
       console.log(
         `  ${picocolors.yellow("!")} Mode rules: ${picocolors.dim(".flowtask/rules/mode.md — not found")}`,
       );
+      console.log(
+        `  ${picocolors.dim("    Run: flowtask init --force to recreate missing files")}`,
+      );
     }
     if (stepsExist) {
       console.log(
@@ -109,6 +127,9 @@ export async function doctorCommand(options?: { providers?: boolean }): Promise<
     } else {
       console.log(
         `  ${picocolors.yellow("!")} Steps: ${picocolors.dim(".flowtask/steps/default.md — not found")}`,
+      );
+      console.log(
+        `  ${picocolors.dim("    Run: flowtask init --force to recreate missing files")}`,
       );
     }
     console.log("");
@@ -173,18 +194,25 @@ export async function doctorCommand(options?: { providers?: boolean }): Promise<
           }
         }
       } else {
-        const status = p.apiKeyAvailable ? picocolors.green("✓") : picocolors.yellow("!");
-        const keyStatus = p.apiKeyAvailable
-          ? picocolors.dim("key found")
-          : picocolors.yellow(`${p.apiKeyEnv ?? "no key"} missing`);
-        console.log(
-          `  ${status} ${picocolors.bold(p.name.padEnd(16))} ${p.type.padEnd(18)} ${keyStatus}`,
-        );
+        if (p.apiKeyAvailable) {
+          console.log(
+            `  ${picocolors.green("✓")} ${picocolors.bold(p.name.padEnd(16))} ${p.type.padEnd(18)} ${picocolors.dim("key found")}`,
+          );
+        } else {
+          const envVar = p.apiKeyEnv ?? `${p.name.toUpperCase()}_API_KEY`;
+          console.log(
+            `  ${picocolors.red("✗")} ${picocolors.bold(p.name.padEnd(16))} ${picocolors.yellow(`${envVar} environment variable not set`)}`,
+          );
+          console.log(`  ${"".padEnd(18)}${picocolors.dim(`Set ${envVar}=your-api-key`)}`);
+        }
       }
     } catch (err) {
-      console.log(
-        `${picocolors.red("✗")} ${picocolors.bold(p.name.padEnd(16))} ${err instanceof Error ? err.message : String(err)}`,
-      );
+      const message = err instanceof Error ? err.message : String(err);
+      const suggestion = err instanceof AiProviderError ? err.suggestion : undefined;
+      console.log(`${picocolors.red("✗")} ${picocolors.bold(p.name.padEnd(16))} ${message}`);
+      if (suggestion) {
+        console.log(`  ${"".padEnd(18)}${picocolors.dim(suggestion)}`);
+      }
     }
   }
 
@@ -282,7 +310,10 @@ export async function doctorCommand(options?: { providers?: boolean }): Promise<
         );
         const cmdDisplay = entry.command ?? "?";
         console.log(
-          `  ${"".padEnd(12)}${picocolors.dim(`Command: ${cmdDisplay} — not found. Install or update config.`)}`,
+          `  ${"".padEnd(12)}${picocolors.dim(`Command: ${cmdDisplay} — not found in PATH`)}`,
+        );
+        console.log(
+          `  ${"".padEnd(12)}${picocolors.dim(`Install: npm install -g ${cmdDisplay} or update executors.${name}.command in config`)}`,
         );
       }
     }
