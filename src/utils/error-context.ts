@@ -38,6 +38,8 @@ export type ErrorCategory =
   | "corrupted_run_state"
   | "cost_limit"
   | "approval_denied"
+  | "project_not_initialized"
+  | "init_failed"
   | "unknown";
 
 export const ERROR_SUGGESTIONS: Record<ErrorCategory, string> = {
@@ -51,11 +53,15 @@ export const ERROR_SUGGESTIONS: Record<ErrorCategory, string> = {
   stuck_process:
     "The process appears stuck with no output. It may need to be killed and restarted.",
   missing_dependency: "A required dependency is missing. Install it and retry.",
-  missing_env_variable: "An environment variable is not set. Configure it and retry.",
-  permission_error: "Permission denied. Check file permissions or run with appropriate privileges.",
-  network_error: "A network error occurred. Check your connection and retry.",
+  missing_env_variable:
+    "An environment variable is not set. Configure it in your shell or .env file and retry. Run: flowtask doctor",
+  permission_error:
+    "Permission denied. Check file permissions or run with appropriate user/group privileges.",
+  network_error:
+    "A network error occurred. Check your connection, firewall, proxy settings, and that the target endpoint is reachable.",
   api_error: "An API error occurred. Check the API status and your configuration.",
-  ai_provider_error: "The AI provider returned an error. Check your API key and provider status.",
+  ai_provider_error:
+    "The AI provider returned an error. Check your API key, provider status, and configuration. Run: flowtask doctor --providers",
   ai_cli_error: "The AI CLI tool encountered an error. Review the CLI output.",
   invalid_plan: "The generated plan is invalid. Retry planning or use a different planner mode.",
   invalid_artifact: "The artifact validation failed. Check the artifact content.",
@@ -63,6 +69,10 @@ export const ERROR_SUGGESTIONS: Record<ErrorCategory, string> = {
   corrupted_run_state: "The run state file appears corrupted. The run may need to be recreated.",
   cost_limit: "The cost limit has been reached. Increase the budget or optimize usage.",
   approval_denied: "The approval was denied by the user or policy.",
+  project_not_initialized:
+    "FlowTask is not initialized. Run: flowtask init. Use --force to reinitialize.",
+  init_failed:
+    "FlowTask initialization failed. Check that the directory is writable, disk space is available, and no existing .flowtask files are locked. Run: flowtask init --force to retry.",
   unknown: "An unexpected error occurred. Check the logs for details.",
 };
 
@@ -96,6 +106,7 @@ function isRetryable(category: ErrorCategory): boolean {
     case "ai_provider_error":
     case "missing_dependency":
     case "missing_env_variable":
+    case "init_failed":
       return true;
     default:
       return false;
@@ -142,6 +153,10 @@ function defaultDecisionOptions(category: ErrorCategory): UserDecisionOption[] {
       return [skip, cancel];
     case "cost_limit":
       return [continueAction, cancel];
+    case "project_not_initialized":
+      return [retry, cancel];
+    case "init_failed":
+      return [retry, cancel];
     case "corrupted_run_state":
     case "invalid_plan":
     case "invalid_artifact":
@@ -202,13 +217,27 @@ export function classifyError(
       return buildErrorContext("timeout", message, { source: "executor" });
     }
     if (
+      message.includes("_API_KEY") ||
+      message.includes("_api_key") ||
+      message.includes("environment variable not set")
+    ) {
+      return buildErrorContext("missing_env_variable", message, {
+        suggestedFix:
+          "Set the required environment variable. Run: flowtask doctor to check your setup.",
+        source: "workflow",
+        retryable: true,
+      });
+    }
+
+    if (
       message.includes("API key") ||
       message.includes("api key") ||
       message.includes("unauthorized") ||
       message.includes("401")
     ) {
       return buildErrorContext("ai_provider_error", message, {
-        suggestedFix: "Check your API key configuration.",
+        suggestedFix:
+          "Check your API key configuration. Set the required environment variable or run: flowtask configure ai",
         source: "ai_provider",
       });
     }
@@ -236,6 +265,24 @@ export function classifyError(
       return buildErrorContext("invalid_plan", message, {
         suggestedFix: "Retry planning or switch to simple planner mode.",
         source: "planning",
+      });
+    }
+
+    if (message.includes("not initialized") || message.includes("PROJECT_NOT_INITIALIZED")) {
+      return buildErrorContext("project_not_initialized", message, {
+        suggestedFix: "Run: flowtask init. Use --force to reinitialize.",
+        source: "workflow",
+      });
+    }
+
+    if (
+      message.includes("init") &&
+      (message.includes("fail") || message.includes("could not create"))
+    ) {
+      return buildErrorContext("init_failed", message, {
+        suggestedFix: "Check directory permissions and disk space, then retry: flowtask init",
+        source: "workflow",
+        retryable: true,
       });
     }
   }
