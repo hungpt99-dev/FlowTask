@@ -1,8 +1,12 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { FlowTaskAPI } from "../../src/api/flowtask-api.js";
+
+vi.mock("enquirer", () => ({
+  default: vi.fn(),
+}));
 
 let testDir: string;
 let api: FlowTaskAPI;
@@ -605,6 +609,363 @@ describe("FlowTaskAPI E2E", () => {
     it("should clean with dry-run", async () => {
       const result = await api.cleanRuns({ dryRun: true });
       expect(result.dryRun).toBe(true);
+    });
+  });
+
+  describe("Interactive input and auto-continue", () => {
+    describe("TTY interactive input", () => {
+      let runId: string;
+      let EnquirerMock: ReturnType<typeof vi.fn>;
+
+      beforeAll(async () => {
+        const project = await api.loadProject();
+        const run = await api.createRun(project!.projectId, "Interactive E2E", "auto");
+        runId = run.runId;
+        const now = new Date().toISOString();
+        await api.saveTasks(runId, [
+          {
+            id: "tty_task",
+            runId,
+            title: "TTY input task",
+            status: "pending" as const,
+            executor: "shell",
+            dependsOn: [],
+            acceptanceCriteria: [],
+            retryCount: 0,
+            maxRetries: 2,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ]);
+      });
+
+      beforeEach(async () => {
+        vi.resetAllMocks();
+        const { default: Enquirer } = await import("enquirer");
+        EnquirerMock = Enquirer as unknown as ReturnType<typeof vi.fn>;
+      });
+
+      it("should prompt inline and accept input in TTY mode", async () => {
+        const origIsTTY = process.stdin.isTTY;
+        process.stdin.isTTY = true as unknown as boolean;
+        try {
+          const { RunLifecycle } = await import("../../src/core/run-lifecycle.js");
+          const { RunManager } = await import("../../src/core/run-manager.js");
+          const { ProjectManager } = await import("../../src/core/project-manager.js");
+
+          const mockInstance = {
+            prompt: vi.fn().mockResolvedValue({ response: "inline-answer" }),
+          };
+          EnquirerMock.mockReturnValue(mockInstance);
+
+          const config = await new ProjectManager().loadConfig(testDir);
+          config.defaultExecutor = "shell";
+          config.validation = { ...config.validation, skipValidation: true };
+          config.approval = { enabled: true, autoApprove: true, requireFor: [] };
+
+          const project = await api.loadProject();
+          const lifecycle = new RunLifecycle(testDir, project!.projectId, config);
+          lifecycle.setSkipValidation(true);
+
+          const rm = new RunManager(testDir);
+          await rm.updateTaskStatus(runId, "tty_task", "waiting_input");
+
+          const cont = await lifecycle.continueRun(runId);
+
+          expect(mockInstance.prompt).toHaveBeenCalled();
+          expect(cont.success).toBe(true);
+          expect(cont.paused).toBe(false);
+
+          const updated = await rm.loadTasks(runId);
+          const task = updated.find((t) => t.id === "tty_task");
+          expect(task?.status).toBe("done");
+        } finally {
+          process.stdin.isTTY = origIsTTY;
+        }
+      }, 15000);
+    });
+
+    describe("Non-TTY fallback", () => {
+      let runId: string;
+
+      beforeAll(async () => {
+        const project = await api.loadProject();
+        const run = await api.createRun(project!.projectId, "Non-TTY E2E", "auto");
+        runId = run.runId;
+        const now = new Date().toISOString();
+        await api.saveTasks(runId, [
+          {
+            id: "nontty_task",
+            runId,
+            title: "Non-TTY input task",
+            status: "pending" as const,
+            executor: "shell",
+            dependsOn: [],
+            acceptanceCriteria: [],
+            retryCount: 0,
+            maxRetries: 2,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ]);
+      });
+
+      it("should fall back to external input in non-TTY mode", async () => {
+        const origIsTTY = process.stdin.isTTY;
+        process.stdin.isTTY = false as unknown as boolean;
+        try {
+          const { RunLifecycle } = await import("../../src/core/run-lifecycle.js");
+          const { RunManager } = await import("../../src/core/run-manager.js");
+          const { ProjectManager } = await import("../../src/core/project-manager.js");
+
+          const config = await new ProjectManager().loadConfig(testDir);
+          config.defaultExecutor = "shell";
+          config.validation = { ...config.validation, skipValidation: true };
+          config.approval = { enabled: true, autoApprove: true, requireFor: [] };
+
+          const project = await api.loadProject();
+          const lifecycle = new RunLifecycle(testDir, project!.projectId, config);
+          lifecycle.setSkipValidation(true);
+
+          const rm = new RunManager(testDir);
+          await rm.updateTaskStatus(runId, "nontty_task", "waiting_input");
+
+          const cont = await lifecycle.continueRun(runId);
+
+          expect(cont.paused).toBe(true);
+          expect(cont.success).toBe(true);
+
+          const updated = await rm.loadTasks(runId);
+          const task = updated.find((t) => t.id === "nontty_task");
+          expect(task?.status).toBe("waiting_input");
+        } finally {
+          process.stdin.isTTY = origIsTTY;
+        }
+      });
+    });
+
+    describe("Auto-continue multi-step", () => {
+      let runId: string;
+
+      beforeAll(async () => {
+        const project = await api.loadProject();
+        const run = await api.createRun(project!.projectId, "Auto-continue E2E", "auto");
+        runId = run.runId;
+        const now = new Date().toISOString();
+        await api.saveTasks(runId, [
+          {
+            id: "ac_t1",
+            runId,
+            title: "Step 1",
+            status: "pending" as const,
+            executor: "shell",
+            dependsOn: [],
+            acceptanceCriteria: [],
+            retryCount: 0,
+            maxRetries: 2,
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: "ac_t2",
+            runId,
+            title: "Step 2",
+            status: "pending" as const,
+            executor: "shell",
+            dependsOn: ["ac_t1"],
+            acceptanceCriteria: [],
+            retryCount: 0,
+            maxRetries: 2,
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: "ac_t3",
+            runId,
+            title: "Step 3",
+            status: "pending" as const,
+            executor: "shell",
+            dependsOn: ["ac_t2"],
+            acceptanceCriteria: [],
+            retryCount: 0,
+            maxRetries: 2,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ]);
+      });
+
+      it("should auto-continue to next pending step without pressing Enter", async () => {
+        const { RunLifecycle } = await import("../../src/core/run-lifecycle.js");
+        const { RunManager } = await import("../../src/core/run-manager.js");
+        const { ProjectManager } = await import("../../src/core/project-manager.js");
+
+        const config = await new ProjectManager().loadConfig(testDir);
+        config.defaultExecutor = "shell";
+        config.validation = { ...config.validation, skipValidation: true };
+        config.approval = { enabled: true, autoApprove: true, requireFor: [] };
+
+        const project = await api.loadProject();
+        const lifecycle = new RunLifecycle(testDir, project!.projectId, config);
+        lifecycle.setSkipValidation(true);
+
+        const rm = new RunManager(testDir);
+        await rm.updateTaskStatus(runId, "ac_t1", "done");
+
+        const cont = await lifecycle.continueRun(runId);
+
+        expect(cont.success).toBe(true);
+        expect(cont.paused).toBe(false);
+
+        const updated = await rm.loadTasks(runId);
+        expect(updated.find((t) => t.id === "ac_t1")?.status).toBe("done");
+        expect(updated.find((t) => t.id === "ac_t2")?.status).toBe("done");
+        expect(updated.find((t) => t.id === "ac_t3")?.status).toBe("done");
+      }, 15000);
+    });
+
+    describe("Repeated waiting_input", () => {
+      let runId: string;
+      let EnquirerMock: ReturnType<typeof vi.fn>;
+
+      beforeAll(async () => {
+        const project = await api.loadProject();
+        const run = await api.createRun(project!.projectId, "Repeated input E2E", "auto");
+        runId = run.runId;
+        const now = new Date().toISOString();
+        await api.saveTasks(runId, [
+          {
+            id: "ri_t1",
+            runId,
+            title: "Input 1",
+            status: "pending" as const,
+            executor: "shell",
+            dependsOn: [],
+            acceptanceCriteria: [],
+            retryCount: 0,
+            maxRetries: 2,
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: "ri_t2",
+            runId,
+            title: "Input 2",
+            status: "pending" as const,
+            executor: "shell",
+            dependsOn: [],
+            acceptanceCriteria: [],
+            retryCount: 0,
+            maxRetries: 2,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ]);
+      });
+
+      beforeEach(async () => {
+        vi.resetAllMocks();
+        const { default: Enquirer } = await import("enquirer");
+        EnquirerMock = Enquirer as unknown as ReturnType<typeof vi.fn>;
+      });
+
+      it("should handle repeated waiting_input prompts across multiple tasks", async () => {
+        const origIsTTY = process.stdin.isTTY;
+        process.stdin.isTTY = true as unknown as boolean;
+        try {
+          const { RunLifecycle } = await import("../../src/core/run-lifecycle.js");
+          const { RunManager } = await import("../../src/core/run-manager.js");
+          const { ProjectManager } = await import("../../src/core/project-manager.js");
+
+          const mockInstance = {
+            prompt: vi.fn().mockResolvedValue({ response: "go" }),
+          };
+          EnquirerMock.mockReturnValue(mockInstance);
+
+          const config = await new ProjectManager().loadConfig(testDir);
+          config.defaultExecutor = "shell";
+          config.validation = { ...config.validation, skipValidation: true };
+          config.approval = { enabled: true, autoApprove: true, requireFor: [] };
+
+          const project = await api.loadProject();
+          const lifecycle = new RunLifecycle(testDir, project!.projectId, config);
+          lifecycle.setSkipValidation(true);
+
+          const rm = new RunManager(testDir);
+          await rm.updateTaskStatus(runId, "ri_t1", "waiting_input");
+          await rm.updateTaskStatus(runId, "ri_t2", "waiting_input");
+
+          const cont = await lifecycle.continueRun(runId);
+
+          expect(mockInstance.prompt).toHaveBeenCalled();
+          expect(cont.success).toBe(true);
+          expect(cont.paused).toBe(false);
+
+          const updated = await rm.loadTasks(runId);
+          expect(updated.find((t) => t.id === "ri_t1")?.status).toBe("done");
+          expect(updated.find((t) => t.id === "ri_t2")?.status).toBe("done");
+        } finally {
+          process.stdin.isTTY = origIsTTY;
+        }
+      }, 30000);
+    });
+
+    describe("Approval steps", () => {
+      let runId: string;
+
+      beforeAll(async () => {
+        const project = await api.loadProject();
+        const run = await api.createRun(project!.projectId, "Approval E2E", "auto");
+        runId = run.runId;
+        const now = new Date().toISOString();
+        await api.saveTasks(runId, [
+          {
+            id: "app_task",
+            runId,
+            title: "Approval needed task",
+            status: "pending" as const,
+            executor: "shell",
+            dependsOn: [],
+            acceptanceCriteria: [],
+            retryCount: 0,
+            maxRetries: 2,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ]);
+      });
+
+      it("should not auto-continue past a waiting_approval step", async () => {
+        const origIsTTY = process.stdin.isTTY;
+        process.stdin.isTTY = true as unknown as boolean;
+        try {
+          const { RunLifecycle } = await import("../../src/core/run-lifecycle.js");
+          const { RunManager } = await import("../../src/core/run-manager.js");
+          const { ProjectManager } = await import("../../src/core/project-manager.js");
+
+          const config = await new ProjectManager().loadConfig(testDir);
+          config.defaultExecutor = "shell";
+          config.validation = { ...config.validation, skipValidation: true };
+          config.approval = { enabled: true, autoApprove: true, requireFor: [] };
+
+          const project = await api.loadProject();
+          const lifecycle = new RunLifecycle(testDir, project!.projectId, config);
+          lifecycle.setSkipValidation(true);
+
+          const rm = new RunManager(testDir);
+          await rm.updateTaskStatus(runId, "app_task", "waiting_approval");
+
+          const cont = await lifecycle.continueRun(runId);
+
+          expect(cont.paused).toBe(true);
+
+          const updated = await rm.loadTasks(runId);
+          const task = updated.find((t) => t.id === "app_task");
+          expect(task?.status).toBe("waiting_approval");
+        } finally {
+          process.stdin.isTTY = origIsTTY;
+        }
+      });
     });
   });
 });

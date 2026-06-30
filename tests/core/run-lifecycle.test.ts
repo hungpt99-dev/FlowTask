@@ -1,10 +1,14 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
 import { ProjectManager } from "../../src/core/project-manager.js";
 import { RunLifecycle } from "../../src/core/run-lifecycle.js";
 import { RunManager } from "../../src/core/run-manager.js";
 import { testDir } from "../setup.js";
 import { join } from "node:path";
 import { generateDefaultConfig } from "../../src/config/default-config.js";
+
+vi.mock("enquirer", () => ({
+  default: vi.fn(),
+}));
 
 describe("RunLifecycle", () => {
   let projectDir: string;
@@ -160,5 +164,260 @@ describe("RunLifecycle", () => {
       });
       expect(result.success).toBe(true);
     });
+  });
+
+  describe("inline interactive input handling", () => {
+    let EnquirerMock: ReturnType<typeof vi.fn>;
+
+    beforeEach(async () => {
+      vi.resetAllMocks();
+      const { default: Enquirer } = await import("enquirer");
+      EnquirerMock = Enquirer as unknown as ReturnType<typeof vi.fn>;
+    });
+
+    function setupTTY() {
+      const original = process.stdin.isTTY;
+      process.stdin.isTTY = true as unknown as boolean;
+      return original;
+    }
+
+    function restoreTTY(original: boolean | undefined) {
+      process.stdin.isTTY = original as unknown as boolean;
+    }
+
+    function createMockEnquirer(response: string) {
+      const mockInstance = {
+        prompt: vi.fn().mockResolvedValue({ response }),
+      };
+      EnquirerMock.mockReturnValue(mockInstance);
+      return mockInstance;
+    }
+
+    it("should inline-prompt for waiting_input in TTY mode, collect input, and auto-continue", async () => {
+      const orig = setupTTY();
+      try {
+        const mockInstance = createMockEnquirer("inline-answer");
+        const config = await new ProjectManager().loadConfig(projectDir);
+        config.defaultExecutor = "shell";
+        config.validation = { ...config.validation, skipValidation: true };
+        config.approval = { enabled: true, autoApprove: true, requireFor: [] };
+        const lifecycle = new RunLifecycle(projectDir, projectId, config);
+        lifecycle.setSkipValidation(true);
+        const result = await lifecycle.executeRun("Test input", { mode: "plan-only" });
+
+        const runManager = new RunManager(projectDir);
+        const tasks = await runManager.loadTasks(result.run.runId);
+        await runManager.updateTaskStatus(result.run.runId, tasks[0]!.id, "waiting_input");
+
+        const cont = await lifecycle.continueRun(result.run.runId);
+
+        expect(mockInstance.prompt).toHaveBeenCalledTimes(1);
+        expect(cont.success).toBe(true);
+        expect(cont.paused).toBe(false);
+
+        const updated = await runManager.loadTasks(result.run.runId);
+        const first = updated.find((t) => t.id === tasks[0]!.id);
+        expect(first?.status).toBe("done");
+      } finally {
+        restoreTTY(orig);
+      }
+    }, 15000);
+
+    it("should fall back to external input in non-TTY mode", async () => {
+      const orig = process.stdin.isTTY;
+      process.stdin.isTTY = false as unknown as boolean;
+      try {
+        const config = await new ProjectManager().loadConfig(projectDir);
+        config.defaultExecutor = "shell";
+        config.validation = { ...config.validation, skipValidation: true };
+        config.approval = { enabled: true, autoApprove: true, requireFor: [] };
+        const lifecycle = new RunLifecycle(projectDir, projectId, config);
+        lifecycle.setSkipValidation(true);
+        const result = await lifecycle.executeRun("Test input", { mode: "plan-only" });
+
+        const runManager = new RunManager(projectDir);
+        const tasks = await runManager.loadTasks(result.run.runId);
+        await runManager.updateTaskStatus(result.run.runId, tasks[0]!.id, "waiting_input");
+
+        const cont = await lifecycle.continueRun(result.run.runId);
+
+        expect(cont.paused).toBe(true);
+        expect(cont.success).toBe(true);
+
+        const updated = await runManager.loadTasks(result.run.runId);
+        const first = updated.find((t) => t.id === tasks[0]!.id);
+        expect(first?.status).toBe("waiting_input");
+      } finally {
+        process.stdin.isTTY = orig;
+      }
+    });
+
+    it("should handle repeated waiting_input prompts across multiple tasks", async () => {
+      const orig = setupTTY();
+      try {
+        const mockInstance = createMockEnquirer("go");
+        const config = await new ProjectManager().loadConfig(projectDir);
+        config.defaultExecutor = "shell";
+        config.validation = { ...config.validation, skipValidation: true };
+        config.approval = { enabled: true, autoApprove: true, requireFor: [] };
+        const lifecycle = new RunLifecycle(projectDir, projectId, config);
+        lifecycle.setSkipValidation(true);
+        const result = await lifecycle.executeRun("Test multi-step", { mode: "plan-only" });
+
+        const runManager = new RunManager(projectDir);
+        const tasks = await runManager.loadTasks(result.run.runId);
+        expect(tasks.length).toBeGreaterThan(1);
+
+        for (const t of tasks) {
+          await runManager.updateTaskStatus(result.run.runId, t.id, "waiting_input");
+        }
+
+        const cont = await lifecycle.continueRun(result.run.runId);
+
+        expect(mockInstance.prompt).toHaveBeenCalled();
+        expect(cont.success).toBe(true);
+        expect(cont.paused).toBe(false);
+
+        const updated = await runManager.loadTasks(result.run.runId);
+        for (const t of updated) {
+          expect(t.status).toBe("done");
+        }
+      } finally {
+        restoreTTY(orig);
+      }
+    }, 30000);
+  });
+
+  describe("auto-continue behavior", () => {
+    let EnquirerMock: ReturnType<typeof vi.fn>;
+
+    beforeEach(async () => {
+      vi.resetAllMocks();
+      const { default: Enquirer } = await import("enquirer");
+      EnquirerMock = Enquirer as unknown as ReturnType<typeof vi.fn>;
+    });
+
+    function setupTTY() {
+      const original = process.stdin.isTTY;
+      process.stdin.isTTY = true as unknown as boolean;
+      return original;
+    }
+
+    function restoreTTY(original: boolean | undefined) {
+      process.stdin.isTTY = original as unknown as boolean;
+    }
+
+    it("should auto-continue to next pending step after previous step completes", async () => {
+      const config = await new ProjectManager().loadConfig(projectDir);
+      config.defaultExecutor = "shell";
+      config.validation = { ...config.validation, skipValidation: true };
+      config.approval = { enabled: true, autoApprove: true, requireFor: [] };
+      const lifecycle = new RunLifecycle(projectDir, projectId, config);
+      lifecycle.setSkipValidation(true);
+      const result = await lifecycle.executeRun("Test auto-continue", { mode: "plan-only" });
+
+      const runManager = new RunManager(projectDir);
+      const tasks = await runManager.loadTasks(result.run.runId);
+      expect(tasks.length).toBeGreaterThan(1);
+
+      await runManager.updateTaskStatus(result.run.runId, tasks[0]!.id, "done");
+
+      const cont = await lifecycle.continueRun(result.run.runId);
+
+      expect(cont.success).toBe(true);
+      expect(cont.paused).toBe(false);
+
+      const updated = await runManager.loadTasks(result.run.runId);
+      const second = updated.find((t) => t.id === tasks[1]!.id);
+      expect(second?.status).toBe("done");
+    }, 15000);
+
+    it("should skip all completed steps and auto-continue to next pending", async () => {
+      const config = await new ProjectManager().loadConfig(projectDir);
+      config.defaultExecutor = "shell";
+      config.validation = { ...config.validation, skipValidation: true };
+      config.approval = { enabled: true, autoApprove: true, requireFor: [] };
+      const lifecycle = new RunLifecycle(projectDir, projectId, config);
+      lifecycle.setSkipValidation(true);
+      const result = await lifecycle.executeRun("Test skip completed", { mode: "plan-only" });
+
+      const runManager = new RunManager(projectDir);
+      const tasks = await runManager.loadTasks(result.run.runId);
+      expect(tasks.length).toBeGreaterThan(2);
+
+      await runManager.updateTaskStatus(result.run.runId, tasks[0]!.id, "done");
+      await runManager.updateTaskStatus(result.run.runId, tasks[1]!.id, "done");
+
+      const cont = await lifecycle.continueRun(result.run.runId);
+
+      expect(cont.success).toBe(true);
+      expect(cont.paused).toBe(false);
+
+      const updated = await runManager.loadTasks(result.run.runId);
+      const third = updated.find((t) => t.id === tasks[2]!.id);
+      expect(third?.status).toBe("done");
+    }, 15000);
+
+    it("should auto-continue pending steps without requiring user input", async () => {
+      const config = await new ProjectManager().loadConfig(projectDir);
+      config.defaultExecutor = "shell";
+      config.validation = { ...config.validation, skipValidation: true };
+      config.approval = { enabled: true, autoApprove: true, requireFor: [] };
+      const lifecycle = new RunLifecycle(projectDir, projectId, config);
+      lifecycle.setSkipValidation(true);
+      const result = await lifecycle.executeRun("Test no input prompt", { mode: "plan-only" });
+
+      const cont = await lifecycle.continueRun(result.run.runId);
+
+      expect(cont.success).toBe(true);
+      expect(cont.paused).toBe(false);
+      expect(EnquirerMock).not.toHaveBeenCalled();
+
+      const runManager = new RunManager(projectDir);
+      const updated = await runManager.loadTasks(result.run.runId);
+      const doneCount = updated.filter((t) => t.status === "done").length;
+      expect(doneCount).toBe(updated.length);
+    }, 15000);
+
+    it("should handle mixed states: done, waiting_input, and pending steps", async () => {
+      const orig = setupTTY();
+      try {
+        const mockInstance = {
+          prompt: vi.fn().mockResolvedValue({ response: "user-input" }),
+        };
+        EnquirerMock.mockReturnValue(mockInstance);
+
+        const config = await new ProjectManager().loadConfig(projectDir);
+        config.defaultExecutor = "shell";
+        config.validation = { ...config.validation, skipValidation: true };
+        config.approval = { enabled: true, autoApprove: true, requireFor: [] };
+        const lifecycle = new RunLifecycle(projectDir, projectId, config);
+        lifecycle.setSkipValidation(true);
+        const result = await lifecycle.executeRun("Test mixed states", { mode: "plan-only" });
+
+        const runManager = new RunManager(projectDir);
+        const tasks = await runManager.loadTasks(result.run.runId);
+        expect(tasks.length).toBeGreaterThan(2);
+
+        await runManager.updateTaskStatus(result.run.runId, tasks[0]!.id, "done");
+        await runManager.updateTaskStatus(result.run.runId, tasks[1]!.id, "waiting_input");
+
+        const cont = await lifecycle.continueRun(result.run.runId);
+
+        expect(mockInstance.prompt).toHaveBeenCalledTimes(1);
+        expect(cont.success).toBe(true);
+        expect(cont.paused).toBe(false);
+
+        const updated = await runManager.loadTasks(result.run.runId);
+        const first = updated.find((t) => t.id === tasks[0]!.id);
+        const second = updated.find((t) => t.id === tasks[1]!.id);
+        const third = updated.find((t) => t.id === tasks[2]!.id);
+        expect(first?.status).toBe("done");
+        expect(second?.status).toBe("done");
+        expect(third?.status).toBe("done");
+      } finally {
+        restoreTTY(orig);
+      }
+    }, 30000);
   });
 });

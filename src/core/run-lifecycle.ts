@@ -39,6 +39,7 @@ import { commandExists } from "../utils/command-exists.js";
 import { ProviderRegistry } from "../ai/provider-registry.js";
 import path from "node:path";
 import picocolors from "picocolors";
+import Enquirer from "enquirer";
 import { getEventBus } from "../ui/event-bus.js";
 import type { UiEvent } from "../ui/event-bus.js";
 import { DatabaseManager } from "./database-manager.js";
@@ -117,6 +118,9 @@ export class RunLifecycle {
       notifyOnGateBlock: config.approval?.gates?.notifyOnGateBlock ?? true,
     });
     this.processManager = new ProcessManager();
+    this.processManager.setMaxConcurrentHeavy(config.process?.maxConcurrentHeavy ?? 1);
+    this.processManager.setLogManager(this.logManager);
+    this.executorRegistry.setProcessManager(this.processManager);
     this.hookManager = new HookManager(rootPath, config.hooks);
   }
 
@@ -924,8 +928,14 @@ export class RunLifecycle {
         task.status !== "interrupted" &&
         task.status !== "waiting_approval" &&
         task.status !== "waiting_input"
-      )
+      ) {
+        await this.logManager.writeRuntime(
+          run.runId,
+          `[debug] Loop: skipping task ${task.id} (status=${task.status})`,
+          "debug",
+        );
         continue;
+      }
 
       const depsMet = task.dependsOn.every((depId) => {
         const depTask = tasks.find((t) => t.id === depId);
@@ -938,12 +948,22 @@ export class RunLifecycle {
             `  [${i + 1}/${tasks.length}] ${task.title} — waiting for dependencies`,
           ),
         );
+        await this.logManager.writeRuntime(
+          run.runId,
+          `[debug] Task ${task.id} waiting for dependencies: ${task.dependsOn.join(", ")}`,
+          "debug",
+        );
         continue;
       }
 
       if (isManual && !autoApprove) {
         // In interactive TTY mode, prompt the user inline
         if (process.stdin.isTTY) {
+          await this.logManager.writeRuntime(
+            run.runId,
+            `[debug] Interactive approval prompt shown for task ${task.id}`,
+            "debug",
+          );
           await this.hookManager.runOnApprovalRequired({
             runId: run.runId,
             taskId: task.id,
@@ -964,6 +984,11 @@ export class RunLifecycle {
           }
         } else {
           // Non-TTY: pause and wait for external approval
+          await this.logManager.writeRuntime(
+            run.runId,
+            `[debug] Non-TTY fallback: marking task ${task.id} as waiting_approval for external approval`,
+            "debug",
+          );
           await this.runManager.updateTaskStatus(run.runId, task.id, "waiting_approval");
           console.log(
             picocolors.cyan(`\n  [${i + 1}/${tasks.length}] ${task.title} — awaiting approval`),
@@ -1013,6 +1038,60 @@ export class RunLifecycle {
           }
           continue;
         }
+
+        // TTY waiting_input: prompt inline instead of pausing
+        if (task.status === "waiting_input" && process.stdin.isTTY) {
+          console.log(
+            picocolors.cyan(`\n  [${i + 1}/${tasks.length}] ${task.title} — awaiting input`),
+          );
+          await this.logManager.writeRuntime(
+            run.runId,
+            `[debug] Interactive input prompt shown for task ${task.id} in executeTasks`,
+            "debug",
+          );
+          const enquirer = new Enquirer();
+          let answer = "";
+          try {
+            const response = await enquirer.prompt({
+              type: "input",
+              name: "response",
+              message: "Enter input:",
+            });
+            answer = String((response as Record<string, unknown>).response ?? "");
+          } catch {
+            await this.logManager.writeRuntime(
+              run.runId,
+              `[debug] Interactive input prompt cancelled for task ${task.id}; falling back to external input`,
+              "debug",
+            );
+            console.log(picocolors.dim(`    Use: flowtask input ${run.runId} <text>`));
+            return { success: true, paused: true };
+          }
+
+          // Store the input in task metadata so executeTask can pass it to the executor
+          task.metadata = { ...(task.metadata ?? {}), _pendingInput: answer };
+          await this.runManager.updateTaskStatus(run.runId, task.id, "pending");
+          await this.logManager.writeTaskLog(
+            run.runId,
+            task.id,
+            "User input provided via TTY prompt",
+          );
+          await this.logManager.writeRuntime(
+            run.runId,
+            `[debug] User input collected via TTY prompt for task ${task.id} in executeTasks`,
+            "debug",
+          );
+          // Re-run this task with the stored input
+          task.status = "pending";
+          i--;
+          continue;
+        }
+
+        await this.logManager.writeRuntime(
+          run.runId,
+          `[debug] Non-TTY fallback: task ${task.id} in state ${task.status}, pausing for external resolution`,
+          "debug",
+        );
 
         console.log(
           picocolors.cyan(
@@ -1122,11 +1201,21 @@ export class RunLifecycle {
       const result = await this.executeTask(run, prompt, rulesContext, task, tasks);
 
       if (result === "waiting" || result === "waiting_input" || result === "waiting_approval") {
+        await this.logManager.writeRuntime(
+          run.runId,
+          `[debug] Task ${task.id} returned "${result}"; pausing run`,
+          "debug",
+        );
         return { success: true, paused: true };
       }
 
       const success = result === true;
       task.status = success ? "done" : "failed";
+      await this.logManager.writeRuntime(
+        run.runId,
+        `[debug] Task ${task.id} transitioned to "${task.status}" — auto-continuing to next task`,
+        "debug",
+      );
 
       const afterTaskCtx: HookContext = {
         runId: run.runId,
@@ -1689,12 +1778,26 @@ export class RunLifecycle {
     let additionalRetryCount = 0;
     const maxRetries = task.maxRetries;
     const MAX_ADDITIONAL_RETRIES = 3;
+    let interactiveInput: string | undefined;
+    let retryWithInput = false;
 
     const stepHookCtx: HookContext = { runId: run.runId, taskId: task.id, taskTitle: task.title };
     await this.hookManager.runBeforeStep(stepHookCtx);
 
     try {
       do {
+        if (!retryWithInput) {
+          interactiveInput = undefined;
+        }
+        retryWithInput = false;
+
+        // Check for pending input stored in task metadata from the outer handler
+        const pendingInput = task.metadata?._pendingInput as string | undefined;
+        if (pendingInput !== undefined && interactiveInput === undefined) {
+          interactiveInput = pendingInput;
+          task.metadata = { ...(task.metadata ?? {}), _pendingInput: undefined };
+        }
+
         if (task.validation?.commands) {
           for (const cmd of task.validation.commands) {
             const safetyResult = this.safetyChecker.check(cmd);
@@ -1855,14 +1958,23 @@ export class RunLifecycle {
               `Interactive session completed with exit code ${exitResult.exitCode}`,
             );
           } else {
-            executorResult = await executor.execute({
-              projectRoot: this.rootPath,
-              runId: run.runId,
-              task,
-              contextPackPath,
-              contextPackContent: contextPack.markdown,
-              signal: abortController.signal,
-            });
+            const executorConfig = this.executorRegistry.getConfig(task.executor);
+            const spawnCommand =
+              executorConfig?.command ?? task.validation?.commands?.join(" && ") ?? "";
+            const releaseSpawn = await this.processManager.acquireSpawnSlot(spawnCommand);
+            try {
+              executorResult = await executor.execute({
+                projectRoot: this.rootPath,
+                runId: run.runId,
+                task,
+                contextPackPath,
+                contextPackContent: contextPack.markdown,
+                signal: abortController.signal,
+                interactiveInput,
+              });
+            } finally {
+              releaseSpawn();
+            }
 
             await this.eventStore.appendToRun(run.runId, {
               type:
@@ -1888,6 +2000,14 @@ export class RunLifecycle {
           const waitStatus =
             executorResult.status === "waiting_input" ? "waiting_input" : "waiting_approval";
           await this.runManager.updateTaskStatus(run.runId, task.id, waitStatus);
+          await this.logManager.writeRuntime(
+            run.runId,
+            `[debug] Task ${task.id} entered "${waitStatus}" state` +
+              (executorResult.detectedPrompt
+                ? ` (prompt: "${executorResult.detectedPrompt}")`
+                : ""),
+            "debug",
+          );
           await this.logManager.writeTaskLog(
             run.runId,
             task.id,
@@ -1910,18 +2030,104 @@ export class RunLifecycle {
             waitStatus,
           );
 
-          if (executorResult.status === "waiting_input") {
-            console.log(picocolors.cyan(`\n  Task waiting for input: ${task.title}`));
-            console.log(picocolors.dim(`    Use: flowtask input ${run.runId} <text>`));
-          } else {
-            console.log(picocolors.cyan(`\n  Task awaiting approval: ${task.title}`));
-            console.log(picocolors.dim(`    Use: flowtask tasks-approve ${task.id}`));
-            console.log(picocolors.dim(`    Use: flowtask tasks-deny ${task.id}`));
-          }
-          console.log(picocolors.dim(`    Use: flowtask watch ${run.runId}`));
-          console.log(picocolors.dim(`    Use: flowtask kill ${run.runId}`));
+          if (executorResult.status === "waiting_input" && process.stdin.isTTY) {
+            const sessionAlive = InteractiveController.isSessionAliveByRunId(run.runId);
+            const promptText = executorResult.detectedPrompt ?? "Enter input:";
+            console.log(picocolors.cyan(`\n  ${promptText}`));
 
-          return waitStatus;
+            await this.logManager.writeRuntime(
+              run.runId,
+              `[debug] Interactive input prompt in executeTask for task ${task.id}: "${promptText}"`,
+              "debug",
+            );
+
+            const enquirer = new Enquirer();
+            let answer = "";
+            try {
+              const response = await enquirer.prompt({
+                type: "input",
+                name: "response",
+                message: promptText,
+              });
+              answer = String((response as Record<string, unknown>).response ?? "");
+            } catch {
+              await this.logManager.writeRuntime(
+                run.runId,
+                `[debug] Interactive input prompt cancelled in executeTask for task ${task.id}; returning ${waitStatus}`,
+                "debug",
+              );
+              console.log(picocolors.dim(`    Use: flowtask input ${run.runId} <text>`));
+              return waitStatus;
+            }
+
+            await this.logManager.writeTaskLog(
+              run.runId,
+              task.id,
+              "User input provided via TTY prompt",
+            );
+
+            if (sessionAlive) {
+              InteractiveController.sendInputByRunId(run.runId, answer);
+
+              const exitResult = await InteractiveController.waitForProcessExitByRunId(run.runId);
+              const session = InteractiveController.getSessionByRunId(run.runId);
+              const stdout = session?.stdoutLines ?? [];
+              const stderr = session?.stderrLines ?? [];
+              if (session) InteractiveController.removeSession(session.id);
+
+              executorResult = {
+                status: exitResult.exitCode === 0 ? "done" : "failed",
+                exitCode: exitResult.exitCode ?? undefined,
+                output: stdout.join("\n"),
+                error: stderr.join("\n") || undefined,
+                startedAt: taskStartedAt,
+                finishedAt: now(),
+              };
+
+              await this.eventStore.appendToRun(run.runId, {
+                type: "executor_completed",
+                runId: run.runId,
+                taskId: task.id,
+                details: { exitCode: exitResult.exitCode },
+              });
+
+              await this.logManager.writeTaskLog(
+                run.runId,
+                task.id,
+                `Interactive session completed with exit code ${exitResult.exitCode}`,
+              );
+
+              console.log(picocolors.green(`  Input sent. Waiting for process...`));
+            } else {
+              interactiveInput = answer;
+              retryWithInput = true;
+              await this.runManager.updateTaskStatus(run.runId, task.id, "pending");
+              await this.logManager.writeRuntime(
+                run.runId,
+                `[debug] Retrying task ${task.id} with user input (no active session)`,
+                "debug",
+              );
+              continue;
+            }
+          } else {
+            await this.logManager.writeRuntime(
+              run.runId,
+              `[debug] Non-TTY in executeTask: task ${task.id} returning "${waitStatus}" for external resolution`,
+              "debug",
+            );
+            if (executorResult.status === "waiting_input") {
+              console.log(picocolors.cyan(`\n  Task waiting for input: ${task.title}`));
+              console.log(picocolors.dim(`    Use: flowtask input ${run.runId} <text>`));
+            } else {
+              console.log(picocolors.cyan(`\n  Task awaiting approval: ${task.title}`));
+              console.log(picocolors.dim(`    Use: flowtask tasks-approve ${task.id}`));
+              console.log(picocolors.dim(`    Use: flowtask tasks-deny ${task.id}`));
+            }
+            console.log(picocolors.dim(`    Use: flowtask watch ${run.runId}`));
+            console.log(picocolors.dim(`    Use: flowtask kill ${run.runId}`));
+
+            return waitStatus;
+          }
         }
 
         if (executorResult.status === "skipped") {
@@ -2276,7 +2482,9 @@ export class RunLifecycle {
 
     if (
       validationResult &&
-      (validationResult.status === "passed" || validationResult.status === "warning")
+      (validationResult.status === "passed" ||
+        validationResult.status === "warning" ||
+        validationResult.status === "skipped")
     ) {
       const hasOutcomeCheck = validationResult.checks.some((c) => c.type === "outcome_comparison");
       const completedMsg = hasOutcomeCheck
