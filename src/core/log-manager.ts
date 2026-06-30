@@ -161,6 +161,125 @@ export class LogManager {
     }
   }
 
+  async writeStartup(
+    runId: string,
+    info: {
+      nodeVersion: string;
+      projectMode?: string;
+      configStatus: "loaded" | "defaults" | "error";
+      planner?: string;
+      executorCount: number;
+      validationProfile?: string;
+      aiProviderCount?: number;
+    },
+  ): Promise<void> {
+    const msg = [
+      `FlowTask startup`,
+      `Node.js: ${info.nodeVersion}`,
+      `Config: ${info.configStatus}`,
+      `Mode: ${info.projectMode ?? "development"}`,
+      info.planner ? `Planner: ${info.planner}` : null,
+      `Executors: ${info.executorCount}`,
+      info.validationProfile ? `Validation: ${info.validationProfile}` : null,
+      info.aiProviderCount !== undefined ? `AI providers: ${info.aiProviderCount}` : null,
+    ]
+      .filter(Boolean)
+      .join(" | ");
+
+    await this.writeRuntime(runId, msg);
+
+    await this.writeRuntimeJsonl(runId, {
+      s: "system",
+      m: JSON.stringify({
+        event: "startup",
+        nodeVersion: info.nodeVersion,
+        projectMode: info.projectMode,
+        configStatus: info.configStatus,
+        planner: info.planner,
+        executorCount: info.executorCount,
+        validationProfile: info.validationProfile,
+        aiProviderCount: info.aiProviderCount,
+      }),
+      l: "info",
+      runId,
+    });
+  }
+
+  async writeAiConnectivity(
+    runId: string,
+    results: Array<{ provider: string; ok: boolean; message: string; latencyMs?: number }>,
+  ): Promise<void> {
+    const ok = results.filter((r) => r.ok);
+    const failed = results.filter((r) => !r.ok);
+    const summary = `AI providers: ${ok.length} ok, ${failed.length} failed (${failed.map((r) => r.provider).join(", ") || "none"})`;
+    await this.writeRuntime(runId, summary);
+
+    for (const r of results) {
+      const tag = r.ok ? "OK" : "FAIL";
+      const latency = r.latencyMs !== undefined ? ` (${r.latencyMs}ms)` : "";
+      await this.writeRuntimeJsonl(runId, {
+        s: "system",
+        m: JSON.stringify({
+          event: "ai_connectivity",
+          provider: r.provider,
+          ok: r.ok,
+          message: r.message,
+          latencyMs: r.latencyMs,
+        }),
+        l: r.ok ? "info" : "warn",
+        runId,
+      });
+    }
+  }
+
+  async writeHealthCheck(
+    runId: string,
+    status: {
+      overall: "healthy" | "degraded" | "failing";
+      healthy: number;
+      degraded: number;
+      failing: number;
+      total: number;
+    },
+  ): Promise<void> {
+    const msg = `Health check: ${status.overall.toUpperCase()} (${status.healthy} healthy, ${status.degraded} degraded, ${status.failing} failing)`;
+    await this.writeRuntime(runId, msg);
+
+    await this.writeRuntimeJsonl(runId, {
+      s: "system",
+      m: JSON.stringify({
+        event: "health_check",
+        overall: status.overall,
+        healthy: status.healthy,
+        degraded: status.degraded,
+        failing: status.failing,
+        total: status.total,
+      }),
+      l: status.overall === "healthy" ? "info" : "warn",
+      runId,
+    });
+  }
+
+  async writeError(
+    runId: string,
+    error: { message: string; code?: string; stack?: string },
+  ): Promise<void> {
+    const msg = `ERROR [${error.code ?? "unknown"}]: ${error.message}`;
+    await this.writeRuntime(runId, msg);
+
+    await this.writeRuntimeJsonl(runId, {
+      s: "system",
+      m: JSON.stringify({
+        event: "error",
+        message: error.message,
+        code: error.code,
+        stack: error.stack,
+      }),
+      l: "error",
+      runId,
+    });
+  }
+
   async readRuntime(runId: string): Promise<string> {
     try {
       return await readTextFile(runtimeLogPath(this.rootPath, runId));
