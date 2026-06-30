@@ -117,8 +117,20 @@ export class ShellExecutor implements Executor {
       args: [getShellCommandFlag(), command],
     });
 
+    const releaseSpawn = this.processManager
+      ? await this.processManager.acquireSpawnSlot(command)
+      : () => {};
+
     try {
       return await new Promise<ExecutorResult>((resolve) => {
+        let settled = false;
+        const resolveOnce = (result: ExecutorResult): void => {
+          if (settled) return;
+          settled = true;
+          releaseSpawn();
+          resolve(result);
+        };
+
         const child = spawn(getShell(), [getShellCommandFlag(), command], {
           cwd: input.projectRoot,
           env: buildChildEnv({
@@ -263,7 +275,7 @@ export class ShellExecutor implements Executor {
               promptText: line.trim(),
             } as never);
 
-            resolve({
+            resolveOnce({
               status: waitStatus,
               output: stdoutLines.join("\n"),
               error: stderrLines.join("\n") || undefined,
@@ -361,7 +373,7 @@ export class ShellExecutor implements Executor {
             const stderrText = stderrLines.join("\n");
             const stdoutText = stdoutLines.join("\n");
             const isFailed = exitCode !== 0 && exitCode !== null;
-            resolve({
+            resolveOnce({
               status: exitCode === 0 ? "done" : "failed",
               exitCode: exitCode ?? undefined,
               output: stdoutText,
@@ -376,6 +388,8 @@ export class ShellExecutor implements Executor {
               finishedAt: now(),
               interactiveSessionId: sessionId,
             });
+          } else {
+            releaseSpawn();
           }
         });
 
@@ -403,7 +417,7 @@ export class ShellExecutor implements Executor {
           const isTimeout = err.message.includes("ETIMEDOUT");
 
           if (!earlyResolve) {
-            resolve({
+            resolveOnce({
               status: "failed",
               exitCode: undefined,
               error: err.message,
@@ -411,17 +425,20 @@ export class ShellExecutor implements Executor {
               suggestedFix: isMissing
                 ? `Command not found. Install the required tool or check your PATH.`
                 : isPermission
-                  ? `Permission denied. Check file permissions or run with appropriate privileges.`
+                  ? "Permission denied. Check file permissions or run with appropriate privileges."
                   : isTimeout
                     ? `The command timed out. Consider increasing the timeout.`
                     : `An unexpected error occurred. Check the command and retry.`,
               startedAt,
               finishedAt: now(),
             });
+          } else {
+            releaseSpawn();
           }
         });
       });
     } catch (err) {
+      releaseSpawn();
       const message = err instanceof Error ? err.message : String(err);
       const isTimeout = message.includes("timeout") || message.includes("ETIMEDOUT");
 

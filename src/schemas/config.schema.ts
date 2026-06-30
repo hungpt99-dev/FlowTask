@@ -158,6 +158,7 @@ export const ExecutorConfigSchema = z.record(ExecutorEntrySchema);
 export const ProcessConfigSchema = z.object({
   gracefulStopTimeoutMs: z.number().int().positive().default(5000),
   forceKillTimeoutMs: z.number().int().positive().default(10000),
+  maxConcurrentHeavy: z.number().int().min(1).default(1).optional(),
 });
 
 export const VitestConfigSchema = z.object({

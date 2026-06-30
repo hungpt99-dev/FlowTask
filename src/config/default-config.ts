@@ -71,6 +71,7 @@ export function generateDefaultConfig(): FlowTaskConfig {
     process: {
       gracefulStopTimeoutMs: 5000,
       forceKillTimeoutMs: 10000,
+      maxConcurrentHeavy: 1,
     },
     validation: {
       profile: "safe",

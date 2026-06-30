@@ -367,12 +367,22 @@ export class RunManager {
     return updated;
   }
 
-  async updateTaskStatus(runId: string, taskId: string, status: Task["status"]): Promise<Task> {
+  async updateTaskStatus(
+    runId: string,
+    taskId: string,
+    status: Task["status"],
+    retryCount?: number,
+  ): Promise<Task> {
     const tasks = await this.loadTasks(runId);
     const idx = tasks.findIndex((t) => t.id === taskId);
     if (idx < 0) throw new Error(`Task not found: ${taskId}`);
     const existing = tasks[idx]!;
-    const updated = { ...existing, status, updatedAt: now() };
+    const updated: Task = {
+      ...existing,
+      status,
+      ...(retryCount !== undefined ? { retryCount } : {}),
+      updatedAt: now(),
+    };
     tasks[idx] = updated;
     await this.saveTasks(runId, tasks);
     return updated;
@@ -382,7 +392,16 @@ export class RunManager {
     runId: string,
     taskId: string,
     updates: Partial<
-      Pick<Task, "title" | "description" | "executor" | "acceptanceCriteria" | "validation">
+      Pick<
+        Task,
+        | "title"
+        | "description"
+        | "executor"
+        | "acceptanceCriteria"
+        | "validation"
+        | "retryCount"
+        | "status"
+      >
     >,
   ): Promise<Task> {
     const tasks = await this.loadTasks(runId);
@@ -1098,6 +1117,29 @@ export class RunManager {
     } catch {
       return [];
     }
+  }
+
+  // ── Process Spawn Metrics / Logging ────────────────────
+
+  async logProcessSpawnMetrics(
+    runId: string,
+    metrics: {
+      totalSpawns: number;
+      totalReuses: number;
+      poolSize: number;
+      activePoolSize: number;
+      activeViteProcesses: number;
+      viteSpawnCount: number;
+    },
+  ): Promise<void> {
+    const run = await this.loadRun(runId);
+    if (!run) return;
+    run.metadata = {
+      ...(run.metadata ?? {}),
+      processSpawnMetrics: metrics,
+      processSpawnMetricsUpdatedAt: now(),
+    };
+    await this.saveRun(run);
   }
 
   // ── Performance: Storage management ───────────────────

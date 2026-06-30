@@ -102,12 +102,17 @@ export class CommandExecutor implements Executor {
       args: finalArgs,
     });
 
+    const releaseSpawn = this.processManager
+      ? await this.processManager.acquireSpawnSlot(cmd)
+      : () => {};
+
     try {
       return await new Promise<ExecutorResult>((resolve) => {
         let settled = false;
         const resolveOnce = (result: ExecutorResult): void => {
           if (settled) return;
           settled = true;
+          releaseSpawn();
           resolve(result);
         };
 
@@ -386,6 +391,8 @@ export class CommandExecutor implements Executor {
               interactiveSessionId: sessionId,
               detectedPrompt: detectedPromptText,
             });
+          } else {
+            releaseSpawn();
           }
         });
 
@@ -436,10 +443,13 @@ export class CommandExecutor implements Executor {
               startedAt,
               finishedAt: now(),
             });
+          } else {
+            releaseSpawn();
           }
         });
       });
     } catch (err) {
+      releaseSpawn();
       const message = err instanceof Error ? err.message : String(err);
       const isTimeout = message.includes("timeout") || message.includes("ETIMEDOUT");
 
