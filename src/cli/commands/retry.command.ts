@@ -191,6 +191,7 @@ export async function retryCommand(
       completedTasks,
       isRetry: true,
       errorLog: previousTaskLog.slice(0, 2000),
+      additionalInstructions: instructions.length > 0 ? instructions : undefined,
     });
 
     const contextDir = getContextDir(rootPath, runId);

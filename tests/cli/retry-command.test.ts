@@ -187,6 +187,21 @@ describe("retryCommand", () => {
     expect(output).toContain("Failed task");
   });
 
+  it("should accept multiple instructions in dry-run", async () => {
+    try {
+      await retryCommand("task_failed_001", {
+        run: runId,
+        dryRun: true,
+        instruction: ["Use semicolons", "Add error handling"],
+      });
+    } catch {
+      // process.exit expected
+    }
+
+    expect(output).toContain("Retry dry-run");
+    expect(output).toContain("Instruction: Use semicolons, Add error handling");
+  });
+
   it("should exit when not initialized", async () => {
     const uninitDir = join(testDir, `not-init-${Date.now()}`);
     mkdirSync(uninitDir, { recursive: true });
