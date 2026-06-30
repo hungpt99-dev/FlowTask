@@ -41,7 +41,10 @@ export class FlowTaskError extends Error {
 
 export class ConfigError extends FlowTaskError {
   constructor(message: string, details?: Record<string, unknown>) {
-    super("CONFIG_ERROR", message, { details });
+    super("CONFIG_ERROR", message, {
+      details,
+      suggestedFix: "Check .flowtask/config.json for valid settings. Run: flowtask doctor",
+    });
     this.name = "ConfigError";
   }
 }
@@ -97,6 +100,8 @@ export class ProjectNotInitializedError extends FlowTaskError {
   constructor(rootPath: string) {
     super("PROJECT_NOT_INITIALIZED", `Project not initialized at: ${rootPath}`, {
       details: { rootPath },
+      suggestedFix: `Run "flowtask init" to initialize FlowTask in this directory. Use --force to reinitialize.`,
+      userReviewSuggestion: "See https://github.com/thanhhung-98/FlowTask#usage for setup help.",
     });
     this.name = "ProjectNotInitializedError";
   }
@@ -141,11 +146,22 @@ export class DependencyError extends FlowTaskError {
     super("DEPENDENCY_ERROR", message, {
       details: opts?.details,
       suggestedFix: opts?.dependency
-        ? `Install the missing dependency: ${opts.dependency}`
-        : "Install the required dependency and retry.",
+        ? `Install the missing dependency and ensure it is in your PATH: ${opts.dependency}`
+        : "Install the required dependency and ensure it is in your PATH.",
       retryable: true,
     });
     this.name = "DependencyError";
+  }
+}
+
+export class MissingEnvVarError extends FlowTaskError {
+  constructor(envVar: string, context?: string) {
+    super("MISSING_ENV_VAR", `${envVar} environment variable not set`, {
+      details: { envVar, context },
+      suggestedFix: `Set ${envVar}=your-value in your shell or .env file.`,
+      retryable: true,
+    });
+    this.name = "MissingEnvVarError";
   }
 }
 
@@ -155,11 +171,14 @@ export class NetworkError extends FlowTaskError {
     opts?: {
       details?: Record<string, unknown>;
       retryable?: boolean;
+      targetUrl?: string;
     },
   ) {
     super("NETWORK_ERROR", message, {
-      details: opts?.details,
-      suggestedFix: "Check your network connection and retry.",
+      details: { ...opts?.details, targetUrl: opts?.targetUrl },
+      suggestedFix: opts?.targetUrl
+        ? `Cannot reach ${opts.targetUrl}. Check your network connection, firewall, and that the endpoint is correct.`
+        : "Check your network connection, firewall, and proxy settings. Run: flowtask doctor",
       retryable: opts?.retryable ?? true,
     });
     this.name = "NetworkError";
@@ -177,8 +196,8 @@ export class PermissionError extends FlowTaskError {
     super("PERMISSION_ERROR", message, {
       details: opts?.details,
       suggestedFix: opts?.requiredPath
-        ? `Check permissions for: ${opts.requiredPath}. Try: chmod or sudo.`
-        : "Check file permissions or run with appropriate privileges.",
+        ? `Check permissions for: ${opts.requiredPath}. Try: chmod +r "${opts.requiredPath}" or run with appropriate user.`
+        : "Check file permissions or run with appropriate user/group privileges.",
       retryable: false,
     });
     this.name = "PermissionError";
