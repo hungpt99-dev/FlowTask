@@ -85,6 +85,7 @@ import { skipCommand } from "./commands/skip.command.js";
 import { reportCommand } from "./commands/report.command.js";
 import { configureAiCommand } from "./commands/configure.command.js";
 import { healthCheckCommand } from "./commands/healthcheck.js";
+import { healthCommand } from "./health-command.js";
 
 const program = new Command();
 
@@ -95,10 +96,15 @@ program
 
 program
   .command("init")
-  .description("Initialize a FlowTask project in the current directory")
+  .description(
+    "Initialize a FlowTask project in the current directory (use --force to reinitialize)",
+  )
   .option("--name <name>", "Project name")
   .option("--mode <mode>", "Project mode: development | writing | research | general")
-  .option("--force", "Force reinitialization")
+  .option(
+    "--force",
+    "Reinitialize if already initialized (overwrites mode config and steps, preserves run data)",
+  )
   .option("--show-modes", "List available init modes and descriptions")
   .action((opts: { name?: string; mode?: string; force?: boolean; showModes?: boolean }) => {
     initCommand(opts);
@@ -589,6 +595,15 @@ program
   .option("--log", "Save results to run logs")
   .action(async (opts: { json?: boolean; log?: boolean }) => {
     await healthCheckCommand(opts);
+  });
+
+program
+  .command("health")
+  .description("Alias for healthcheck — check runtime health status")
+  .option("--json", "Output as JSON")
+  .option("--log", "Save results to run logs")
+  .action(async (opts: { json?: boolean; log?: boolean }) => {
+    await healthCommand(opts);
   });
 
 program

@@ -359,10 +359,27 @@ export function reinitializationConfirmation(): string {
   lines.push(`  ${picocolors.dim("To reinitialize, use:")}`);
   lines.push(`  ${picocolors.cyan("  flowtask init --force")}`);
   lines.push("");
-  lines.push(`  ${picocolors.dim("This will overwrite existing mode config and steps.")}`);
-  lines.push(`  ${picocolors.dim("Your existing runs and task data will be preserved.")}`);
+  lines.push(`  ${picocolors.dim("This will overwrite existing mode config and rules.")}`);
+  lines.push(`  ${picocolors.dim("Your existing runs, tasks, and state data will be preserved.")}`);
   lines.push(`  ${picocolors.dim(`See: ${COMMANDS_URL}`)}`);
   lines.push("");
+  return lines.join("\n");
+}
+
+export function forceReinitWarning(): string {
+  const lines: string[] = [];
+  lines.push("");
+  lines.push(
+    `  ${picocolors.yellow("⚠")} ${picocolors.bold("Reinitializing FlowTask will overwrite:")}`,
+  );
+  lines.push("");
+  lines.push(`  ${picocolors.dim("  • Mode configuration (.flowtask/config.json → projectMode)")}`);
+  lines.push(`  ${picocolors.dim("  • Mode rules (.flowtask/rules/mode.md)")}`);
+  lines.push(`  ${picocolors.dim("  • Step templates (.flowtask/steps/default.md)")}`);
+  lines.push("");
+  lines.push(`  ${picocolors.green("  ✓ Existing runs, tasks, and state will be preserved.")}`);
+  lines.push("");
+  lines.push(`  ${picocolors.dim("Continue with reinitialization?")}`);
   return lines.join("\n");
 }
 

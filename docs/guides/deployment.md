@@ -145,12 +145,33 @@ EOF
 
 ### Run as a Service (systemd)
 
-Create `/etc/systemd/system/flowtask.service`:
+Example systemd service files are available in `examples/systemd/`:
+
+```
+examples/systemd/
+├── flowtask.service      # Production systemd unit
+└── .env.example          # Environment file template
+```
+
+Copy them to your server:
+
+```bash
+# Install the service unit
+sudo cp examples/systemd/flowtask.service /etc/systemd/system/
+
+# Create and edit the environment file
+cp examples/systemd/.env.example /opt/my-project/.env
+# Edit /opt/my-project/.env with your API keys
+```
+
+The service unit (`examples/systemd/flowtask.service`):
 
 ```ini
 [Unit]
 Description=FlowTask AI Task Runtime
+Documentation=https://github.com/thanhhung-98/FlowTask
 After=network.target
+Wants=network-online.target
 
 [Service]
 Type=simple
@@ -158,9 +179,17 @@ User=flowtask
 Group=flowtask
 WorkingDirectory=/opt/my-project
 ExecStart=/usr/bin/node /opt/flowtask/dist/index.js run --watch
+ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=10
+TimeoutStopSec=30
 EnvironmentFile=/opt/my-project/.env
+AmbientCapabilities=
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/my-project /opt/flowtask
 
 [Install]
 WantedBy=multi-user.target

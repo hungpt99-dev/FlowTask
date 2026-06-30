@@ -72,7 +72,7 @@ export const ERROR_SUGGESTIONS: Record<ErrorCategory, string> = {
   project_not_initialized:
     "FlowTask is not initialized. Run: flowtask init. Use --force to reinitialize.",
   init_failed:
-    "FlowTask initialization failed. Check that the directory is writable, disk space is available, and no existing .flowtask files are locked. Run: flowtask init --force to retry.",
+    "FlowTask initialization failed. Check that the directory is writable, disk space is available, and no existing .flowtask files are locked. Run: flowtask init --force to retry. For details, see: docs/guides/TROUBLESHOOTING.md#initialization-fails",
   unknown: "An unexpected error occurred. Check the logs for details.",
 };
 
@@ -184,10 +184,13 @@ export function classifyError(
     if (
       message.includes("ENOENT") ||
       message.includes("command not found") ||
-      message.includes("not found")
+      message.includes("not found") ||
+      message.includes("Cannot find module") ||
+      message.includes("Module not found")
     ) {
       return buildErrorContext("missing_dependency", message, {
-        suggestedFix: "Install the missing dependency and retry.",
+        suggestedFix:
+          "The required command or module was not found. Install the missing dependency and ensure it is in your PATH. Run: flowtask doctor to verify your environment. Check .flowtask/config.json for the correct executor command path.",
         source: "executor",
       });
     }
@@ -213,6 +216,37 @@ export function classifyError(
         source: "executor",
       });
     }
+    if (message.includes("docker") || message.includes("Docker")) {
+      return buildErrorContext("missing_dependency", message, {
+        suggestedFix:
+          "Docker is required but not found. Install Docker Desktop (macOS/Windows) or Docker Engine (Linux). Visit https://docker.com for installation instructions. If Docker is installed, ensure the daemon is running (docker info).",
+        source: "executor",
+      });
+    }
+
+    if (
+      message.includes("npm ERR") ||
+      message.includes("ERR_PNPM") ||
+      message.includes("ERR! code")
+    ) {
+      return buildErrorContext("command_failure", message, {
+        suggestedFix:
+          "A package manager command failed. Check the output above for the specific error. Common issues: network connectivity, missing registry access, or conflicting dependencies. Try: npm cache clean --force && npm install, or delete node_modules and reinstall.",
+        source: "executor",
+      });
+    }
+
+    if (
+      message.includes("module") &&
+      (message.includes("not found") || message.includes("cannot find"))
+    ) {
+      return buildErrorContext("missing_dependency", message, {
+        suggestedFix:
+          "A required npm/pnpm module is missing. Run the install command for your package manager and retry.",
+        source: "executor",
+      });
+    }
+
     if (message.includes("ETIMEDOUT") || message.includes("timeout")) {
       return buildErrorContext("timeout", message, { source: "executor" });
     }
@@ -270,7 +304,8 @@ export function classifyError(
 
     if (message.includes("not initialized") || message.includes("PROJECT_NOT_INITIALIZED")) {
       return buildErrorContext("project_not_initialized", message, {
-        suggestedFix: "Run: flowtask init. Use --force to reinitialize.",
+        suggestedFix:
+          "Run: flowtask init in your project directory. Use --force to reinitialize if already initialized.",
         source: "workflow",
       });
     }
@@ -280,8 +315,42 @@ export function classifyError(
       (message.includes("fail") || message.includes("could not create"))
     ) {
       return buildErrorContext("init_failed", message, {
-        suggestedFix: "Check directory permissions and disk space, then retry: flowtask init",
+        suggestedFix:
+          "Check directory write permissions (ls -la .), disk space (df -h .), and that no .flowtask files are locked by another process. Then retry: flowtask init --force",
         source: "workflow",
+        retryable: true,
+      });
+    }
+
+    if (
+      message.includes("JSON") &&
+      (message.includes("parse") || message.includes("parsing") || message.includes("invalid"))
+    ) {
+      return buildErrorContext("invalid_validation_result", message, {
+        suggestedFix:
+          "The AI provider returned invalid or non-JSON output. FlowTask will retry with a JSON-repair prompt. If this persists, switch to simple planner: flowtask run --planner simple. Check raw output in .flowtask/runs/<runId>/outputs/",
+        source: "ai_provider",
+        retryable: true,
+      });
+    }
+
+    if (
+      message.includes("EADDRINUSE") ||
+      (message.includes("port") && message.includes("in use"))
+    ) {
+      return buildErrorContext("command_failure", message, {
+        suggestedFix:
+          "The required port is already in use. Stop the process using it (lsof -i :<port>) or configure a different port in .flowtask/config.json.",
+        source: "executor",
+        retryable: true,
+      });
+    }
+
+    if (message.includes("disk") || message.includes("ENOSPC") || message.includes("no space")) {
+      return buildErrorContext("command_failure", message, {
+        suggestedFix:
+          "Disk space is low or exhausted. Free up space (df -h .), clean temporary files, or remove old node_modules. Run: pnpm store prune or npm cache clean --force.",
+        source: "executor",
         retryable: true,
       });
     }

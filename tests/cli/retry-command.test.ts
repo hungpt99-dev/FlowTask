@@ -1,10 +1,12 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { join } from "node:path";
 import { mkdirSync } from "node:fs";
 import { testDir } from "../setup.js";
 import { initCommand } from "../../src/cli/commands/init.command.js";
 import { retryCommand } from "../../src/cli/commands/retry.command.js";
 import { RunManager } from "../../src/core/run-manager.js";
+import { RunLifecycle } from "../../src/core/run-lifecycle.js";
+import { EventStore } from "../../src/core/event-store.js";
 
 describe("retryCommand", () => {
   let projectDir: string;
@@ -213,5 +215,99 @@ describe("retryCommand", () => {
       const err = e as Error;
       expect(err.message).toContain("process.exit");
     }
+  });
+
+  it("should increment and persist retryCount after retry success", async () => {
+    const run = (await runManager.loadRun(runId))!;
+    run.errors = [
+      {
+        taskId: "task_failed_001",
+        message: "First attempt error",
+        timestamp: new Date().toISOString(),
+      },
+    ];
+    run.errorCount = 1;
+    await runManager.saveRun(run);
+
+    const execSpy = vi.spyOn(RunLifecycle.prototype, "executeSingleTask").mockResolvedValue(true);
+    const eventSpy = vi.spyOn(EventStore.prototype, "appendToRun").mockResolvedValue();
+
+    try {
+      await retryCommand("task_failed_001", { run: runId, skipValidation: true });
+    } catch {
+      // process.exit expected
+    }
+
+    const tasks = await runManager.loadTasks(runId);
+    const task = tasks.find((t) => t.id === "task_failed_001");
+    expect(task?.retryCount).toBe(1);
+
+    execSpy.mockRestore();
+    eventSpy.mockRestore();
+  });
+
+  it("should clear task errors from run before retry execution", async () => {
+    const run = (await runManager.loadRun(runId))!;
+    run.errors = [
+      {
+        taskId: "task_failed_001",
+        message: "First attempt error",
+        timestamp: new Date().toISOString(),
+      },
+    ];
+    run.errorCount = 1;
+    await runManager.saveRun(run);
+
+    // Mock executeSingleTask to fail, so only pre-retry error clearing runs
+    const execSpy = vi.spyOn(RunLifecycle.prototype, "executeSingleTask").mockResolvedValue(false);
+    const eventSpy = vi.spyOn(EventStore.prototype, "appendToRun").mockResolvedValue();
+
+    try {
+      await retryCommand("task_failed_001", { run: runId, skipValidation: true });
+    } catch {
+      // process.exit expected
+    }
+
+    const updatedRun = await runManager.loadRun(runId);
+    expect(updatedRun?.errors ?? []).toHaveLength(0);
+    expect(updatedRun?.errorCount).toBe(0);
+
+    execSpy.mockRestore();
+    eventSpy.mockRestore();
+  });
+
+  it("should clear task errors from run after retry success", async () => {
+    const run = (await runManager.loadRun(runId))!;
+    run.errors = [
+      {
+        taskId: "task_failed_001",
+        message: "First attempt error",
+        timestamp: new Date().toISOString(),
+      },
+      {
+        taskId: "other_task",
+        message: "Other task error",
+        timestamp: new Date().toISOString(),
+      },
+    ];
+    run.errorCount = 2;
+    await runManager.saveRun(run);
+
+    const execSpy = vi.spyOn(RunLifecycle.prototype, "executeSingleTask").mockResolvedValue(true);
+    const eventSpy = vi.spyOn(EventStore.prototype, "appendToRun").mockResolvedValue();
+
+    try {
+      await retryCommand("task_failed_001", { run: runId, skipValidation: true });
+    } catch {
+      // process.exit expected
+    }
+
+    const updatedRun = await runManager.loadRun(runId);
+    expect(updatedRun?.errors?.filter((e) => e.taskId === "task_failed_001")).toHaveLength(0);
+    expect(updatedRun?.errors?.filter((e) => e.taskId === "other_task")).toHaveLength(1);
+    expect(updatedRun?.errorCount).toBe(1);
+
+    execSpy.mockRestore();
+    eventSpy.mockRestore();
   });
 });

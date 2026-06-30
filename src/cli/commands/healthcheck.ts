@@ -99,7 +99,11 @@ async function logHealthResults(rootPath: string, status: RuntimeStatus): Promis
 
     for (const check of status.checks) {
       if (!check.ok) {
-        await logManager.writeRuntime(runId, `Health check fail: ${check.name} — ${check.message}`);
+        await logManager.writeRuntime(
+          runId,
+          `Health check fail: ${check.name} — ${check.message}`,
+          "warn",
+        );
       }
     }
   } catch {

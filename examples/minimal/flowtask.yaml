@@ -1,0 +1,13 @@
+runTitle: "Hello World Example"
+tasks:
+  - id: hello_world
+    title: "Print Hello World"
+    description: "Run a shell command that prints Hello World to the console"
+    executor: shell
+    dependsOn: []
+    acceptanceCriteria:
+      - Output contains "Hello World"
+    validation:
+      commands:
+        - echo "Hello World"
+    expectedResult: "Hello World printed to console"

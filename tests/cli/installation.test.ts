@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { testDir } from "../setup.js";
 import { initCommand } from "../../src/cli/commands/init.command.js";
-import { reinitializationConfirmation } from "../../src/cli/errors.js";
+import { forceReinitWarning, reinitializationConfirmation } from "../../src/cli/errors.js";
 
 describe("installation and init", () => {
   let projectDir: string;
@@ -196,6 +196,74 @@ describe("installation and init", () => {
 
     await initCommand({ force: true });
 
-    expect(output).toContain("FlowTask initialized");
+    expect(output).toContain("FlowTask reinitialized");
+  });
+
+  it("should preserve existing run index during force reinit", async () => {
+    process.stdin.isTTY = false as unknown as boolean;
+
+    await initCommand({});
+
+    const runIndexPath = join(projectDir, ".flowtask", "run-index.json");
+    const existing = JSON.parse(readFileSync(runIndexPath, "utf-8"));
+    existing.runs.push({
+      runId: "test-run-001",
+      title: "Preserved Run",
+      status: "completed",
+      mode: "auto",
+      createdAt: new Date().toISOString(),
+    });
+    writeFileSync(runIndexPath, JSON.stringify(existing, null, 2));
+
+    await initCommand({ force: true });
+
+    const updated = JSON.parse(readFileSync(runIndexPath, "utf-8"));
+    expect(updated.projectId).toBeDefined();
+    expect(updated.runs).toHaveLength(1);
+    expect(updated.runs[0].runId).toBe("test-run-001");
+  });
+
+  it("should preserve existing task index during force reinit", async () => {
+    process.stdin.isTTY = false as unknown as boolean;
+
+    await initCommand({});
+
+    const taskIndexPath = join(projectDir, ".flowtask", "task-index.json");
+    const existing = JSON.parse(readFileSync(taskIndexPath, "utf-8"));
+    existing.tasks.push({
+      taskId: "test-task-001",
+      runId: "test-run-001",
+      title: "Preserved Task",
+      status: "done",
+    });
+    writeFileSync(taskIndexPath, JSON.stringify(existing, null, 2));
+
+    await initCommand({ force: true });
+
+    const updated = JSON.parse(readFileSync(taskIndexPath, "utf-8"));
+    expect(updated.projectId).toBeDefined();
+    expect(updated.tasks).toHaveLength(1);
+    expect(updated.tasks[0].taskId).toBe("test-task-001");
+  });
+
+  it("should show force reinit warning message before proceeding", async () => {
+    process.stdin.isTTY = false as unknown as boolean;
+
+    await initCommand({});
+
+    output = "";
+    await initCommand({ force: true });
+
+    expect(output).toContain("Reinitializing FlowTask will overwrite");
+    expect(output).toContain("Existing runs, tasks, and state will be preserved");
+  });
+
+  it("should render forceReinitWarning with expected content", () => {
+    const warning = forceReinitWarning();
+    expect(warning).toContain("Reinitializing FlowTask will overwrite");
+    expect(warning).toContain("Mode configuration");
+    expect(warning).toContain("Mode rules");
+    expect(warning).toContain("Step templates");
+    expect(warning).toContain("Existing runs, tasks, and state will be preserved");
   });
 });

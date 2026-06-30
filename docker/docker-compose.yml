@@ -1,55 +1,53 @@
 services:
   flowtask:
-    build: .
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
     image: flowtask:latest
     container_name: flowtask
-    restart: "no"
+    stdin_open: true
+    tty: true
+    working_dir: /project
     volumes:
       - .:/project
       - flowtask-data:/app/.flowtask
-    working_dir: /project
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
-      - GROQ_API_KEY=${GROQ_API_KEY:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - TOGETHER_API_KEY=${TOGETHER_API_KEY:-}
       - FIREWORKS_API_KEY=${FIREWORKS_API_KEY:-}
       - BYTEPLUS_MODELARK_API_KEY=${BYTEPLUS_MODELARK_API_KEY:-}
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
-    stdin_open: true
-    tty: true
-    labels:
-      - "org.opencontainers.image.title=FlowTask"
-      - "org.opencontainers.image.description=AI workflow orchestrator CLI"
-      - "org.opencontainers.image.source=https://github.com/phamthanhhung/flowtask"
     healthcheck:
-      test: ["CMD", "node", "dist/index.js", "doctor"]
+      test: ["CMD", "node", "/app/dist/index.js", "doctor"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 5s
+    restart: "no"
 
   ollama:
+    profile: ollama
     image: ollama/ollama:latest
     container_name: flowtask-ollama
-    profiles:
-      - ollama
-    restart: unless-stopped
-    volumes:
-      - ollama-data:/root/.ollama
     ports:
       - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
     healthcheck:
       test: ["CMD", "ollama", "list"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
+    restart: unless-stopped
 
 volumes:
   flowtask-data:

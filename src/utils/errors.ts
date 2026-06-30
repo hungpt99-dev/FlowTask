@@ -67,8 +67,16 @@ export class ValidationError extends FlowTaskError {
 }
 
 export class StateError extends FlowTaskError {
-  constructor(message: string, details?: Record<string, unknown>) {
-    super("STATE_ERROR", message, { details });
+  constructor(message: string, details?: Record<string, unknown>, opts?: { filePath?: string }) {
+    const suggestions: string[] = [];
+    if (opts?.filePath) {
+      suggestions.push(`Check the file at: ${opts.filePath}`);
+    }
+    suggestions.push("Check .flowtask/state.json for corruption. Run: flowtask doctor");
+    super("STATE_ERROR", message, {
+      details: { ...details, ...(opts?.filePath ? { filePath: opts.filePath } : {}) },
+      suggestedFix: suggestions.join(" "),
+    });
     this.name = "StateError";
   }
 }
@@ -82,16 +90,46 @@ export class ExecutorError extends FlowTaskError {
       suggestedFix?: string;
       retryable?: boolean;
       retrySuggestion?: string;
+      executorName?: string;
+      exitCode?: number;
     },
   ) {
-    super("EXECUTOR_ERROR", message, opts);
+    const exitInfo = opts?.exitCode !== undefined ? ` (exit code: ${opts.exitCode})` : "";
+    const executorInfo = opts?.executorName ? `Executor: ${opts.executorName}` : "";
+    super("EXECUTOR_ERROR", `${message}${exitInfo}`, {
+      ...opts,
+      details: {
+        ...opts?.details,
+        ...(opts?.executorName ? { executorName: opts.executorName } : {}),
+        ...(opts?.exitCode !== undefined ? { exitCode: opts.exitCode } : {}),
+      },
+      suggestedFix:
+        opts?.suggestedFix ??
+        `${executorInfo}Review the executor output above for error details. Check that the command is installed and working. Run: flowtask doctor`.trim(),
+    });
     this.name = "ExecutorError";
   }
 }
 
 export class SafetyError extends FlowTaskError {
-  constructor(message: string, details?: Record<string, unknown>) {
-    super("SAFETY_ERROR", message, { details });
+  constructor(
+    message: string,
+    details?: Record<string, unknown>,
+    opts?: { command?: string; riskLevel?: string },
+  ) {
+    const suggestion = opts?.command
+      ? opts.riskLevel === "blocked"
+        ? `The command "${opts.command}" was blocked because it is considered dangerous. To proceed, add it to safety.allowedCommands in .flowtask/config.json.`
+        : `The command "${opts.command}" was flagged as "${opts.riskLevel}" and requires approval. Use --approve to override or add it to safety.allowedCommands in .flowtask/config.json.`
+      : "The command was blocked by safety checks. Review the command and retry with explicit approval if needed.";
+    super("SAFETY_ERROR", message, {
+      details: {
+        ...details,
+        ...(opts?.command ? { command: opts.command } : {}),
+        ...(opts?.riskLevel ? { riskLevel: opts.riskLevel } : {}),
+      },
+      suggestedFix: suggestion + " Run: flowtask doctor",
+    });
     this.name = "SafetyError";
   }
 }

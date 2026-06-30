@@ -159,6 +159,20 @@ export async function retryCommand(
 
     const indTaskId = task.id;
     const newRetryCount = task.retryCount + 1;
+
+    // Clear stale error state before retry
+    const prevErrorCount = run.errors?.length ?? 0;
+    if (run.errors) {
+      run.errors = run.errors.filter((e) => e.taskId !== indTaskId);
+    }
+    const removedCount = prevErrorCount - (run.errors?.length ?? 0);
+    if (removedCount > 0) {
+      run.errorCount = Math.max(0, (run.errorCount ?? 0) - removedCount);
+      await runManager.saveRun(run);
+    }
+
+    await runManager.updateTaskStatus(runId, indTaskId, "pending", newRetryCount);
+
     const eventStore = new EventStore(rootPath);
 
     await eventStore.appendToRun(runId, {
@@ -206,8 +220,6 @@ export async function retryCommand(
       details: { retryCount: newRetryCount, contextPackPath },
     });
 
-    await runManager.updateTaskStatus(runId, indTaskId, "pending");
-
     await eventStore.appendToRun(runId, {
       type: "retry_executor_started",
       runId,
@@ -224,6 +236,19 @@ export async function retryCommand(
     const success = await runLifecycle.executeSingleTask(runId, indTaskId);
 
     if (success) {
+      const updatedRun = await runManager.loadRun(runId);
+      if (updatedRun) {
+        const prevErrorCount = updatedRun.errors?.length ?? 0;
+        if (updatedRun.errors) {
+          updatedRun.errors = updatedRun.errors.filter((e) => e.taskId !== indTaskId);
+        }
+        const removedCount = prevErrorCount - (updatedRun.errors?.length ?? 0);
+        if (removedCount > 0) {
+          updatedRun.errorCount = Math.max(0, (updatedRun.errorCount ?? 0) - removedCount);
+          await runManager.saveRun(updatedRun);
+        }
+      }
+
       await eventStore.appendToRun(runId, {
         type: "retry_completed",
         runId,

@@ -9,6 +9,7 @@ import {
   MODE_DEFINITIONS,
 } from "../../config/project-modes.js";
 import {
+  forceReinitWarning,
   initializationFailedError,
   reinitializationConfirmation,
   unknownInitModeError,
@@ -39,6 +40,26 @@ export async function initCommand(options: {
   if (alreadyInit && !options.force) {
     console.log(reinitializationConfirmation());
     process.exit(0);
+  }
+
+  if (alreadyInit && options.force) {
+    console.log(forceReinitWarning());
+    if (process.stdin.isTTY) {
+      const m = await import("enquirer");
+      const Enquirer = m.default ?? m;
+      const enquirer = new (Enquirer as unknown as new () => {
+        prompt: (opts: unknown) => Promise<Record<string, unknown>>;
+      })();
+      const response = await enquirer.prompt({
+        type: "confirm",
+        name: "confirmed",
+        message: "Reinitialize FlowTask?",
+        initial: false,
+      });
+      if (!response.confirmed) {
+        process.exit(0);
+      }
+    }
   }
 
   let mode: ProjectMode;
@@ -75,7 +96,8 @@ export async function initCommand(options: {
 
   const projectFile = path.join(flowtaskDir, "project.json");
   if (await fileExists(projectFile)) {
-    console.log(picocolors.green(`\n✓ FlowTask initialized: ${project.name}`));
+    const label = options.force && alreadyInit ? "Reinitialized" : "Initialized";
+    console.log(picocolors.green(`\n✓ FlowTask ${label.toLowerCase()}: ${project.name}`));
     console.log(picocolors.dim(`  Project mode: ${mode}`));
   } else {
     console.log(

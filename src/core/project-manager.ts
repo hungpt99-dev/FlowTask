@@ -56,8 +56,27 @@ export class ProjectManager {
       status: "idle",
       updatedAt: timestamp,
     } satisfies ProjectState);
-    await atomicWriteJsonFile(runIndexPath(rootPath), { projectId, runs: [] });
-    await atomicWriteJsonFile(taskIndexPath(rootPath), { projectId, tasks: [] });
+    const [existingRunIndex, existingTaskIndex] = await Promise.all([
+      fileExists(runIndexPath(rootPath)).then(async (e) =>
+        e
+          ? readJsonFile<{ projectId: string; runs: unknown[] }>(runIndexPath(rootPath)).catch(
+              () => null,
+            )
+          : null,
+      ),
+      fileExists(taskIndexPath(rootPath)).then(async (e) =>
+        e
+          ? readJsonFile<{ projectId: string; tasks: unknown[] }>(taskIndexPath(rootPath)).catch(
+              () => null,
+            )
+          : null,
+      ),
+    ]);
+    await atomicWriteJsonFile(runIndexPath(rootPath), existingRunIndex ?? { projectId, runs: [] });
+    await atomicWriteJsonFile(
+      taskIndexPath(rootPath),
+      existingTaskIndex ?? { projectId, tasks: [] },
+    );
 
     const rulesDir = path.join(rootPath, RULES_DIR);
     const defaultRules = {

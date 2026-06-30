@@ -13,6 +13,8 @@ import { SecretRedactor } from "../safety/secret-redactor.js";
 
 const LOG_DIR_MODE = 0o700;
 const LOG_FILE_MODE = 0o600;
+const DEFAULT_MAX_LOG_SIZE = 10 * 1024 * 1024;
+const DEFAULT_MAX_LOG_FILES = 5;
 
 export interface LogEntry {
   t: string;
@@ -28,27 +30,55 @@ export class LogManager {
   private redactor: SecretRedactor;
   private pendingWrites = 0;
   private resolveQueue: Array<() => void> = [];
+  private maxLogSize: number;
+  private maxLogFiles: number;
 
-  constructor(rootPath: string) {
+  constructor(rootPath: string, options?: { maxLogSize?: number; maxLogFiles?: number }) {
     this.rootPath = rootPath;
     this.redactor = new SecretRedactor();
+    this.maxLogSize = options?.maxLogSize ?? DEFAULT_MAX_LOG_SIZE;
+    this.maxLogFiles = options?.maxLogFiles ?? DEFAULT_MAX_LOG_FILES;
+  }
+
+  private async rotateIfNeeded(filePath: string): Promise<void> {
+    try {
+      const { fileStat } = await import("../utils/fs.js");
+      const stat = await fileStat(filePath);
+      if (!stat || stat.size < this.maxLogSize) return;
+
+      for (let i = this.maxLogFiles - 1; i >= 1; i--) {
+        const oldPath = `${filePath}.${i}`;
+        const { fileExists: fe } = await import("../utils/fs.js");
+        if (await fe(oldPath)) {
+          const { rename } = await import("node:fs/promises");
+          await rename(oldPath, `${filePath}.${i + 1}`);
+        }
+      }
+      const { rename } = await import("node:fs/promises");
+      await rename(filePath, `${filePath}.1`);
+    } catch {
+      // rotation is best-effort
+    }
   }
 
   private async ensureLogDir(runId: string): Promise<void> {
     await ensureDir(getLogsDir(this.rootPath, runId), LOG_DIR_MODE);
   }
 
-  async writeRuntime(runId: string, message: string): Promise<void> {
+  async writeRuntime(
+    runId: string,
+    message: string,
+    level?: "info" | "warn" | "error" | "debug",
+  ): Promise<void> {
     await this.ensureLogDir(runId);
     const timestamp = now();
     const safeMessage = this.redactor.redact(message);
+    const lvl = (level ?? "info").toUpperCase();
     this.pendingWrites++;
     try {
-      await appendToFile(
-        runtimeLogPath(this.rootPath, runId),
-        `[${timestamp}] ${safeMessage}\n`,
-        LOG_FILE_MODE,
-      );
+      const logPath = runtimeLogPath(this.rootPath, runId);
+      await this.rotateIfNeeded(logPath);
+      await appendToFile(logPath, `[${timestamp}] [${lvl}] ${safeMessage}\n`, LOG_FILE_MODE);
     } finally {
       this.pendingWrites--;
       this.checkQueue();
@@ -72,17 +102,21 @@ export class LogManager {
     }
   }
 
-  async writeTaskLog(runId: string, taskId: string, message: string): Promise<void> {
+  async writeTaskLog(
+    runId: string,
+    taskId: string,
+    message: string,
+    level?: "info" | "warn" | "error" | "debug",
+  ): Promise<void> {
     await this.ensureLogDir(runId);
     const timestamp = now();
     const safeMessage = this.redactor.redact(message);
+    const lvl = (level ?? "info").toUpperCase();
     this.pendingWrites++;
     try {
-      await appendToFile(
-        taskLogPath(this.rootPath, runId, taskId),
-        `[${timestamp}] ${safeMessage}\n`,
-        LOG_FILE_MODE,
-      );
+      const logPath = taskLogPath(this.rootPath, runId, taskId);
+      await this.rotateIfNeeded(logPath);
+      await appendToFile(logPath, `[${timestamp}] [${lvl}] ${safeMessage}\n`, LOG_FILE_MODE);
     } finally {
       this.pendingWrites--;
       this.checkQueue();
@@ -110,17 +144,20 @@ export class LogManager {
     }
   }
 
-  async writeValidation(runId: string, message: string): Promise<void> {
+  async writeValidation(
+    runId: string,
+    message: string,
+    level?: "info" | "warn" | "error" | "debug",
+  ): Promise<void> {
     await this.ensureLogDir(runId);
     const timestamp = now();
     const safeMessage = this.redactor.redact(message);
+    const lvl = (level ?? "info").toUpperCase();
     this.pendingWrites++;
     try {
-      await appendToFile(
-        validationLogPath(this.rootPath, runId),
-        `[${timestamp}] ${safeMessage}\n`,
-        LOG_FILE_MODE,
-      );
+      const logPath = validationLogPath(this.rootPath, runId);
+      await this.rotateIfNeeded(logPath);
+      await appendToFile(logPath, `[${timestamp}] [${lvl}] ${safeMessage}\n`, LOG_FILE_MODE);
     } finally {
       this.pendingWrites--;
       this.checkQueue();
@@ -186,7 +223,7 @@ export class LogManager {
       .filter(Boolean)
       .join(" | ");
 
-    await this.writeRuntime(runId, msg);
+    await this.writeRuntime(runId, msg, "info");
 
     await this.writeRuntimeJsonl(runId, {
       s: "system",
@@ -212,7 +249,8 @@ export class LogManager {
     const ok = results.filter((r) => r.ok);
     const failed = results.filter((r) => !r.ok);
     const summary = `AI providers: ${ok.length} ok, ${failed.length} failed (${failed.map((r) => r.provider).join(", ") || "none"})`;
-    await this.writeRuntime(runId, summary);
+    const summaryLevel: "info" | "warn" = failed.length > 0 ? "warn" : "info";
+    await this.writeRuntime(runId, summary, summaryLevel);
 
     for (const r of results) {
       const tag = r.ok ? "OK" : "FAIL";
@@ -243,7 +281,8 @@ export class LogManager {
     },
   ): Promise<void> {
     const msg = `Health check: ${status.overall.toUpperCase()} (${status.healthy} healthy, ${status.degraded} degraded, ${status.failing} failing)`;
-    await this.writeRuntime(runId, msg);
+    const hcLevel: "info" | "warn" = status.overall === "healthy" ? "info" : "warn";
+    await this.writeRuntime(runId, msg, hcLevel);
 
     await this.writeRuntimeJsonl(runId, {
       s: "system",
@@ -255,7 +294,7 @@ export class LogManager {
         failing: status.failing,
         total: status.total,
       }),
-      l: status.overall === "healthy" ? "info" : "warn",
+      l: hcLevel,
       runId,
     });
   }
@@ -264,8 +303,7 @@ export class LogManager {
     runId: string,
     error: { message: string; code?: string; stack?: string },
   ): Promise<void> {
-    const msg = `ERROR [${error.code ?? "unknown"}]: ${error.message}`;
-    await this.writeRuntime(runId, msg);
+    await this.writeRuntime(runId, `ERROR [${error.code ?? "unknown"}]: ${error.message}`, "error");
 
     await this.writeRuntimeJsonl(runId, {
       s: "system",

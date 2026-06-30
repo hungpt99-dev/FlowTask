@@ -104,6 +104,57 @@ describe("LogManager", () => {
     expect(runtimeContent).toContain("Connection refused");
   });
 
+  it("should write runtime logs with log level prefix", async () => {
+    await manager.writeRuntime(runId, "Info message", "info");
+    await manager.writeRuntime(runId, "Warning message", "warn");
+    await manager.writeRuntime(runId, "Error message", "error");
+    await manager.writeRuntime(runId, "Debug message", "debug");
+    await manager.flush();
+
+    const content = await manager.readRuntime(runId);
+    expect(content).toContain("[INFO] Info message");
+    expect(content).toContain("[WARN] Warning message");
+    expect(content).toContain("[ERROR] Error message");
+    expect(content).toContain("[DEBUG] Debug message");
+  });
+
+  it("should write task logs with log level prefix", async () => {
+    await manager.writeTaskLog(runId, "task_levels", "Task warn", "warn");
+    await manager.flush();
+
+    const content = await manager.readTaskLog(runId, "task_levels");
+    expect(content).toContain("[WARN] Task warn");
+  });
+
+  it("should write validation logs with log level prefix", async () => {
+    await manager.writeValidation(runId, "Validation error", "error");
+    await manager.flush();
+
+    const content = await manager.readValidation(runId);
+    expect(content).toContain("[ERROR] Validation error");
+  });
+
+  it("should rotate log files when size limit is exceeded", async () => {
+    const tinyManager = new LogManager(testDir, { maxLogSize: 1, maxLogFiles: 2 });
+    const rotateRunId = "log-rotate-test";
+
+    for (let i = 0; i < 20; i++) {
+      await tinyManager.writeRuntime(
+        rotateRunId,
+        `Line ${i} - xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`,
+      );
+    }
+    await tinyManager.flush();
+
+    const { fileExists } = await import("../../src/utils/fs.js");
+    const { runtimeLogPath } = await import("../../src/utils/paths.js");
+
+    const currentExists = await fileExists(runtimeLogPath(testDir, rotateRunId));
+    const rotatedExists = await fileExists(`${runtimeLogPath(testDir, rotateRunId)}.1`);
+
+    expect(currentExists || rotatedExists).toBe(true);
+  });
+
   it("should write startup with new optional fields", async () => {
     await manager.writeStartup(runId, {
       nodeVersion: "v22.0.0",

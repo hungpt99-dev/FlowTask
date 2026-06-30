@@ -16,6 +16,7 @@ Welcome to the FlowTask documentation. This index helps you find the right docum
 
 ## Quick Links
 
+- [Installation](guides/INSTALLATION.md) — Global install via npm/pnpm/yarn
 - [Getting Started](guides/GETTING_STARTED.md) — Install and run your first workflow
 - [CLI Commands](reference/COMMANDS.md) — Full command reference
 - [Configuration](reference/CONFIGURATION.md) — config.json schema and defaults
