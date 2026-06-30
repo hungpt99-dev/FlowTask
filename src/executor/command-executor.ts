@@ -141,7 +141,7 @@ export class CommandExecutor implements Executor {
         if (this.processManager && child.pid) {
           this.processManager.registerChildProcess(runId, child);
           this.processManager
-            .save(runId, {
+            .save(input.projectRoot, {
               runId,
               taskId,
               pid: child.pid,
@@ -352,7 +352,7 @@ export class CommandExecutor implements Executor {
 
           if (this.processManager) {
             this.processManager.unregisterChildProcess(runId);
-            this.processManager.clear(runId, runId).catch((err) => {
+            this.processManager.clear(input.projectRoot, runId).catch((err) => {
               if (this.logManager) {
                 this.logManager.writeTaskLog(
                   runId,
@@ -406,7 +406,7 @@ export class CommandExecutor implements Executor {
 
           if (this.processManager) {
             this.processManager.unregisterChildProcess(runId);
-            this.processManager.clear(runId, runId).catch((e) => {
+            this.processManager.clear(input.projectRoot, runId).catch((e) => {
               if (this.logManager) {
                 this.logManager.writeTaskLog(
                   runId,
