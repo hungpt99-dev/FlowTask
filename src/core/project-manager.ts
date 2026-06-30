@@ -22,7 +22,12 @@ import { generateModeRules } from "../config/mode-rules.js";
 import { generateModeSteps } from "../config/mode-steps.js";
 
 export class ProjectManager {
-  async init(rootPath: string, name?: string, mode?: ProjectMode): Promise<Project> {
+  async init(
+    rootPath: string,
+    name?: string,
+    mode?: ProjectMode,
+    force?: boolean,
+  ): Promise<Project> {
     const projectId = generateProjectId(name ?? "FlowTask Project");
     const timestamp = now();
     const project: Project = {
@@ -62,21 +67,21 @@ export class ProjectManager {
 
     for (const [fileName, content] of Object.entries(defaultRules)) {
       const rulePath = path.join(rulesDir, fileName);
-      if (!(await fileExists(rulePath))) {
+      if (force || !(await fileExists(rulePath))) {
         const { writeTextFile } = await import("../utils/fs.js");
         await writeTextFile(rulePath, content);
       }
     }
 
     const modeRulePath = path.join(rulesDir, "mode.md");
-    if (!(await fileExists(modeRulePath))) {
+    if (force || !(await fileExists(modeRulePath))) {
       const { writeTextFile } = await import("../utils/fs.js");
       await writeTextFile(modeRulePath, generateModeRules(resolvedMode));
     }
 
     const stepsDir = path.join(rootPath, STEPS_DIR);
     const stepsPath = path.join(stepsDir, "default.md");
-    if (!(await fileExists(stepsPath))) {
+    if (force || !(await fileExists(stepsPath))) {
       const { writeTextFile } = await import("../utils/fs.js");
       await writeTextFile(stepsPath, generateModeSteps(resolvedMode));
     }
