@@ -17,7 +17,7 @@ export async function retryCommand(
     failedOnly?: boolean;
     from?: string;
     skipValidation?: boolean;
-    instruction?: string;
+    instruction?: string | string[];
   },
 ): Promise<void> {
   const rootPath = process.cwd();
@@ -97,6 +97,12 @@ export async function retryCommand(
     process.exit(0);
   }
 
+  const instructions = options.instruction
+    ? Array.isArray(options.instruction)
+      ? options.instruction
+      : [options.instruction]
+    : [];
+
   if (options.dryRun) {
     if (tasksToRetry.length === 1) {
       const t = tasksToRetry[0]!;
@@ -105,8 +111,8 @@ export async function retryCommand(
       console.log(picocolors.dim(`  Run ID: ${runId}`));
       console.log(`  Retry count: ${t.retryCount + 1}/${t.maxRetries}`);
       console.log(`  Executor: ${t.executor}`);
-      if (options.instruction) {
-        console.log(picocolors.cyan(`  Instruction: ${options.instruction}`));
+      if (instructions.length > 0) {
+        console.log(picocolors.cyan(`  Instruction: ${instructions.join(", ")}`));
       }
     } else {
       console.log(picocolors.cyan(`\nRetry dry-run for ${tasksToRetry.length} tasks`));
@@ -116,8 +122,8 @@ export async function retryCommand(
           `  ${picocolors.dim("\u2022")} ${t.title} (attempt ${t.retryCount + 1}/${t.maxRetries})`,
         );
       }
-      if (options.instruction) {
-        console.log(picocolors.cyan(`  Instruction: ${options.instruction}`));
+      if (instructions.length > 0) {
+        console.log(picocolors.cyan(`  Instruction: ${instructions.join(", ")}`));
       }
     }
     if (options.continue) {
@@ -162,11 +168,13 @@ export async function retryCommand(
       details: { retryCount: newRetryCount },
     });
 
-    if (options.instruction) {
-      const instructionNote = `**Additional instruction:** ${options.instruction}`;
+    if (instructions.length > 0) {
+      const instructionNote = instructions
+        .map((i) => `**Additional instruction:** ${i}`)
+        .join("\n\n");
       task.description = [task.description, instructionNote].filter(Boolean).join("\n\n");
       await runManager.updateTask(runId, indTaskId, { description: task.description });
-      console.log(picocolors.cyan(`  Instruction: ${options.instruction}`));
+      console.log(picocolors.cyan(`  Instruction: ${instructions.join(", ")}`));
     }
 
     const previousTaskLog = await runManager.loadTaskOutput(runId, indTaskId);

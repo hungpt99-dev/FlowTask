@@ -262,7 +262,15 @@ program
   .option("--failed-only", "Retry all failed and interrupted tasks in the run")
   .option("--from <taskId>", "Retry all tasks from this point forward")
   .option("--skip-validation", "Skip validation after each task execution")
-  .option("--instruction <text>", "Additional instruction to guide the retry execution")
+  .option(
+    "--instruction <text>",
+    "Additional instruction to guide the retry execution (repeatable)",
+    (val: string, prev: string | string[] | undefined) => {
+      if (prev === undefined) return val;
+      if (Array.isArray(prev)) return [...prev, val];
+      return [prev, val];
+    },
+  )
   .action(retryCommand);
 
 program
