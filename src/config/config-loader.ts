@@ -48,7 +48,10 @@ export class ConfigLoader {
     const migrated = migrateConfig(raw);
     const result = FlowTaskConfigSchema.safeParse(migrated);
     if (!result.success) {
-      console.warn("Config validation failed, using default config:", result.error.message);
+      console.warn(`Config validation failed in "${configPath}": ${result.error.message}`);
+      console.warn(
+        "Using default configuration. Run: flowtask doctor to diagnose, or check .flowtask/config.json for errors.",
+      );
       return generateDefaultConfig();
     }
     return result.data;
