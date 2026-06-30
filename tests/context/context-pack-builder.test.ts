@@ -137,4 +137,80 @@ describe("ContextPackBuilder", () => {
     expect(pack.markdown).toContain("First task");
     expect(pack.markdown).toContain("Previous Completed Tasks");
   });
+
+  it("should include additional instructions when provided", () => {
+    const builder = new ContextPackBuilder();
+    const pack = builder.build({
+      prompt: "Fix login bug",
+      rulesContext: "Use strict TypeScript.",
+      run: {
+        runId: "run_004",
+        projectId: "test",
+        title: "Fix login",
+        status: "running",
+        mode: "auto",
+        taskCount: 1,
+        completedTaskCount: 0,
+        createdAt: now(),
+        updatedAt: now(),
+      },
+      task: {
+        id: "task_001",
+        runId: "run_004",
+        title: "Fix bug",
+        status: "running",
+        executor: "shell",
+        dependsOn: [],
+        acceptanceCriteria: [],
+        retryCount: 1,
+        maxRetries: 2,
+        createdAt: now(),
+        updatedAt: now(),
+      },
+      completedTasks: [],
+      isRetry: true,
+      errorLog: "Error occurred",
+      additionalInstructions: ["Use semicolons", "Add error handling"],
+    });
+
+    expect(pack.markdown).toContain("Additional Instructions");
+    expect(pack.markdown).toContain("Use semicolons");
+    expect(pack.markdown).toContain("Add error handling");
+  });
+
+  it("should not include additional instructions section when empty", () => {
+    const builder = new ContextPackBuilder();
+    const pack = builder.build({
+      prompt: "Test",
+      rulesContext: "None",
+      run: {
+        runId: "run_005",
+        projectId: "test",
+        title: "Test",
+        status: "running",
+        mode: "auto",
+        taskCount: 1,
+        completedTaskCount: 0,
+        createdAt: now(),
+        updatedAt: now(),
+      },
+      task: {
+        id: "task_001",
+        runId: "run_005",
+        title: "Test task",
+        status: "running",
+        executor: "shell",
+        dependsOn: [],
+        acceptanceCriteria: [],
+        retryCount: 0,
+        maxRetries: 2,
+        createdAt: now(),
+        updatedAt: now(),
+      },
+      completedTasks: [],
+      isRetry: false,
+    });
+
+    expect(pack.markdown).not.toContain("Additional Instructions");
+  });
 });

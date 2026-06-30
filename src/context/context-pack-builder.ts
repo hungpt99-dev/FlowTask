@@ -13,6 +13,7 @@ export interface ContextPackInput {
   completedTasks: Task[];
   errorLog?: string;
   isRetry: boolean;
+  additionalInstructions?: string[];
 }
 
 export class ContextPackBuilder {
@@ -75,6 +76,14 @@ export class ContextPackBuilder {
         }
         parts.push(`  - Validation: ${output.validationMethod}`);
         parts.push("");
+      }
+      parts.push("");
+    }
+
+    if (input.additionalInstructions && input.additionalInstructions.length > 0) {
+      parts.push("## Additional Instructions\n");
+      for (const instruction of input.additionalInstructions) {
+        parts.push(`- ${instruction}`);
       }
       parts.push("");
     }
