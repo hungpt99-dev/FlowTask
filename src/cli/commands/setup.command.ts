@@ -1,6 +1,7 @@
 import picocolors from "picocolors";
 import { SETUP_PROVIDERS, SKIP_OPTION } from "../../ai/provider-definitions.js";
 import { saveProviderConfig } from "../../ai/provider-service.js";
+import { unknownProviderError } from "../errors.js";
 
 export async function setupAiCommand(options?: {
   provider?: string;
@@ -108,12 +109,7 @@ async function nonInteractiveSetup(
 ): Promise<void> {
   const providerDef = SETUP_PROVIDERS.find((p) => p.name === options.provider);
   if (!providerDef) {
-    console.log(picocolors.red(`\nUnknown provider: ${options.provider}`));
-    console.log(picocolors.cyan("Available providers:"));
-    for (const p of SETUP_PROVIDERS) {
-      console.log(`  ${p.name} \u2014 ${p.label}`);
-    }
-    console.log("");
+    console.log(unknownProviderError(options.provider));
     process.exit(1);
     return;
   }
@@ -125,6 +121,8 @@ async function nonInteractiveSetup(
       console.log(picocolors.dim(`  Using ${options.apiKeyEnv} from environment.`));
     } else {
       console.log(picocolors.yellow(`  ${options.apiKeyEnv} not set in environment.`));
+      console.log(picocolors.dim(`  Set it with: export ${options.apiKeyEnv}=your-api-key`));
+      console.log(picocolors.dim("  Or provide it interactively: flowtask setup ai"));
     }
   }
 

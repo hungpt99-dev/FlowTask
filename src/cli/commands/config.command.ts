@@ -1,6 +1,7 @@
 import { ProjectManager } from "../../core/project-manager.js";
 import { ConfigLoader } from "../../config/config-loader.js";
 import picocolors from "picocolors";
+import { projectNotInitializedError } from "../errors.js";
 
 const VALID_PATHS = ["approval.autoApprove"] as const;
 
@@ -36,7 +37,7 @@ export async function configSetCommand(key: string, value: string): Promise<void
 
   const initialized = await manager.isInitialized(rootPath);
   if (!initialized) {
-    console.log(picocolors.yellow("FlowTask not initialized. Run: flowtask init"));
+    console.log(projectNotInitializedError(rootPath));
     process.exit(0);
   }
 
@@ -71,7 +72,7 @@ export async function configGetCommand(key?: string): Promise<void> {
 
   const initialized = await manager.isInitialized(rootPath);
   if (!initialized) {
-    console.log(picocolors.yellow("FlowTask not initialized. Run: flowtask init"));
+    console.log(projectNotInitializedError(rootPath));
     process.exit(0);
   }
 
@@ -121,7 +122,7 @@ export async function configListCommand(): Promise<void> {
 
   const initialized = await manager.isInitialized(rootPath);
   if (!initialized) {
-    console.log(picocolors.yellow("FlowTask not initialized. Run: flowtask init"));
+    console.log(projectNotInitializedError(rootPath));
     process.exit(0);
   }
 

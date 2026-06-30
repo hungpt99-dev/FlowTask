@@ -65,6 +65,8 @@ export function checkResponseSize(response: Response, provider: string): void {
       provider,
       kind: "invalid_response",
       message: `Response too large: ${contentLength} bytes exceeds limit of ${MAX_RESPONSE_BYTES} bytes`,
+      suggestion:
+        "Reduce the response size by asking for shorter output, using a model with lower max tokens, or breaking the task into smaller steps.",
     });
   }
 }

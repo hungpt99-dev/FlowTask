@@ -8,6 +8,11 @@ import {
   VALID_PROJECT_MODES,
   MODE_DEFINITIONS,
 } from "../../config/project-modes.js";
+import {
+  initializationFailedError,
+  reinitializationConfirmation,
+  unknownInitModeError,
+} from "../errors.js";
 
 export async function initCommand(options: {
   name?: string;
@@ -32,8 +37,7 @@ export async function initCommand(options: {
   const alreadyInit = await fileExists(path.join(flowtaskDir, "project.json"));
 
   if (alreadyInit && !options.force) {
-    console.log(picocolors.yellow("FlowTask already initialized in this directory."));
-    console.log(picocolors.dim("Use --force to reinitialize."));
+    console.log(reinitializationConfirmation());
     process.exit(0);
   }
 
@@ -42,12 +46,7 @@ export async function initCommand(options: {
   if (options.mode) {
     const lower = options.mode.toLowerCase();
     if (!VALID_PROJECT_MODES.includes(lower as ProjectMode)) {
-      console.log(picocolors.red(`\nUnknown init mode: ${options.mode}\n`));
-      console.log(picocolors.cyan("Available modes:"));
-      for (const m of VALID_PROJECT_MODES) {
-        console.log(`  ${m}`);
-      }
-      console.log("");
+      console.log(unknownInitModeError(options.mode));
       process.exit(1);
     }
     mode = lower as ProjectMode;
@@ -72,14 +71,18 @@ export async function initCommand(options: {
   }
 
   const manager = new ProjectManager();
-  const project = await manager.init(rootPath, options.name, mode);
+  const project = await manager.init(rootPath, options.name, mode, options.force);
 
   const projectFile = path.join(flowtaskDir, "project.json");
   if (await fileExists(projectFile)) {
     console.log(picocolors.green(`\n✓ FlowTask initialized: ${project.name}`));
     console.log(picocolors.dim(`  Project mode: ${mode}`));
   } else {
-    console.log(picocolors.red("\n✗ Initialization failed — could not create project files."));
+    console.log(
+      initializationFailedError(
+        "Could not create project files. Check directory permissions and disk space.",
+      ),
+    );
     process.exit(1);
   }
 

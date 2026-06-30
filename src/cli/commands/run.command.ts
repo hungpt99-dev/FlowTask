@@ -9,6 +9,7 @@ import { selectPlanner } from "./run-planner.js";
 import { getEventBus } from "../../ui/event-bus.js";
 import { formatErrorBlock } from "../../ui/formatters/error-format.js";
 import { createOutputOptions, type OutputOptions } from "../../ui/output-mode.js";
+import { projectNotInitializedError, projectLoadFailedError } from "../errors.js";
 import type { EventBus } from "../../ui/event-bus.js";
 
 export async function runCommand(
@@ -44,15 +45,14 @@ export async function runCommand(
 
   const initialized = await manager.isInitialized(rootPath);
   if (!initialized) {
-    console.log(picocolors.red("FlowTask project not initialized."));
-    console.log(picocolors.yellow("Run: flowtask init"));
+    console.log(projectNotInitializedError(rootPath));
     process.exitCode = 1;
     return;
   }
 
   const loadedProject = await manager.load(rootPath);
   if (!loadedProject) {
-    console.log(picocolors.red("Failed to load project."));
+    console.log(projectLoadFailedError(rootPath));
     process.exitCode = 1;
     return;
   }
