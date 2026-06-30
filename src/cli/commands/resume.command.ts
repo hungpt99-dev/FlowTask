@@ -4,6 +4,7 @@ import { RunManager } from "../../core/run-manager.js";
 import { RunLifecycle } from "../../core/run-lifecycle.js";
 import { EventStore } from "../../core/event-store.js";
 import { ProcessManager } from "../../core/process-manager.js";
+import { setActiveRunsDir } from "../../utils/paths.js";
 
 export async function resumeCommand(
   runId?: string,
@@ -30,6 +31,9 @@ export async function resumeCommand(
     console.log(picocolors.yellow("No run to resume."));
     process.exit(0);
   }
+
+  const config = await manager.loadConfig(rootPath);
+  setActiveRunsDir(config.runsDir);
 
   const runManager = new RunManager(rootPath);
   const run = await runManager.loadRun(targetRunId);
@@ -96,7 +100,6 @@ export async function resumeCommand(
   }
 
   const project = (await manager.load(rootPath))!;
-  const config = await manager.loadConfig(rootPath);
   const lifecycle = new RunLifecycle(rootPath, project.projectId, config, undefined, {
     skipValidation: options?.skipValidation,
   });

@@ -32,7 +32,7 @@ import { classifyError, buildErrorContext, type ErrorContext } from "../utils/er
 import type { UserDecisionOption } from "../utils/error-context.js";
 import type { QualityGateResult } from "../schemas/quality.schema.js";
 import { writeTextFile, ensureDir, atomicWriteJsonFile } from "../utils/fs.js";
-import { getContextDir, getOutputsDir, dbPath } from "../utils/paths.js";
+import { getContextDir, getOutputsDir, dbPath, setActiveRunsDir } from "../utils/paths.js";
 import { ProjectScanner } from "../context/project-scanner.js";
 import { now } from "../utils/time.js";
 import { commandExists } from "../utils/command-exists.js";
@@ -92,6 +92,7 @@ export class RunLifecycle {
     this.config = config;
     this.skipValidation = options?.skipValidation ?? config.validation?.skipValidation ?? false;
     this.runManager = new RunManager(rootPath);
+    setActiveRunsDir(config.runsDir);
     this.stateManager = new StateManager(rootPath);
     this.eventStore = new EventStore(rootPath);
     this.logManager = new LogManager(rootPath);

@@ -5,6 +5,16 @@ export const RULES_DIR = ".flowtask/rules";
 export const STEPS_DIR = ".flowtask/steps";
 export const RUNS_DIR = ".flowtask/runs";
 
+let activeRunsDir = RUNS_DIR;
+
+export function getActiveRunsDir(): string {
+  return activeRunsDir;
+}
+
+export function setActiveRunsDir(dir: string): void {
+  activeRunsDir = dir;
+}
+
 export function projectJsonPath(rootPath: string): string {
   return path.join(rootPath, FLOWTASK_DIR, "project.json");
 }
@@ -26,7 +36,7 @@ export function taskIndexPath(rootPath: string): string {
 }
 
 export function getRunDir(rootPath: string, runId: string): string {
-  return path.join(rootPath, RUNS_DIR, runId);
+  return path.join(rootPath, getActiveRunsDir(), runId);
 }
 
 export function runJsonPath(rootPath: string, runId: string): string {

@@ -11,6 +11,7 @@ import { formatErrorBlock } from "../../ui/formatters/error-format.js";
 import { createOutputOptions, type OutputOptions } from "../../ui/output-mode.js";
 import { projectNotInitializedError, projectLoadFailedError } from "../errors.js";
 import type { EventBus } from "../../ui/event-bus.js";
+import { setActiveRunsDir } from "../../utils/paths.js";
 
 export async function runCommand(
   prompt: string,
@@ -58,6 +59,7 @@ export async function runCommand(
   }
   const project = loadedProject;
   const config = await manager.loadConfig(rootPath);
+  setActiveRunsDir(config.runsDir);
 
   if (options.plannerProvider) {
     config.planner = { ...config.planner, provider: options.plannerProvider };

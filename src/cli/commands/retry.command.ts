@@ -5,7 +5,7 @@ import { RunLifecycle } from "../../core/run-lifecycle.js";
 import { ContextPackBuilder } from "../../context/context-pack-builder.js";
 import { EventStore } from "../../core/event-store.js";
 import { ensureDir, writeTextFile } from "../../utils/fs.js";
-import { getContextDir } from "../../utils/paths.js";
+import { getContextDir, setActiveRunsDir } from "../../utils/paths.js";
 
 export async function retryCommand(
   taskIdOrRunId: string,
@@ -42,6 +42,9 @@ export async function retryCommand(
     console.log(picocolors.yellow("Use: flowtask retry <taskId> --run <runId>"));
     process.exit(1);
   }
+
+  const config = await manager.loadConfig(rootPath);
+  setActiveRunsDir(config.runsDir);
 
   const runManager = new RunManager(rootPath);
   const run = await runManager.loadRun(runId);
@@ -134,7 +137,6 @@ export async function retryCommand(
   }
 
   const project = (await manager.load(rootPath))!;
-  const config = await manager.loadConfig(rootPath);
   const runLifecycle = new RunLifecycle(rootPath, project.projectId, config, undefined, {
     skipValidation: options.skipValidation,
   });

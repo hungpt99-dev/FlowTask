@@ -56,7 +56,7 @@ import {
   type PluginCapability,
 } from "../core/plugin-manager.js";
 import path from "node:path";
-import { dbPath } from "../utils/paths.js";
+import { dbPath, setActiveRunsDir } from "../utils/paths.js";
 
 export interface ApiOptions {
   rootPath?: string;
@@ -85,7 +85,7 @@ export class FlowTaskAPI {
   private startTime: number;
 
   constructor(options: ApiOptions = {}) {
-    this.rootPath = options.rootPath ?? process.cwd();
+    this.rootPath = options.rootPath ? path.resolve(options.rootPath) : process.cwd();
     this.projectManager = new ProjectManager();
     this.runManager = new RunManager(this.rootPath);
     this.stateManager = new StateManager(this.rootPath);
@@ -102,7 +102,7 @@ export class FlowTaskAPI {
   }
 
   setRootPath(rootPath: string): void {
-    this.rootPath = rootPath;
+    this.rootPath = path.resolve(rootPath);
     this.runManager = new RunManager(rootPath);
     this.stateManager = new StateManager(rootPath);
     this.eventStore = new EventStore(rootPath);
@@ -174,7 +174,9 @@ export class FlowTaskAPI {
   }
 
   async loadConfig(): Promise<FlowTaskConfig> {
-    return this.projectManager.loadConfig(this.rootPath);
+    const config = await this.projectManager.loadConfig(this.rootPath);
+    setActiveRunsDir(config.runsDir);
+    return config;
   }
 
   async isInitialized(): Promise<boolean> {
